@@ -62,4 +62,7 @@ install:
 	install $(BUILD_BIN_DIR)/$(BIN) $(DESTDIR)$(bindir)
 
 uninstall:
+	
+	
+	
 	$(RM) -r $(addprefix $(DESTDIR)$(bindir)/,$(BIN))

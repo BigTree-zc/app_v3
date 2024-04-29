@@ -29,6 +29,9 @@ CSRCS += lv_font_montserrat_48.c
 CSRCS += lv_font_simsun_16_cjk.c
 CSRCS += lv_font_unscii_8.c
 CSRCS += lv_font_unscii_16.c
+CSRCS += songFont10.c
+CSRCS += songFont11.c
+CSRCS += songFont12.c
 
 DEPPATH += --dep-path $(LVGL_DIR)/$(LVGL_DIR_NAME)/src/font
 VPATH += :$(LVGL_DIR)/$(LVGL_DIR_NAME)/src/font

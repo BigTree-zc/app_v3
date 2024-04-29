@@ -1,4 +1,4 @@
-include $(LVGL_DIR)/$(LVGL_DIR_NAME)/demos/lv_demos.mk
+include $(LVGL_DIR)/$(LVGL_DIR_NAME)/docs/demos/lv_demos.mk
 include $(LVGL_DIR)/$(LVGL_DIR_NAME)/examples/lv_examples.mk
 include $(LVGL_DIR)/$(LVGL_DIR_NAME)/src/core/lv_core.mk
 include $(LVGL_DIR)/$(LVGL_DIR_NAME)/src/draw/lv_draw.mk
