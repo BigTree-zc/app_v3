@@ -620,9 +620,9 @@ uint32_t custom_tick_get(void);
 #endif
 
 /*API for open, read, etc*/
-#define LV_USE_FS_POSIX 0
+#define LV_USE_FS_POSIX 1
 #if LV_USE_FS_POSIX
-    #define LV_FS_POSIX_LETTER '\0'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
+    #define LV_FS_POSIX_LETTER 'A'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
     #define LV_FS_POSIX_PATH ""         /*Set the working directory. File/directory paths will be appended to it.*/
     #define LV_FS_POSIX_CACHE_SIZE 0    /*>0 to cache this number of bytes in lv_fs_read()*/
 #endif
@@ -638,14 +638,14 @@ uint32_t custom_tick_get(void);
 /*API for FATFS (needs to be added separately). Uses f_open, f_read, etc*/
 #define LV_USE_FS_FATFS 0
 #if LV_USE_FS_FATFS
-    #define LV_FS_FATFS_LETTER '\0'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
+    #define LV_FS_FATFS_LETTER 'A'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
     #define LV_FS_FATFS_CACHE_SIZE 0    /*>0 to cache this number of bytes in lv_fs_read()*/
 #endif
 
 /*API for LittleFS (library needs to be added separately). Uses lfs_file_open, lfs_file_read, etc*/
-#define LV_USE_FS_LITTLEFS 0
+#define LV_USE_FS_LITTLEFS0
 #if LV_USE_FS_LITTLEFS
-    #define LV_FS_LITTLEFS_LETTER '\0'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
+    #define LV_FS_LITTLEFS_LETTER 'D'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
     #define LV_FS_LITTLEFS_CACHE_SIZE 0    /*>0 to cache this number of bytes in lv_fs_read()*/
 #endif
 
@@ -686,7 +686,7 @@ uint32_t custom_tick_get(void);
 #define LV_USE_TINY_TTF 0
 #if LV_USE_TINY_TTF
     /*Load TTF data from files*/
-    #define LV_TINY_TTF_FILE_SUPPORT 0
+    #define LV_TINY_TTF_FILE_SUPPORT 1
 #endif
 
 /*Rlottie library*/

@@ -7,6 +7,17 @@
  *      INCLUDES
  *********************/
 #include "lv_demo_widgets.h"
+#include "stdio.h"
+#include "unistd.h"
+#include "sys/types.h"
+#include "sys/stat.h"
+#include "fcntl.h"
+#include "stdlib.h"
+#include <sys/mman.h>
+#include <time.h>
+#include <string.h>
+#include <sys/time.h>   
+#include <sys/resource.h>
 
 #if LV_USE_DEMO_WIDGETS
 
@@ -98,8 +109,30 @@ static lv_obj_t * Battery_image;
 static lv_obj_t * win; 
 static lv_obj_t * win_content;
 
-#define CANVAS_WIDTH 1024
-#define CANVAS_HEIGHT 600
+#define CANVAS_WIDTH      1024
+#define CANVAS_HEIGHT     200
+#define PRINT_KEY_NUM     130   // PE2
+#define ENCODER_KEY_NUM   132   // PE4
+#define PH45_164_CLK_NUM  136   // PE8
+#define PH45_164_AB_NUM   135   // PE7
+#define PH45_595_SER1_NUM 138   // PE10
+#define PH45_595_SER2_NUM 137   // PE9
+#define PH45_595_CLK_NUM  134   // PE6
+#define PH45_595_RCK_NUM  133   // PE5
+
+#define PH45_GPIO_STATUS_HIGH  1
+#define PH45_GPIO_STATUS_LOW   0
+
+#define GPIO_REG_BASE   0x01C20800      //GPIO物理基地址 (小页4kb)
+#define MAP_SIZE        0x400 //MMU页大小
+#define GPIO_BASE_OFFSET (GPIO_REG_BASE & 0X00000FFF) //GPIO基地址偏移计算
+#define GPIO_PAGE_OFFSET (GPIO_REG_BASE & 0XFFFFF000) //获得页偏移
+
+#define rPE_CFG0 0X90  //PE_CFG0寄存器地址偏移  PE0~PE7
+#define rPE_CFG1 0X94  //PE_CFG0寄存器地址偏移  PE8~PE15
+#define rPE_DAT 0XA0    //PE_DAT寄存器地址偏移
+#define rPE_PULL0 0XAC  //PE_PULL0寄存器地址偏移
+
 /* 第一步：为画布申请缓冲区内存 */
 static lv_color_t cbuf[LV_CANVAS_BUF_SIZE_TRUE_COLOR(CANVAS_WIDTH,CANVAS_HEIGHT)];
 static lv_obj_t * canvas; 
@@ -107,15 +140,1744 @@ static lv_obj_t * add_imgbtn;
 static lv_obj_t * add_imgbtn_img;
 static lv_obj_t * print_imgbtn;
 static lv_obj_t * Print_label;
-
+static lv_obj_t * test_Print_label;
 static lv_obj_t * Bottom_background_image;
+static lv_draw_label_dsc_t label_dsc;
+static lv_img_dsc_t *p_print_image;
+static unsigned int buzzer_enable = 0;
+static unsigned int buzzer_count = 0;
+static int fd_buzzer;
+static int fd_mp1484_en;
+static int print_width[CANVAS_HEIGHT] = {0};
+static int print_button_enable = 0;
+static int printWidth= 0;
+static int printHeight = 0;
+static int fd_gpio_in;
+static unsigned int key_value;
+static unsigned int encoder_enalbe = 0;
+static unsigned int encoder_count = 0;
+static unsigned int encoder_count_last = 0;
+static unsigned char printBuffer[CANVAS_WIDTH*CANVAS_HEIGHT];
+static int fd_ph45;
+static unsigned char g_odd_even = 1; //jishu
+static unsigned char *map_base;
+
+//获取1列的打印数据
+unsigned short get_print_data_for_each_column(unsigned int line_number,unsigned int A_number,unsigned char odd_even)
+{
+    unsigned int nozzle_number;
+    unsigned short ret = 0;
+
+    //偶数
+    if (odd_even == 0)
+    {
+        nozzle_number = line_number * 2 + 2;
+    }
+    //奇数
+    else
+    {
+        nozzle_number = line_number * 2 + 1;
+    }
+    switch (A_number)
+    {
+        case 1:
+            switch (nozzle_number)
+            {
+                case 1:
+                    ret = 0x0001;
+                    break;
+                case 45:
+                    ret = 0x0004;
+                    break;
+                case 42:
+                    ret = 0x0008;
+                    break;
+                case 89:
+                    ret = 0x0010;
+                    break;
+                case 86:
+                    ret = 0x0020;
+                    break;
+                case 133:
+                    ret = 0x0040;
+                    break;
+                case 130:
+                    ret = 0x0080;
+                    break;
+                case 177:
+                    ret = 0x0100;
+                    break;
+                case 174:
+                    ret = 0x0200;
+                    break;
+                case 221:
+                    ret = 0x0400;
+                    break;
+                case 218:
+                    ret = 0x0800;
+                    break;
+                case 265:
+                    ret = 0x1000;
+                    break;
+                case 262:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+        case 2:
+            switch (nozzle_number)
+            {
+                case 7:
+                    ret = 0x0001;
+                    break;
+                case 4:
+                    ret = 0x0002;
+                    break;
+                case 51:
+                    ret = 0x0004;
+                    break;
+                case 48:
+                    ret = 0x0008;
+                    break;
+                case 95:
+                    ret = 0x0010;
+                    break;
+                case 92:
+                    ret = 0x0020;
+                    break;
+                case 139:
+                    ret = 0x0040;
+                    break;
+                case 136:
+                    ret = 0x0080;
+                    break;
+                case 183:
+                    ret = 0x0100;
+                    break;
+                case 180:
+                    ret = 0x0200;
+                    break;
+                case 227:
+                    ret = 0x0400;
+                    break;
+                case 224:
+                    ret = 0x0800;
+                    break;
+                case 271:
+                    ret = 0x1000;
+                    break;
+                case 268:
+                    ret = 0x2000;
+                    break;
+                default:
+                        ret = 0x00;
+                        break;
+            }
+            break;
+        case 3:
+            switch (nozzle_number)
+            {
+                case 13:
+                    ret = 0x0001;
+                    break;
+                case 10:
+                    ret = 0x0002;
+                    break;
+                case 57:
+                    ret = 0x0004;
+                    break;
+                case 54:
+                    ret = 0x0008;
+                    break;
+                case 101:
+                    ret = 0x0010;
+                    break;
+                case 98:
+                    ret = 0x0020;
+                    break;
+                case 145:
+                    ret = 0x0040;
+                    break;
+                case 142:
+                    ret = 0x0080;
+                    break;
+                case 189:
+                    ret = 0x0100;
+                    break;
+                case 186:
+                    ret = 0x0200;
+                    break;
+                case 233:
+                    ret = 0x0400;
+                    break;
+                case 230:
+                    ret = 0x0800;
+                    break;
+                case 277:
+                    ret = 0x1000;
+                    break;
+                case 274:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 4:
+            switch (nozzle_number)
+            {
+                case 19:
+                    ret = 0x0001;
+                    break;
+                case 16:
+                    ret = 0x0002;
+                    break;
+                case 63:
+                    ret = 0x0004;
+                    break;
+                case 60:
+                    ret = 0x0008;
+                    break;
+                case 107:
+                    ret = 0x0010;
+                    break;
+                case 104:
+                    ret = 0x0020;
+                    break;
+                case 151:
+                    ret = 0x0040;
+                    break;
+                case 148:
+                    ret = 0x0080;
+                    break;
+                case 195:
+                    ret = 0x0100;
+                    break;
+                case 192:
+                    ret = 0x0200;
+                    break;
+                case 239:
+                    ret = 0x0400;
+                    break;
+                case 236:
+                    ret = 0x0800;
+                    break;
+                case 283:
+                    ret = 0x1000;
+                    break;
+                case 280:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 5:
+            switch (nozzle_number)
+            {
+                case 25:
+                    ret = 0x0001;
+                    break;
+                case 22:
+                    ret = 0x0002;
+                    break;
+                case 69:
+                    ret = 0x0004;
+                    break;
+                case 66:
+                    ret = 0x0008;
+                    break;
+                case 113:
+                    ret = 0x0010;
+                    break;
+                case 110:
+                    ret = 0x0020;
+                    break;
+                case 157:
+                    ret = 0x0040;
+                    break;
+                case 154:
+                    ret = 0x0080;
+                    break;
+                case 201:
+                    ret = 0x0100;
+                    break;
+                case 198:
+                    ret = 0x0200;
+                    break;
+                case 245:
+                    ret = 0x0400;
+                    break;
+                case 242:
+                    ret = 0x0800;
+                    break;
+                case 289:
+                    ret = 0x1000;
+                    break;
+                case 286:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 6:
+            switch (nozzle_number)
+            {
+                case 31:
+                    ret = 0x0001;
+                    break;
+                case 28:
+                    ret = 0x0002;
+                    break;
+                case 75:
+                    ret = 0x0004;
+                    break;
+                case 72:
+                    ret = 0x0008;
+                    break;
+                case 119:
+                    ret = 0x0010;
+                    break;
+                case 116:
+                    ret = 0x0020;
+                    break;
+                case 163:
+                    ret = 0x0040;
+                    break;
+                case 160:
+                    ret = 0x0080;
+                    break;
+                case 207:
+                    ret = 0x0100;
+                    break;
+                case 204:
+                    ret = 0x0200;
+                    break;
+                case 251:
+                    ret = 0x0400;
+                    break;
+                case 248:
+                    ret = 0x0800;
+                    break;
+                case 295:
+                    ret = 0x1000;
+                    break;
+                case 292:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 7:
+            switch (nozzle_number)
+            {
+                case 37:
+                    ret = 0x0001;
+                    break;
+                case 34:
+                    ret = 0x0002;
+                    break;            
+                case 81:
+                    ret = 0x0004;
+                    break;
+                case 78:
+                    ret = 0x0008;
+                    break;
+                case 125:
+                    ret = 0x0010;
+                    break;
+                case 122:
+                    ret = 0x0020;
+                    break;
+                case 169:
+                    ret = 0x0040;
+                    break;
+                case 166:
+                    ret = 0x0080;
+                    break;
+                case 213:
+                    ret = 0x0100;
+                    break;
+                case 210:
+                    ret = 0x0200;
+                    break;
+                case 257:
+                    ret = 0x0400;
+                    break;
+                case 254:
+                    ret = 0x0800;
+                    break;
+                case 298:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+
+        case 8:
+            switch (nozzle_number)
+            {
+                case 40:
+                    ret = 0x0002;
+                    break;
+                case 43:
+                    ret = 0x0004;
+                    break;
+                case 84:
+                    ret = 0x0008;
+                    break;
+                case 87:
+                    ret = 0x0010;
+                    break;
+                case 128:
+                    ret = 0x0020;
+                    break;
+                case 131:
+                    ret = 0x0040;
+                    break;
+                case 172:
+                    ret = 0x0080;
+                    break;
+                case 175:
+                    ret = 0x0100;
+                    break;
+                case 216:
+                    ret = 0x0200;
+                    break;
+                case 219:
+                    ret = 0x0400;
+                    break;
+                case 260:
+                    ret = 0x0800;
+                    break;
+                case 263:
+                    ret = 0x1000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 9:
+            switch (nozzle_number)
+            {
+                case 5:
+                    ret = 0x0001;
+                    break;
+                case 2:
+                    ret = 0x0002;
+                    break;
+                case 49:
+                    ret = 0x0004;
+                    break;
+                case 46:
+                    ret = 0x0008;
+                    break;
+                case 93:
+                    ret = 0x0010;
+                    break;
+                case 90:
+                    ret = 0x0020;
+                    break;
+                case 137:
+                    ret = 0x0040;
+                    break;
+                case 134:
+                    ret = 0x0080;
+                    break;
+                case 181:
+                    ret = 0x0100;
+                    break;
+                case 178:
+                    ret = 0x0200;
+                    break;
+                case 225:
+                    ret = 0x0400;
+                    break;
+                case 222:
+                    ret = 0x0800;
+                    break;
+                case 269:
+                    ret = 0x1000;
+                    break;
+                case 266:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 10:
+            switch (nozzle_number)
+            {
+                case 11:
+                    ret = 0x0001;
+                    break;
+                case 8:
+                    ret = 0x0002;
+                    break;
+                case 55:
+                    ret = 0x0004;
+                    break;
+                case 52:
+                    ret = 0x0008;
+                    break;
+                case 99:
+                    ret = 0x0010;
+                    break;
+                case 96:
+                    ret = 0x0020;
+                    break;
+                case 143:
+                    ret = 0x0040;
+                    break;
+                case 140:
+                    ret = 0x0080;
+                    break;
+                case 187:
+                    ret = 0x0100;
+                    break;
+                case 184:
+                    ret = 0x0200;
+                    break;
+                case 231:
+                    ret = 0x0400;
+                    break;
+                case 228:
+                    ret = 0x0800;
+                    break;
+                case 275:
+                    ret = 0x1000;
+                    break;
+                case 272:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 11:
+            switch (nozzle_number)
+            {
+                case 17:
+                    ret = 0x0001;
+                    break;
+                case 14:
+                    ret = 0x0002;
+                    break;
+                case 61:
+                    ret = 0x0004;
+                    break;
+                case 58:
+                    ret = 0x0008;
+                    break;
+                case 105:
+                    ret = 0x0010;
+                    break;
+                case 102:
+                    ret = 0x0020;
+                    break;
+                case 149:
+                    ret = 0x0040;
+                    break;
+                case 146:
+                    ret = 0x0080;
+                    break;
+                case 193:
+                    ret = 0x0100;
+                    break;
+                case 190:
+                    ret = 0x0200;
+                    break;
+                case 237:
+                    ret = 0x0400;
+                    break;
+                case 234:
+                    ret = 0x0800;
+                    break;
+                case 281:
+                    ret = 0x1000;
+                    break;
+                case 278:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 12:
+            switch (nozzle_number)
+            {
+                case 23:
+                    ret = 0x0001;
+                    break;
+                case 20:
+                    ret = 0x0002;
+                    break;
+                case 67:
+                    ret = 0x0004;
+                    break;
+                case 64:
+                    ret = 0x0008;
+                    break;
+                case 111:
+                    ret = 0x0010;
+                    break;
+                case 108:
+                    ret = 0x0020;
+                    break;
+                case 155:
+                    ret = 0x0040;
+                    break;
+                case 152:
+                    ret = 0x0080;
+                    break;
+                case 199:
+                    ret = 0x0100;
+                    break;
+                case 196:
+                    ret = 0x0200;
+                    break;
+                case 243:
+                    ret = 0x0400;
+                    break;
+                case 240:
+                    ret = 0x0800;
+                    break;
+                case 287:
+                    ret = 0x1000;
+                    break;
+                case 284:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 13:
+            switch (nozzle_number)
+            {
+                case 29:
+                    ret = 0x0001;
+                    break;
+                case 26:
+                    ret = 0x0002;
+                    break;
+                case 73:
+                    ret = 0x0004;
+                    break;
+                case 70:
+                    ret = 0x0008;
+                    break;
+                case 117:
+                    ret = 0x0010;
+                    break;
+                case 114:
+                    ret = 0x0020;
+                    break;
+                case 161:
+                    ret = 0x0040;
+                    break;
+                case 158:
+                    ret = 0x0080;
+                    break;
+                case 205:
+                    ret = 0x0100;
+                    break;
+                case 202:
+                    ret = 0x0200;
+                    break;
+                case 249:
+                    ret = 0x0400;
+                    break;
+                case 246:
+                    ret = 0x0800;
+                    break;
+                case 293:
+                    ret = 0x1000;
+                    break;
+                case 290:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 14:
+            switch (nozzle_number)
+            {
+                case 35:
+                    ret = 0x0001;
+                    break;
+                case 32:
+                    ret = 0x0002;
+                    break;
+                case 79:
+                    ret = 0x0004;
+                    break;
+                case 76:
+                    ret = 0x0008;
+                    break;
+                case 123:
+                    ret = 0x0010;
+                    break;
+               case 120:
+                    ret = 0x0020;
+                    break;
+                case 167:
+                    ret = 0x0040;
+                    break;
+                case 164:
+                    ret = 0x0080;
+                    break;
+                case 211:
+                    ret = 0x0100;
+                    break;
+                case 208:
+                    ret = 0x0200;
+                    break;
+                case 255:
+                    ret = 0x0400;
+                    break;
+                case 252:
+                    ret = 0x0800;
+                    break;
+                case 299:
+                    ret = 0x1000;
+                    break;
+                case 296:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 15:
+            switch(nozzle_number)
+            {
+                case 38:
+                    ret = 0x0002;
+                    break;
+                case 41:
+                    ret = 0x0004;
+                    break;
+                case 82:
+                    ret = 0x0008;
+                    break;
+                case 85:
+                    ret = 0x0010;
+                    break;
+                case 126:
+                    ret = 0x0020;
+                    break;
+                case 129:
+                    ret = 0x0040;
+                    break;
+                case 170:
+                    ret = 0x0080;
+                    break;
+                case 173:
+                    ret = 0x0100;
+                    break;
+                case 214:
+                    ret = 0x0200;
+                    break;
+                case 217:
+                    ret = 0x0400;
+                    break;
+                case 258:
+                    ret = 0x0800;
+                    break;
+                case 261:
+                    ret = 0x1000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 16:
+            switch (nozzle_number)
+            {
+                case 3:
+                    ret = 0x0001;
+                    break;
+                case 47:
+                    ret = 0x0004;
+                    break;
+                case 44:
+                    ret = 0x0008;
+                    break;
+                case 91:
+                    ret = 0x0010;
+                    break;
+                case 88:
+                    ret = 0x0020;
+                    break;
+                case 135:
+                    ret = 0x0040;
+                    break;
+                case 132:
+                    ret = 0x0080;
+                    break;
+                case 179:
+                    ret = 0x0100;
+                    break;
+                case 176:
+                    ret = 0x0200;
+                    break;
+                case 223:
+                    ret = 0x0400;
+                    break;
+                case 220:
+                    ret = 0x0800;
+                    break;
+                case 267:
+                    ret = 0x1000;
+                    break;
+                case 264:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 17:
+            switch (nozzle_number)
+            {
+                case 9:
+                    ret = 0x0001;
+                    break;
+                case 6:
+                    ret = 0x0002;
+                    break;
+                case 53:
+                    ret = 0x0004;
+                    break;
+                case 50:
+                    ret = 0x0008;
+                    break;
+                case 97:
+                    ret = 0x0010;
+                    break;
+                case 94:
+                    ret = 0x0020;
+                    break;
+                case 141:
+                    ret = 0x0040;
+                    break;
+                case 138:
+                    ret = 0x0080;
+                    break;
+                case 185:
+                    ret = 0x0100;
+                    break;
+                case 182:
+                    ret = 0x0200;
+                    break;
+                case 229:
+                    ret = 0x0400;
+                    break;
+                case 226:
+                    ret = 0x0800;
+                    break;
+                case 273:
+                    ret = 0x1000;
+                    break;
+                case 270:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x00;
+                    break;
+            }
+            break;
+
+        case 18:
+            switch (nozzle_number)
+            {
+                case 15:
+                    ret = 0x0001;
+                    break;
+                case 12:
+                    ret = 0x0002;
+                    break;
+                case 59:
+                    ret = 0x0004;
+                    break;
+                case 56:
+                    ret = 0x0008;
+                    break;
+                case 103:
+                    ret = 0x0010;
+                    break;
+                case 100:
+                    ret = 0x0020;
+                    break;
+                case 147:
+                    ret = 0x0040;
+                    break;
+                case 144:
+                    ret = 0x0080;
+                    break;
+                case 191:
+                    ret = 0x0100;
+                    break;
+                case 188:
+                    ret = 0x0200;
+                    break;
+                case 235:
+                    ret = 0x0400;
+                    break;
+                case 232:
+                    ret = 0x0800;
+                    break;
+                case 279:
+                    ret = 0x1000;
+                    break;
+                case 276:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 19:
+            switch (nozzle_number)
+            {
+                case 21:
+                    ret = 0x0001;
+                    break;
+                case 18:
+                    ret = 0x0002;
+                    break;
+                case 65:
+                    ret = 0x0004;
+                    break;
+                case 62:
+                    ret = 0x0008;
+                    break;
+                case 109:
+                    ret = 0x0010;
+                    break;
+                case 106:
+                    ret = 0x0020;
+                    break;
+                case 153:
+                    ret = 0x0040;
+                    break;
+                case 150:
+                    ret = 0x0080;
+                    break;
+                case 197:
+                    ret = 0x0100;
+                    break;
+                case 194:
+                    ret = 0x0200;
+                    break;
+                case 241:
+                    ret = 0x0400;
+                    break;
+                case 238:
+                    ret = 0x0800;
+                    break;
+                case 285:
+                    ret = 0x1000;
+                    break;
+                case 282:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+
+        case 20:
+            switch (nozzle_number)
+            {
+                case 27:
+                    ret = 0x0001;
+                    break;
+                case 24:
+                    ret = 0x0002;
+                    break;
+                case 71:
+                    ret = 0x0004;
+                    break;
+                case 68:
+                    ret = 0x0008;
+                    break;
+                case 115:
+                    ret = 0x0010;
+                    break;
+                case 112:
+                    ret = 0x0020;
+                    break;
+                case 159:
+                    ret = 0x0040;
+                    break;
+                case 156:
+                    ret = 0x0080;
+                    break;
+                case 203:
+                    ret = 0x0100;
+                    break;
+                case 200:
+                    ret = 0x0200;
+                    break;
+                case 247:
+                    ret = 0x0400;
+                    break;
+                case 244:
+                    ret = 0x0800;
+                    break;
+                case 291:
+                    ret = 0x0100;
+                    break;
+                case 288:
+                    ret = 0x0200;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+        case 21:
+            switch (nozzle_number)
+            {
+                case 33:
+                    ret = 0x0001;
+                    break;
+                case 30:
+                    ret = 0x0002;
+                    break;
+                case 77:
+                    ret = 0x0004;
+                    break;
+                case 74:
+                    ret = 0x0008;
+                    break;
+                case 121:
+                    ret = 0x0010;
+                    break;
+                case 118:
+                    ret = 0x0020;
+                    break;
+                case 165:
+                    ret = 0x0040;
+                    break;
+                case 162:
+                    ret = 0x0080;
+                    break;
+                case 209:
+                    ret = 0x0100;
+                    break;
+                case 206:
+                    ret = 0x0200;
+                    break;
+                case 253:
+                    ret = 0x0400;
+                    break;
+                case 250:
+                    ret = 0x0800;
+                    break;
+                case 297:
+                    ret = 0x1000;
+                    break;
+                case 294:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+
+
+        case 22:
+            switch (nozzle_number)
+            {
+                case 39:
+                    ret = 0x0001;
+                    break;
+                case 36:
+                    ret = 0x0002;
+                    break;
+                case 83:
+                    ret = 0x0004;
+                    break;
+                case 80:
+                    ret = 0x0008;
+                    break;
+                case 127:
+                    ret = 0x0010;
+                    break;
+                case 124:
+                    ret = 0x0020;
+                    break;
+                case 171:
+                    ret = 0x0040;
+                    break;
+                case 168:
+                    ret = 0x0080;
+                    break;
+                case 215:
+                    ret = 0x0100;
+                    break;
+                case 212:
+                    ret = 0x0200;
+                    break;
+                case 259:
+                    ret = 0x0400;
+                    break;
+                case 256:
+                    ret = 0x0800;
+                    break;
+                case 300:
+                    ret = 0x2000;
+                    break;
+                default:
+                    ret = 0x0000;
+                    break;
+            }
+            break;
+    }
+ 
+    return ret;
+}
+
+void set_PH45_GPIO(unsigned char gpio_num,unsigned char gpio_status)
+{
+    unsigned char databuf[2];
+    int retvalue;
+
+    databuf[0] = gpio_status;
+    databuf[1] = gpio_num;
+    retvalue = write(fd_ph45, databuf, sizeof(databuf));      
+    if(retvalue < 0)
+    {
+        printf("fd_ph45 Control Failed!\r\n");
+        close(fd_ph45);
+    }    
+}
+
+
+void set_mp1484_en(unsigned char gpio_status)
+{
+    unsigned char databuf[2];
+    int retvalue;
+
+    databuf[0] = gpio_status;
+    retvalue = write(fd_mp1484_en, databuf, 1);      
+    if(retvalue < 0)
+    {
+        printf("set_mp1484_en Control Failed!\r\n");
+        close(fd_mp1484_en);
+    }    
+}
+
+void delay_100ns(unsigned char ns)
+{
+    unsigned char i;
+    for(i=0;i<ns;i++);
+}
+
+void p_74hc595d(unsigned short data)
+{
+    int i;
+    unsigned char ser1;
+    unsigned char ser2;
+    unsigned int PE_DAT;
+/*
+    PS1 = Q20 = SER2
+    PS2 = Q21 = SER2
+    PS3 = Q22 = SER2
+    PS4 = Q23 =SER2
+    PS5 = Q24 = SER2
+    PS6 = Q25 = SER2
+    PS7 = Q26 = SER2
+    PS8 = Q10 = SER1
+    PS9 = Q11 = SER1
+    PS10 = Q12 = SER1
+    PS11 = Q13 = SER1
+    PS12 = Q14 = SER1
+    PS13 = Q15 = SER1
+    PS14 = Q16 = SER1
+*/
+#if 0
+    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
+    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
+    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
+    delay_100ns(1);
+    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
+    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);  
+#endif
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF)); //PE9,PE10,LOW
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,HIGI
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF) | 0x00000600); //PE9,PE10,HIGH
+
+    ser1 = (data >> 8) & 0xff;
+    ser2 = data & 0xff;
+  
+    for(i=0;i<7;i++)
+    {
+        //delay_100ns(1);
+        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
+        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW       
+        //delay_100ns(1);
+        if((ser1 >> i) & 0x01)
+        {
+            //set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
+            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFBFF)); //PE10,LOW                
+        }
+        else
+        {
+            //set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
+            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFBFF) | 0X00000400); //PE10,HIGH
+        }
+
+        if((ser2 >> i) & 0x01)
+        {
+            //set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
+            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFDFF)); //PE9,LOW    
+        }
+        else
+        {
+            //set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);
+            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFDFF) | 0x00000200); //PE9,HIGH    
+        }
+        
+        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0x00000040); //PE6,high   
+    }
+
+#if 0
+    delay_100ns(1);
+    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_LOW);
+    delay_100ns(1);
+    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
+    delay_100ns(1);
+#endif
+    delay_100ns(1);
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF)); //PE5,LOW
+    delay_100ns(1);
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF) | 0X00000020); //PE5,high
+
+#if 0
+    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
+    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
+    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
+    delay_100ns(1);
+    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
+    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);  
+#endif
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF)); //PE9,PE10,LOW
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,HIGH
+    //delay_100ns(1);
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF) | 0x00000600); //PE9,PE10,HIGH
+
+
+    for(i=0;i<7;i++)
+    {
+        //delay_100ns(1);
+        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
+        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW   
+        //delay_100ns(1);
+        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0x00000040); //PE6,high  
+    }
+
+#if 0
+    delay_100ns(1);
+    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_LOW);
+    delay_100ns(1);
+    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
+    delay_100ns(1);
+#endif
+    //delay_100ns(1);
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF)); //PE5,LOW
+    //delay_100ns(1);
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF) | 0X00000020); //PE5,high
+
+    //set_PH45_GPIO(PH45_164_AB_NUM,PH45_GPIO_STATUS_LOW);
+    //set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_LOW);
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFF7F)); //PE7,LOW
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF)); //PE8,LOW
+    //delay_100ns(1);
+    //set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF) | 0X00000100); //PE8,HIGH
+}
+
+void initialize(void)
+{
+    unsigned int PE_CFG0;
+    unsigned int PE_CFG1;
+#if 0
+    fd_gpio_in = open("/dev/keys-key", O_RDWR);
+	if (fd_gpio_in < 0)
+	{
+		printf("can not open file gpio_in\n");
+	}
+#endif
+#if 0
+    fd_ph45 = open("/dev/hp45",O_RDWR | O_SYNC);
+	if (fd_ph45 < 0)
+	{
+		printf("can not open file hp45\n");
+	}
+    else
+    {
+        printf("initialize\n");
+        set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
+        set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);
+        set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+        set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
+        set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+        set_PH45_GPIO(PH45_164_AB_NUM,PH45_GPIO_STATUS_HIGH);
+    }
+#endif
+
+    // 设置当前进程的优先级为最高
+    if (setpriority(PRIO_PROCESS, 0, -20) == -1) 
+    {
+        perror("setpriority");
+    }
+ 
+    // 输出当前进程的优先级
+    int priority = getpriority(PRIO_PROCESS, 0);
+    printf("Current priority: %d\n", priority);
+ 
+    // 这里可以执行你的代码，进程将不会被抢占
+ 
+
+    fd_ph45 = open("/dev/mem", O_RDWR | O_SYNC);
+    if (fd_ph45 < 0) 
+    {
+        printf("open error\n");
+    }
+    map_base = (unsigned char *)mmap(NULL, 0x400,PROT_READ | PROT_WRITE, MAP_SHARED,fd_ph45, GPIO_PAGE_OFFSET); //把物理地址映射到虚拟地址
+    if(*map_base)  
+    {
+        printf("mmap_fail!\n"); //是否映射成功
+    }
+
+    PE_CFG0=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG0);
+    PE_CFG1=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG1);
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG0)=((PE_CFG0 & 0X0000F0FF)|0X11100000);//PE2,PE4,PE5,PE6,PE7
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG1)=((PE_CFG1 & 0XFFFFF000)|0X00000111);//PE8,PE9,PE10
+}
+
+void function(void)
+{
+    unsigned short data;
+    int i,j,k;
+    static int column = 0;
+    unsigned int PE_CFG0;
+    unsigned int PE_CFG1;
+    unsigned int PE_DAT;
+#if 0
+    read(fd_gpio_in, &key_value, 4); 
+    if((key_value >> 8) == PRINT_KEY_NUM)
+    {
+        if((key_value & 0xff)== 0x00)
+        {
+            printf("PRINT_KEY_NUM\n");
+            buzzer_enable = 1;
+            if(print_button_enable == 1)
+            {
+                encoder_enalbe = 1;
+                encoder_count = 0;
+            }
+        }
+    }
+#endif
+
+
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT); //PE2,PE4
+    if((PE_DAT & 0X00000004) == 0x00)  //PE2
+    {
+        printf("PRINT_KEY_NUM\n");
+        buzzer_enable = 1;
+        if(print_button_enable == 1)
+        {
+            encoder_enalbe = 1;
+            encoder_count = 0;
+        }  
+    }
+
+    if(encoder_enalbe == 2)
+    {
+        if((PE_DAT & 0X00000010) == 0x00)  //PE4
+        {
+            //printf("ENCODER_KEY_NUM\n");
+            encoder_count++;
+            if(encoder_count > 500)
+            {
+#if 0
+                fd_ph45 = open("/dev/mem", O_RDWR | O_SYNC);
+                if (fd_ph45 < 0) 
+                {
+                    printf("open error\n");
+                }
+                map_base = (unsigned char *)mmap(NULL, 0x400,PROT_READ | PROT_WRITE, MAP_SHARED,fd_ph45, GPIO_PAGE_OFFSET); //把物理地址映射到虚拟地址
+                if(*map_base)  
+                {
+                    printf("mmap_fail!\n"); //是否映射成功
+                }
+#endif
+                
+
+
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF7E0) | 0X00000760); //PE5,PE6,PE7,PE8,PE9,PE10,HIGH,PE7,LOW
+
+                //一列打印150个像素点
+                //一次上升沿打印7个地址位
+                //7*22=154
+                //打印第一列，获取A1所有的地址位
+                //单数喷嘴
+                //unsigned char print_data[22] = {0};
+                data = 0;
+        
+                //printf("column=%d\n",column);
+#if 0
+                set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
+                set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
+                set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
+                delay_100ns(1);
+                set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+                set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
+                set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);
+#endif
+
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF)); //PE9,PE10,LOW
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,high
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF) | 0x00000600); //PE9,PE10,HIGH
+            
+#if 0
+                for(i=0;i<7;i++)
+                {
+                    delay_100ns(1);
+                    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
+                    delay_100ns(1);
+                    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+                }
+#endif
+                for(i=0;i<7;i++)
+                {
+                    delay_100ns(1);
+                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
+                    delay_100ns(1);
+                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,high
+                }
+
+#if 0
+                set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_LOW);
+                delay_100ns(1);
+                set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
+#endif
+
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF)); //PE5,LOW
+                delay_100ns(1);
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF) | 0X00000020); //PE5,high
+
+#if 0
+                for(i=0;i<21;i++)
+                {
+                    set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_LOW);
+                    delay_100ns(1);
+                    set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+                    delay_100ns(1);
+                }   
+#endif
+                for(i=0;i<21;i++)
+                {
+                    delay_100ns(1);
+                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF)); //PE8,LOW
+                    delay_100ns(1);
+                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF) | 0X00000100); //PE8,high
+                }   
+#if 0
+                set_PH45_GPIO(PH45_164_AB_NUM,PH45_GPIO_STATUS_HIGH);
+                set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_LOW);
+                delay_100ns(1);
+                set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
+#endif
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFF7F) | 0X00000080); //PE7,high
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF)); //PE8,LOW  
+                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF) | 0X00000100); //PE8,HIGH             
+
+                for(k=0;k<22;k++)
+                { 
+                    for (j = 0; j < printHeight; j++)
+                    {
+                        if (printBuffer[j * printWidth + column] == 1)
+                        {
+                            //printf("j=%d i=%d\n", j, i);
+                            data |= get_print_data_for_each_column(j, k, g_odd_even);
+                        }
+                    }
+                    //printf("A=%d data=%u\n", k+1,data);
+                    p_74hc595d(data);
+                    
+                    data = 0x00;
+                }
+#if 0
+                if(fd_ph45) 
+                {
+                    close(fd_ph45);
+                }
+                munmap(map_base,MAP_SIZE);//解除映射关系
+#endif
+                column++;
+                if(column >= printWidth)
+                {
+                    encoder_enalbe = 0;
+                    buzzer_enable = 1;
+                    printf("end\n");
+                    lv_timer_enable(1);
+                }
+            }
+            else
+            {
+                column = 0;
+            }
+        }      
+    }
+}
+
+int get_max(int buf[],int len)
+{
+    int i;
+    int ret;
+    ret = buf[0];
+    for(i=0;i<len;i++)
+    {
+        if(ret < buf[i])
+        {
+            ret = buf[i];
+        }
+    }
+
+    return ret;
+}
+
+
+void print_event_cb(lv_event_t *e)
+{
+    unsigned char *pdata = NULL;
+    unsigned char *pdata1 = NULL;
+    unsigned char *pdata2 = NULL;
+    unsigned char data = 0;
+    int i,j;
+
+    lv_obj_t *target = lv_event_get_target(e); /* 获取触发源 */
+    printf("print_event_cb\n");
+    buzzer_enable = 1;
+    //get image
+    //Gets the width you want to print
+    if(print_button_enable == 0)
+    {
+        print_button_enable  = 1;
+        pdata = (unsigned char *)cbuf;
+
+        for(i=0;i<CANVAS_HEIGHT;i++)
+        {
+            for(j=CANVAS_WIDTH-1;j>=0;j--)
+            {
+                data = *(pdata + (i*1024+j) * 4);
+                if(data != 0xff)
+                {
+                    print_width[i] = j;
+                    break;
+                }
+            }
+        }
+#if 0
+        for(i=0;i<CANVAS_HEIGHT;i++)
+        {
+            printf("%d\n",print_width[i]);
+        }
+#endif
+        
+        printWidth = get_max(print_width,CANVAS_HEIGHT);
+
+        pdata1 = (unsigned char *)cbuf;
+        printHeight = 0;
+        for(i=CANVAS_HEIGHT-1;i>=0;i--)
+        {
+            for(j=0;j<CANVAS_WIDTH;j++)
+            {
+                data = *(pdata + (i*1024+j) * 4);
+                if(data != 0xff)
+                {
+                    printHeight = i;
+                    break;
+                }
+            }
+            if(printHeight != 0)
+            {
+                break;
+            }
+        }
+
+        printf("printWidth=%d printHeight=%d\n",printWidth,printHeight);
+
+        pdata2 = (unsigned char *)cbuf;
+        for(i=0;i<printHeight;i++)
+        {
+            for(j=0;j<printWidth;j++)
+            {
+                data = *(pdata2 + (i * 1024 + j)*4);
+                if (data > 127)
+                {
+                    printBuffer[i*printWidth + j] = 0;
+                }
+                else
+                {
+                    printBuffer[i*printWidth + j] = 1;
+                }
+                printf("%u ", printBuffer[i*printWidth + j]);
+            }
+            printf("\n");
+        }
+    }
+    else if(print_button_enable == 1)
+    {
+        print_button_enable = 0;
+    }
+}
+
+static void timer_1ms_cb(lv_timer_t * t)
+{
+    int retvalue;
+    char buf[2]={0};
+    if(buzzer_enable == 1)
+    {
+        buzzer_count++;
+        if(buzzer_count == 2)
+        {
+            buf[0] = 1;
+	        retvalue = write(fd_buzzer, buf, 1);
+	        if(retvalue < 0)
+            {
+		        printf("BEEP Control Failed!\r\n");
+		        close(fd_buzzer);
+            }
+        }
+        if(buzzer_count > 50)
+        {
+            buzzer_enable = 0;
+            buf[0] = 0;
+            retvalue = write(fd_buzzer, buf, 1);
+	        if(retvalue < 0)
+            {
+		        printf("BEEP Control Failed!\r\n");
+		        close(fd_buzzer);
+            }
+
+            if(encoder_enalbe == 1)
+            {
+                lv_timer_enable(0);
+                encoder_enalbe = 2;
+            }
+        }
+    }
+    else
+    {
+        buzzer_count = 0;
+    }
+}
 
 
 void lv_demo_widgets(void)
 {
+    int retvalue;
+	char *filename;
+	unsigned char databuf[1];
+
     if(LV_HOR_RES <= 320) disp_size = DISP_SMALL;
     else if(LV_HOR_RES < 720) disp_size = DISP_MEDIUM;
     else disp_size = DISP_LARGE;
+    
 
     font_large = LV_FONT_DEFAULT;
     font_normal = LV_FONT_DEFAULT;
@@ -166,6 +1928,104 @@ void lv_demo_widgets(void)
                           font_normal);
 #endif
 
+#if 0
+
+    lv_fs_file_t lv_file;
+  	lv_fs_res_t  lv_res;
+    char buf[20] = {0};
+    int num;
+
+  	lv_res = lv_fs_open( &lv_file, "A:/root/1.txt", LV_FS_MODE_RD );
+  	if ( lv_res != LV_FS_RES_OK ) 
+    {
+    	printf( "LVGL FS open error. (%d)\n", lv_res );
+  	} 
+    else 
+    {
+        printf( "LVGL FS open Ok\n" );
+    }
+
+    lv_res = lv_fs_read(&lv_file,buf,5,&num);
+    if(lv_res != LV_FS_RES_OK )
+    {
+        printf( "LVGL f_read error. (%d)\n", lv_res);
+    }
+    else
+    {
+        printf( "%s\n", buf);
+    }
+    
+  	
+	lv_fs_close(&lv_file);
+
+#if 0
+    lv_draw_rect_dsc_t rect_dsc;
+    /* 初始化绘画矩形 */
+    lv_draw_rect_dsc_init(&rect_dsc);
+    /* 设置圆角 */
+    rect_dsc.radius = 10;
+    /* 设置透明度 */
+    rect_dsc.bg_opa = LV_OPA_COVER;
+    /* 设置颜色渐变方向 */
+    rect_dsc.bg_grad.dir = LV_GRAD_DIR_HOR;
+    /* 设置开始颜色 */
+    rect_dsc.bg_grad.stops[0].color = lv_palette_main(LV_PALETTE_RED);
+    /* 设置结束颜色 */
+    rect_dsc.bg_grad.stops[1].color = lv_palette_main(LV_PALETTE_BLUE);
+    /* 设置边缘宽度 */
+    rect_dsc.border_width = 2;
+    /* 设置边缘透明度 */
+    rect_dsc.border_opa = LV_OPA_90;
+    /* 设置边缘颜色 */
+    rect_dsc.border_color = lv_color_white();
+    /* 在画布上绘制矩形 */
+    lv_canvas_draw_rect(canvas,0,0,50,50,&rect_dsc);
+#endif
+
+#if 0
+
+    /* 定义绘制标签 */
+    lv_draw_label_dsc_t label_dsc;
+    /* 初始化绘制标签 */
+    lv_draw_label_dsc_init(&label_dsc);
+    /* 设置标签颜色 */
+    label_dsc.color = lv_color_black();
+    /* 在画布上绘制标签 */
+    lv_canvas_draw_text(canvas,0,0,1024,&label_dsc,"Some text on text canvas");
+#endif
+
+/* 字体测试*/
+    lv_font_t *my_font;
+    my_font = lv_font_load("A:/usr/font/songFont36.bin");
+    if (my_font == NULL)
+    {
+        printf("font load failed\n");
+    }
+    else
+    {
+       printf("font load ok\n");
+    }
+    
+
+    static lv_style_t font_style;
+    lv_style_init(&font_style);
+    lv_style_set_text_font(&font_style, my_font);
+
+
+    lv_obj_t *label_zh = lv_label_create(lv_scr_act());
+    lv_obj_align(label_zh, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_style(label_zh, &font_style, 0);
+    lv_label_set_text(label_zh, "中国智造");
+
+    lv_font_free(my_font);
+
+#endif
+
+
+
+
+#if 1
+
     LV_IMG_DECLARE(head_background_image);
     Head_background_image = lv_img_create(lv_scr_act()); /* 创建图片部件 */
     lv_img_set_src(Head_background_image, &head_background_image); /* 设置图片源 */
@@ -182,7 +2042,7 @@ void lv_demo_widgets(void)
 
     Date_label = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(Date_label, (const lv_font_t *)&songFont11, 0);
-    lv_label_set_text(Date_label, "2024/04/28");
+    lv_label_set_text(Date_label, "2024/05/01");
     lv_obj_align(Date_label, LV_ALIGN_TOP_LEFT, 170, 0);
     lv_obj_set_style_text_color(Date_label, lv_color_hex(0xffffff),LV_STATE_DEFAULT);
 
@@ -220,7 +2080,7 @@ void lv_demo_widgets(void)
     lv_obj_align(canvas, LV_ALIGN_TOP_LEFT, 0, 0);
     /* 第三步：为画布设置缓冲区 */
     lv_canvas_set_buffer(canvas, cbuf, CANVAS_WIDTH,CANVAS_HEIGHT, LV_IMG_CF_TRUE_COLOR);
-    lv_canvas_fill_bg(canvas,lv_color_white(),LV_OPA_100);
+    lv_canvas_fill_bg(canvas,lv_color_white(),LV_OPA_COVER);
 
 
     LV_IMG_DECLARE(bottom_img);
@@ -240,6 +2100,7 @@ void lv_demo_widgets(void)
     lv_obj_set_size(print_imgbtn, 48, 48);
     /* 设置图片按钮位置 */
     lv_obj_align(print_imgbtn, LV_ALIGN_TOP_LEFT, 430, 201);
+    lv_obj_add_event_cb(print_imgbtn, print_event_cb, LV_EVENT_PRESSED, NULL);
     
 
     LV_IMG_DECLARE(songFont10);
@@ -248,6 +2109,45 @@ void lv_demo_widgets(void)
     lv_label_set_text(Print_label, "喷印");
     lv_obj_align(Print_label, LV_ALIGN_TOP_LEFT, 432, 248);
     lv_obj_set_style_text_color(Print_label, lv_color_hex(0xffffff),LV_STATE_DEFAULT);
+
+
+    LV_IMG_DECLARE(songFont28);
+    /* 定义绘制标签 */
+    lv_draw_label_dsc_t label_dsc;
+    /* 初始化绘制标签 */
+    lv_draw_label_dsc_init(&label_dsc);
+    /* 设置标签颜色 */
+    label_dsc.color = lv_color_black();
+    label_dsc.font = (const lv_font_t *)&songFont28;
+    //label_dsc.font = font_normal;
+    label_dsc.align = LV_TEXT_ALIGN_LEFT;
+    /* 在画布上绘制标签 */
+    lv_canvas_draw_text(canvas, 0, 0, 1024,&label_dsc,"欢");
+
+    	/* 打开beep驱动 */
+	fd_buzzer = open("/dev/buzzer", O_RDWR);
+	if(fd_buzzer < 0)
+    {
+		printf("file /dev/buzzer open failed!\r\n");
+	}
+    else
+    {
+        printf("file /dev/buzzer open ok!\r\n");
+    }
+
+    fd_mp1484_en = open("/dev/mp1484_en", O_RDWR);
+	if(fd_mp1484_en < 0)
+    {
+		printf("file /dev/mp1484_en open failed!\r\n");
+	}
+    else
+    {
+        printf("file /dev/mp1484_en open ok!\r\n");
+        set_mp1484_en(1);
+    }
+
+    lv_timer_create(timer_1ms_cb, 1, NULL);
+#endif
 }
 
 

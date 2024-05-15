@@ -2,7 +2,7 @@
 # Makefile
 #
 #CC 				?= gcc
-CC = /home/zc/nano/buildroot/buildroot/output/host/bin/arm-linux-gcc
+CC = /home/zc/nano/buildroot_v2/output/host/bin/arm-linux-gcc
 LVGL_DIR_NAME 	?= lvgl
 LVGL_DIR 		?= .
 

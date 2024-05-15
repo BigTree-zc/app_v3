@@ -142,6 +142,8 @@ int main(void)
     indev_drv.read_cb = evdev_read;
     lv_indev_t * my_indev = lv_indev_drv_register(&indev_drv); 
 
+    initialize();
+
     /*Create a Demo*/
     lv_demo_widgets();
 
@@ -149,7 +151,8 @@ int main(void)
     while(1) 
     {
         lv_timer_handler();
-        usleep(5000);
+        usleep(1);
+        function();
     }
     
     return 0;
