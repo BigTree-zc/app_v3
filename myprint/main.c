@@ -151,8 +151,8 @@ int main(void)
     while(1) 
     {
         lv_timer_handler();
-        usleep(1);
-        function();
+        usleep(10);
+        function_20240522();
     }
     
     return 0;

@@ -111,6 +111,7 @@ static lv_obj_t * win_content;
 
 #define CANVAS_WIDTH      1024
 #define CANVAS_HEIGHT     200
+
 #define PRINT_KEY_NUM     130   // PE2
 #define ENCODER_KEY_NUM   132   // PE4
 #define PH45_164_CLK_NUM  136   // PE8
@@ -133,6 +134,15 @@ static lv_obj_t * win_content;
 #define rPE_DAT 0XA0    //PE_DAT寄存器地址偏移
 #define rPE_PULL0 0XAC  //PE_PULL0寄存器地址偏移
 
+typedef struct _PRINT_DATA_
+{
+    unsigned int data_len;
+    unsigned int data_hight;
+    unsigned int data_width;
+    unsigned int nozzle; // 0:left;1:right
+    unsigned char data[CANVAS_WIDTH * CANVAS_HEIGHT];
+}PRINT_DATA;          
+
 /* 第一步：为画布申请缓冲区内存 */
 static lv_color_t cbuf[LV_CANVAS_BUF_SIZE_TRUE_COLOR(CANVAS_WIDTH,CANVAS_HEIGHT)];
 static lv_obj_t * canvas; 
@@ -150,17 +160,19 @@ static int fd_buzzer;
 static int fd_mp1484_en;
 static int print_width[CANVAS_HEIGHT] = {0};
 static int print_button_enable = 0;
-static int printWidth= 0;
-static int printHeight = 0;
+//static int printWidth= 0;
+//static int printHeight = 0;
 static int fd_gpio_in;
 static unsigned int key_value;
 static unsigned int encoder_enalbe = 0;
+static unsigned int encoder_low_flag = 0;
 static unsigned int encoder_count = 0;
 static unsigned int encoder_count_last = 0;
-static unsigned char printBuffer[CANVAS_WIDTH*CANVAS_HEIGHT];
+//static unsigned char printBuffer[CANVAS_WIDTH*CANVAS_HEIGHT];
 static int fd_ph45;
 static unsigned char g_odd_even = 1; //jishu
 static unsigned char *map_base;
+static PRINT_DATA print_data;
 
 //获取1列的打印数据
 unsigned short get_print_data_for_each_column(unsigned int line_number,unsigned int A_number,unsigned char odd_even)
@@ -1472,10 +1484,28 @@ void p_74hc595d(unsigned short data)
     *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF) | 0X00000100); //PE8,HIGH
 }
 
+
+extern void msleep(unsigned int n);
+
 void initialize(void)
 {
+
+    fd_ph45 = open("/dev/hp45",O_RDWR | O_SYNC);
+	if (fd_ph45 < 0)
+	{
+		printf("can not open file hp45\n");
+	}
+    else
+    {
+        printf("initialize hp45 ok\n");
+    }
+
+#if 0
     unsigned int PE_CFG0;
     unsigned int PE_CFG1;
+    unsigned int PE_PULL0;
+#endif
+
 #if 0
     fd_gpio_in = open("/dev/keys-key", O_RDWR);
 	if (fd_gpio_in < 0)
@@ -1483,6 +1513,7 @@ void initialize(void)
 		printf("can not open file gpio_in\n");
 	}
 #endif
+
 #if 0
     fd_ph45 = open("/dev/hp45",O_RDWR | O_SYNC);
 	if (fd_ph45 < 0)
@@ -1500,20 +1531,21 @@ void initialize(void)
         set_PH45_GPIO(PH45_164_AB_NUM,PH45_GPIO_STATUS_HIGH);
     }
 #endif
-
+#if 0
     // 设置当前进程的优先级为最高
     if (setpriority(PRIO_PROCESS, 0, -20) == -1) 
     {
-        perror("setpriority");
+        printf("setpriority error \n");
     }
  
     // 输出当前进程的优先级
     int priority = getpriority(PRIO_PROCESS, 0);
     printf("Current priority: %d\n", priority);
+#endif
  
     // 这里可以执行你的代码，进程将不会被抢占
- 
 
+#if 0
     fd_ph45 = open("/dev/mem", O_RDWR | O_SYNC);
     if (fd_ph45 < 0) 
     {
@@ -1527,10 +1559,34 @@ void initialize(void)
 
     PE_CFG0=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG0);
     PE_CFG1=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG1);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG0)=((PE_CFG0 & 0X0000F0FF)|0X11100000);//PE2,PE4,PE5,PE6,PE7
+    PE_PULL0=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_PULL0);
+
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG0)=((PE_CFG0 & 0X9998F8FF)|0X00080000);//PE2,PE4,PE5,PE6,PE7
     *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG1)=((PE_CFG1 & 0XFFFFF000)|0X00000111);//PE8,PE9,PE10
+    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_PULL0)=((PE_PULL0 & 0XFFFFFCCF)|0X00000220);//
+#endif
+
 }
 
+
+void function_20240522(void)
+{
+    int retvalue;
+
+    if(print_button_enable == 1)
+    {
+        print_button_enable = 0;
+
+        retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
+        if(retvalue < 0)
+        {
+            printf("fd_ph45 Control Failed!\r\n");
+            close(fd_ph45);
+        }
+    }   
+}
+
+#if 0
 void function(void)
 {
     unsigned short data;
@@ -1539,7 +1595,8 @@ void function(void)
     unsigned int PE_CFG0;
     unsigned int PE_CFG1;
     unsigned int PE_DAT;
-#if 0
+    unsigned char writeData;
+
     read(fd_gpio_in, &key_value, 4); 
     if((key_value >> 8) == PRINT_KEY_NUM)
     {
@@ -1547,53 +1604,70 @@ void function(void)
         {
             printf("PRINT_KEY_NUM\n");
             buzzer_enable = 1;
-            if(print_button_enable == 1)
+            if((print_button_enable == 1)&&(encoder_enalbe == 0))
             {
                 encoder_enalbe = 1;
                 encoder_count = 0;
+                encoder_low_flag = 0;
             }
         }
     }
-#endif
 
+#if 0
+    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
 
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT); //PE2,PE4
-    if((PE_DAT & 0X00000004) == 0x00)  //PE2
+    if((PE_DAT & 0x00000004) == 0x00000000)
     {
-        printf("PRINT_KEY_NUM\n");
-        buzzer_enable = 1;
-        if(print_button_enable == 1)
+         msleep(100);
+        if((PE_DAT & 0x00000004) == 0x00000000)
         {
-            encoder_enalbe = 1;
-            encoder_count = 0;
-        }  
+            printf("PRINT_KEY_NUM\n");
+            buzzer_enable = 1;
+            if((print_button_enable == 1)&&(encoder_enalbe == 0))
+            {
+                encoder_enalbe = 1;
+                encoder_count = 0;
+                encoder_low_flag = 0;
+            }
+        }
     }
 
     if(encoder_enalbe == 2)
     {
-        if((PE_DAT & 0X00000010) == 0x00)  //PE4
+        
+        if((PE_DAT & 0x00000010) == 0x00000010)
         {
-            //printf("ENCODER_KEY_NUM\n");
-            encoder_count++;
-            if(encoder_count > 500)
+            if(encoder_low_flag == 0)
             {
-#if 0
-                fd_ph45 = open("/dev/mem", O_RDWR | O_SYNC);
-                if (fd_ph45 < 0) 
-                {
-                    printf("open error\n");
-                }
-                map_base = (unsigned char *)mmap(NULL, 0x400,PROT_READ | PROT_WRITE, MAP_SHARED,fd_ph45, GPIO_PAGE_OFFSET); //把物理地址映射到虚拟地址
-                if(*map_base)  
-                {
-                    printf("mmap_fail!\n"); //是否映射成功
-                }
+                encoder_low_flag = 1;
+            }
+        }
+        else if((PE_DAT & 0x00000010) == 0x00000000)
+        {
+            if(encoder_low_flag == 1)
+            {
+                encoder_low_flag = 0;
+                encoder_count++;
+            }
+        }
 #endif
-                
 
+    if(print_button_enable == 1)
+    {
+        //printf("key_value=0x%x\n",key_value);
+        //if((key_value >> 8) == ENCODER_KEY_NUM)
+        {
+            encoder_count++;
+            //printf("%u\n",encoder_count);
+            if(encoder_count> 1000)
+            {
+                //printf("ENCODER_KEY_NUM\n");
+
+                writeData = 0;
+                write(fd_gpio_in, &writeData, 1); 
 
                 PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF7E0) | 0X00000760); //PE5,PE6,PE7,PE8,PE9,PE10,HIGH,PE7,LOW
+	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=(PE_DAT & 0XFFFFFF7F); //PE5,PE6,PE8,PE9,PE10,HIGH,PE7,LOW
 
                 //一列打印150个像素点
                 //一次上升沿打印7个地址位
@@ -1707,6 +1781,9 @@ void function(void)
                 }
                 munmap(map_base,MAP_SIZE);//解除映射关系
 #endif
+                writeData = 1;
+                write(fd_gpio_in, &writeData, 1); 
+
                 column++;
                 if(column >= printWidth)
                 {
@@ -1714,15 +1791,19 @@ void function(void)
                     buzzer_enable = 1;
                     printf("end\n");
                     lv_timer_enable(1);
+                    print_button_enable = 0;
+                    encoder_count = 0;
                 }
             }
             else
             {
                 column = 0;
             }
+
         }      
     }
 }
+#endif
 
 int get_max(int buf[],int len)
 {
@@ -1756,7 +1837,6 @@ void print_event_cb(lv_event_t *e)
     //Gets the width you want to print
     if(print_button_enable == 0)
     {
-        print_button_enable  = 1;
         pdata = (unsigned char *)cbuf;
 
         for(i=0;i<CANVAS_HEIGHT;i++)
@@ -1778,47 +1858,48 @@ void print_event_cb(lv_event_t *e)
         }
 #endif
         
-        printWidth = get_max(print_width,CANVAS_HEIGHT);
+        print_data.data_width = get_max(print_width,CANVAS_HEIGHT);
 
         pdata1 = (unsigned char *)cbuf;
-        printHeight = 0;
+        print_data.data_hight = 0;
         for(i=CANVAS_HEIGHT-1;i>=0;i--)
         {
             for(j=0;j<CANVAS_WIDTH;j++)
             {
-                data = *(pdata + (i*1024+j) * 4);
+                data = *(pdata1 + (i*1024+j) * 4);
                 if(data != 0xff)
                 {
-                    printHeight = i;
+                    print_data.data_hight = i;
                     break;
                 }
             }
-            if(printHeight != 0)
+            if(print_data.data_hight != 0)
             {
                 break;
             }
         }
 
-        printf("printWidth=%d printHeight=%d\n",printWidth,printHeight);
-
+        printf("printWidth=%d printHeight=%d\n",print_data.data_width,print_data.data_hight);
+        print_data.nozzle = 0;
         pdata2 = (unsigned char *)cbuf;
-        for(i=0;i<printHeight;i++)
+        for(i=0;i<print_data.data_hight;i++)
         {
-            for(j=0;j<printWidth;j++)
+            for(j=0;j<print_data.data_width;j++)
             {
                 data = *(pdata2 + (i * 1024 + j)*4);
                 if (data > 127)
                 {
-                    printBuffer[i*printWidth + j] = 0;
+                    print_data.data[i*print_data.data_width + j] = 0;
                 }
                 else
                 {
-                    printBuffer[i*printWidth + j] = 1;
+                    print_data.data[i*print_data.data_width + j] = 1;
                 }
-                printf("%u ", printBuffer[i*printWidth + j]);
+                printf("%u ", print_data.data[i*print_data.data_width + j]);
             }
             printf("\n");
         }
+        print_button_enable  = 1;
     }
     else if(print_button_enable == 1)
     {
@@ -1858,6 +1939,7 @@ static void timer_1ms_cb(lv_timer_t * t)
             {
                 lv_timer_enable(0);
                 encoder_enalbe = 2;
+                printf("encoder_enalbe = 2\n");
             }
         }
     }
