@@ -1576,6 +1576,7 @@ void function_20240522(void)
     if(print_button_enable == 1)
     {
         print_button_enable = 0;
+        sleep(1);
 
         retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
         if(retvalue < 0)
@@ -1895,9 +1896,9 @@ void print_event_cb(lv_event_t *e)
                 {
                     print_data.data[i*print_data.data_width + j] = 1;
                 }
-                printf("%u ", print_data.data[i*print_data.data_width + j]);
+                //printf("%u ", print_data.data[i*print_data.data_width + j]);
             }
-            printf("\n");
+            //printf("\n");
         }
         print_button_enable  = 1;
     }
@@ -2191,9 +2192,10 @@ void lv_demo_widgets(void)
     lv_label_set_text(Print_label, "喷印");
     lv_obj_align(Print_label, LV_ALIGN_TOP_LEFT, 432, 248);
     lv_obj_set_style_text_color(Print_label, lv_color_hex(0xffffff),LV_STATE_DEFAULT);
-
-
+    
     LV_IMG_DECLARE(songFont28);
+
+    //LV_IMG_DECLARE(lv_font_montserrat_48);
     /* 定义绘制标签 */
     lv_draw_label_dsc_t label_dsc;
     /* 初始化绘制标签 */
@@ -2204,7 +2206,7 @@ void lv_demo_widgets(void)
     //label_dsc.font = font_normal;
     label_dsc.align = LV_TEXT_ALIGN_LEFT;
     /* 在画布上绘制标签 */
-    lv_canvas_draw_text(canvas, 0, 0, 1024,&label_dsc,"欢");
+    lv_canvas_draw_text(canvas, 10, 10, 1024,&label_dsc,"欢迎使用");
 
     	/* 打开beep驱动 */
 	fd_buzzer = open("/dev/buzzer", O_RDWR);
