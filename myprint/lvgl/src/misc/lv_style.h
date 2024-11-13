@@ -527,6 +527,12 @@ static inline void lv_style_set_size(lv_style_t * style, lv_coord_t value)
     lv_style_set_height(style, value);
 }
 
+static inline void lv_style_set_size_A(lv_style_t * style, lv_coord_t value, lv_coord_t value1)
+{
+    lv_style_set_width(style, value);
+    lv_style_set_height(style, value1);
+}
+
 static inline void lv_style_set_pad_all(lv_style_t * style, lv_coord_t value)
 {
     lv_style_set_pad_left(style, value);

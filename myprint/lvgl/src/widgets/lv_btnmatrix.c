@@ -810,6 +810,8 @@ static void draw_main(lv_event_t * e)
         lv_draw_rect(draw_ctx, &draw_rect_dsc_act, &btn_area);
 
         /*Calculate the size of the text*/
+        LV_FONT_DECLARE(heiFont7);
+        draw_label_dsc_act.font = &heiFont7;
         const lv_font_t * font = draw_label_dsc_act.font;
         lv_coord_t letter_space = draw_label_dsc_act.letter_space;
         lv_coord_t line_space = draw_label_dsc_act.line_space;

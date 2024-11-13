@@ -1,4 +1,4 @@
-
+﻿
 /**
  * @file lv_keyboard.c
  *
@@ -15,6 +15,8 @@
 
 #include <stdlib.h>
 
+//#pragma execution_character_set("utf-8")
+
 /*********************
  *      DEFINES
  *********************/
@@ -24,7 +26,8 @@
 /**********************
  *      TYPEDEFS
  **********************/
-
+int keyboard_type = 0; //0:小写;1:大写
+int symbol_type = 0;//0：中文；1：英文；2：中文；3：英文
 /**********************
  *  STATIC PROTOTYPES
  **********************/
@@ -45,7 +48,7 @@ const lv_obj_class_t lv_keyboard_class = {
     .editable = 1,
     .base_class = &lv_btnmatrix_class
 };
-
+#if 0
 static const char * const default_kb_map_lc[] = {"1#", "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", LV_SYMBOL_BACKSPACE, "\n",
                                                  "ABC", "a", "s", "d", "f", "g", "h", "j", "k", "l", LV_SYMBOL_NEW_LINE, "\n",
                                                  "_", "-", "z", "x", "c", "v", "b", "n", "m", ".", ",", ":", "\n",
@@ -59,11 +62,13 @@ static const lv_btnmatrix_ctrl_t default_kb_ctrl_lc_map[] = {
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2, LV_BTNMATRIX_CTRL_CHECKED | 2, 6, LV_BTNMATRIX_CTRL_CHECKED | 2, LV_KEYBOARD_CTRL_BTN_FLAGS | 2
 };
 
-static const char * const default_kb_map_uc[] = {"1#", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", LV_SYMBOL_BACKSPACE, "\n",
+static const char* const default_kb_map_uc[] = { "1#", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", LV_SYMBOL_BACKSPACE, "\n",
                                                  "abc", "A", "S", "D", "F", "G", "H", "J", "K", "L", LV_SYMBOL_NEW_LINE, "\n",
                                                  "_", "-", "Z", "X", "C", "V", "B", "N", "M", ".", ",", ":", "\n",
                                                  LV_SYMBOL_KEYBOARD, LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
-                                                };
+};
+
+
 
 static const lv_btnmatrix_ctrl_t default_kb_ctrl_uc_map[] = {
     LV_KEYBOARD_CTRL_BTN_FLAGS | 5, LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 7,
@@ -72,11 +77,11 @@ static const lv_btnmatrix_ctrl_t default_kb_ctrl_uc_map[] = {
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2, LV_BTNMATRIX_CTRL_CHECKED | 2, 6, LV_BTNMATRIX_CTRL_CHECKED | 2, LV_KEYBOARD_CTRL_BTN_FLAGS | 2
 };
 
-static const char * const default_kb_map_spec[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", LV_SYMBOL_BACKSPACE, "\n",
+static const char* const default_kb_map_spec[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", LV_SYMBOL_BACKSPACE, "\n",
                                                    "abc", "+", "&", "/", "*", "=", "%", "!", "?", "#", "<", ">", "\n",
                                                    "\\",  "@", "$", "(", ")", "{", "}", "[", "]", ";", "\"", "'", "\n",
                                                    LV_SYMBOL_KEYBOARD, LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
-                                                  };
+};
 
 static const lv_btnmatrix_ctrl_t default_kb_ctrl_spec_map[] = {
     LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_BTNMATRIX_CTRL_CHECKED | 2,
@@ -84,6 +89,107 @@ static const lv_btnmatrix_ctrl_t default_kb_ctrl_spec_map[] = {
     LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
     LV_KEYBOARD_CTRL_BTN_FLAGS | 2, LV_BTNMATRIX_CTRL_CHECKED | 2, 6, LV_BTNMATRIX_CTRL_CHECKED | 2, LV_KEYBOARD_CTRL_BTN_FLAGS | 2
 };
+
+#else
+
+static const char* const default_kb_map_lc[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+                                                 "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+                                                 "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+                                                 "大小写", "z", "x", "c", "v", "b", "n", "m", "删除", "\n",
+                                                 "图标","123","/","空格",".","中文","符号",""
+                                                };
+static const lv_btnmatrix_ctrl_t default_kb_ctrl_lc_map[] = {
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), 
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 5, LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED |4,
+    LV_KEYBOARD_CTRL_BTN_FLAGS, LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1),LV_KB_BTN(4),LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
+};
+
+static const char * const default_kb_map_uc[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+                                                  "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+                                                  "A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
+                                                 "大小写", "Z", "X", "C", "V", "B", "N", "M", "删除", "\n",
+                                                 "图标","123","/","空格",".","英文","符号",""
+                                                };
+
+
+
+static const lv_btnmatrix_ctrl_t default_kb_ctrl_uc_map[] = {
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 5, LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 4,
+    LV_KEYBOARD_CTRL_BTN_FLAGS, LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1),LV_KB_BTN(4),LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
+};
+
+static const char * const default_kb_map_spec[] = {"±", "‰", "≤", "≥", "$", "&", "÷", "#", "≈", "￥", "\n",
+                                                   "？", "。", "；","：","-", "=", "（", "）", "%", "*", "\n",
+                                                   "！",  "，", "、", "“", "”", "[", "]", "@", "\"", "\n",
+                                                   "大小写", "‘", "’", "^", "＜", "＞", "+", "删除", "\n",
+                                                    "图标","123","/","空格",".","中文","符号",""
+                                                  };
+
+static const lv_btnmatrix_ctrl_t default_kb_ctrl_spec_map[] = {
+    LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
+    LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
+    LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 5, LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_BTNMATRIX_CTRL_CHECKED | 4,
+    LV_KEYBOARD_CTRL_BTN_FLAGS, LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1),LV_KB_BTN(4),LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
+};
+
+static const char* const default_kb_map_spec_1[] = { "±", "‰", "≤", "≥", "$", "&", "÷", "#", "≈", "￥", "\n",
+                                                   "?", ".", ";",":", "-", "=", "(", ")", "%", "*", "\n",
+                                                   "!",  ",", "\\", "\"", "\"", "[", "]","@", "\"", "\n",
+                                                   "大小写", "'", "'", "^", "<", ">", "+", "删除", "\n",
+                                                    "图标","123","/","空格",".","中文","符号",""
+                                                    };
+
+static const lv_btnmatrix_ctrl_t default_kb_ctrl_spec_map_1[] = {
+    LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
+    LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
+    LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 5, LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_KB_BTN(3), LV_BTNMATRIX_CTRL_CHECKED | 4,
+    LV_KEYBOARD_CTRL_BTN_FLAGS , LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(4), LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
+};
+
+static const char* const default_kb_map_lc_1[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+                                                 "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+                                                 "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+                                                 "大小写", "z", "x", "c", "v", "b", "n", "m", "删除", "\n",
+                                                 "图标","123","/","空格",".","英文","符号",""
+};
+static const lv_btnmatrix_ctrl_t default_kb_ctrl_lc_map_1[] = {
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4),
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 5, LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 4,
+    LV_KEYBOARD_CTRL_BTN_FLAGS , LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1),LV_KB_BTN(4),LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
+};
+
+
+static const char* const default_kb_map_num_1[] = {
+            "€","￡","₣","₧","p","₴","¥","₩","₹","฿","₨","₪","₫","₭","₱","₤","₺","\n",
+            "₵","©","®","°","℃","℉","№","Ω","μ","π","φ","ø","Ψ","※","㎡","℡","²","\n",
+            "Σ","θ","λ","ω","∮","←","↑","→","↓","~","√","∞","∴","∵","∷","∽","≠","\n",
+            "≤","≥","≦","≧","⊙","⊕","〈","〉","《","》","「","」","『","』","【","】","〔","\n",
+            "〕","〖","〗","︗","︘","︵","︶","︷","︸","︹","︺","︻","︼","︽","︾","︿","﹀","\n",
+            "﹁","﹂","﹃","﹄","{","|","}","«","»","^","˄","˅","ˆ","ˇ","►","◄","㏗","\n",
+            "㏋","｟","｠","■","□","▲","△","▼","▽","◆","◇","○","◎","★","☆","ˆ","ˇ","\n",
+            "图标","123","/","空格",".","英文","符号",""
+};
+static const lv_btnmatrix_ctrl_t default_kb_ctrl_num_map_1[] = {
+    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
+    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
+    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
+    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
+    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
+    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
+    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),    LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1), LV_KB_BTN(1),
+    LV_KEYBOARD_CTRL_BTN_FLAGS | LV_KB_BTN(1), LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1),LV_KB_BTN(4),LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
+};
+
+#endif
 
 static const char * const default_kb_map_num[] = {"1", "2", "3", LV_SYMBOL_KEYBOARD, "\n",
                                                   "4", "5", "6", LV_SYMBOL_OK, "\n",
@@ -103,9 +209,9 @@ static const char * * kb_map[9] = {
     (const char * *)default_kb_map_uc,
     (const char * *)default_kb_map_spec,
     (const char * *)default_kb_map_num,
-    (const char * *)default_kb_map_lc,
-    (const char * *)default_kb_map_lc,
-    (const char * *)default_kb_map_lc,
+    (const char * *)default_kb_map_spec_1,
+    (const char * *)default_kb_map_lc_1,
+    (const char * *)default_kb_map_num_1,
     (const char * *)default_kb_map_lc,
     (const char * *)NULL,
 };
@@ -114,9 +220,9 @@ static const lv_btnmatrix_ctrl_t * kb_ctrl[9] = {
     default_kb_ctrl_uc_map,
     default_kb_ctrl_spec_map,
     default_kb_ctrl_num_map,
-    default_kb_ctrl_lc_map,
-    default_kb_ctrl_lc_map,
-    default_kb_ctrl_lc_map,
+    default_kb_ctrl_spec_map_1,
+    default_kb_ctrl_lc_map_1,
+    default_kb_ctrl_num_map_1,
     default_kb_ctrl_lc_map,
     NULL,
 };
@@ -168,7 +274,8 @@ void lv_keyboard_set_textarea(lv_obj_t * obj, lv_obj_t * ta)
     keyboard->ta = ta;
 
     /*Show the cursor of the new Text area if cursor management is enabled*/
-    if(keyboard->ta) {
+    if(keyboard->ta)
+    {
         lv_obj_add_flag(obj, LV_STATE_FOCUSED);
     }
 }
@@ -197,7 +304,8 @@ void lv_keyboard_set_popovers(lv_obj_t * obj, bool en)
 {
     lv_keyboard_t * keyboard = (lv_keyboard_t *)obj;
 
-    if(keyboard->popovers == en) {
+    if(keyboard->popovers == en)
+    {
         return;
     }
 
@@ -277,44 +385,146 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     LV_ASSERT_OBJ(obj, MY_CLASS);
     lv_keyboard_t * keyboard = (lv_keyboard_t *)obj;
     uint16_t btn_id   = lv_btnmatrix_get_selected_btn(obj);
-    if(btn_id == LV_BTNMATRIX_BTN_NONE) return;
+    if(btn_id == LV_BTNMATRIX_BTN_NONE) 
+    {
+        return;
+    }
 
     const char * txt = lv_btnmatrix_get_btn_text(obj, lv_btnmatrix_get_selected_btn(obj));
-    if(txt == NULL) return;
+    if(txt == NULL) 
+    {
+        return;
+    }
 
-    if(strcmp(txt, "abc") == 0) {
+    if(strcmp(txt, "大小写") == 0)
+    {
+        //英文
+        lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(obj, 480, 133);
+        symbol_type = 3;
+        if (keyboard_type == 0)
+        {
+            LV_LOG_ERROR("big\n\r");
+            //大写
+            keyboard_type = 1;
+            keyboard->mode = LV_KEYBOARD_MODE_TEXT_UPPER;
+            lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_TEXT_UPPER]);
+            lv_keyboard_update_ctrl_map(obj);
+        }
+        else
+        {
+            LV_LOG_ERROR("smal\n\r");
+            //小写
+            keyboard_type = 0;
+            keyboard->mode = LV_KEYBOARD_MODE_TEXT_LOWER_1;
+            lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_TEXT_LOWER_1]);
+            lv_keyboard_update_ctrl_map(obj);
+        }
+        return;
+    }
+    else if (strcmp(txt, "英文") == 0)
+    {
+        //英文
+        LV_LOG_ERROR("yingwen\n\r");
+        lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(obj, 480, 133);
+        symbol_type = 2;
+        keyboard_type = 0;
         keyboard->mode = LV_KEYBOARD_MODE_TEXT_LOWER;
         lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_TEXT_LOWER]);
         lv_keyboard_update_ctrl_map(obj);
         return;
     }
-    else if(strcmp(txt, "ABC") == 0) {
+    else if(strcmp(txt, "中文") == 0)
+    {
+        LV_LOG_ERROR("zhongwen\n\r");
+        lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(obj, 480, 133);
+        keyboard_type = 1;
+        symbol_type = 3;
         keyboard->mode = LV_KEYBOARD_MODE_TEXT_UPPER;
         lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_TEXT_UPPER]);
         lv_keyboard_update_ctrl_map(obj);
         return;
     }
-    else if(strcmp(txt, "1#") == 0) {
-        keyboard->mode = LV_KEYBOARD_MODE_SPECIAL;
-        lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_SPECIAL]);
+    else if (strcmp(txt, "图标") == 0)
+    {
+        keyboard_type = 0;
+        symbol_type = 3;
+        lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 40);
+        lv_obj_set_size(obj, 480, 210);
+        keyboard->mode = LV_KEYBOARD_MODE_NUMBER_1;
+        lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_NUMBER_1]);
         lv_keyboard_update_ctrl_map(obj);
         return;
     }
-    else if(strcmp(txt, LV_SYMBOL_CLOSE) == 0 || strcmp(txt, LV_SYMBOL_KEYBOARD) == 0) {
+    else if(strcmp(txt, "123") == 0)
+    {
+        lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(obj, 480, 133);
+        keyboard_type = 0;
+        keyboard->mode = LV_KEYBOARD_MODE_TEXT_LOWER;
+        lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_TEXT_LOWER]);
+        lv_keyboard_update_ctrl_map(obj);
+        return;
+    }
+    else if (strcmp(txt, "符号") == 0)
+    {
+        lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(obj, 480, 133);
+        //printf("symbol_type=%d\n", symbol_type);
+        if (symbol_type == 0)
+        {
+            symbol_type = 1;
+            keyboard->mode = LV_KEYBOARD_MODE_SPECIAL;
+            lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_SPECIAL]);
+            lv_keyboard_update_ctrl_map(obj);
+        }
+        else if(symbol_type == 1)
+        {
+            symbol_type = 0;
+            keyboard->mode = LV_KEYBOARD_MODE_SPECIAL_1;
+            lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_SPECIAL_1]);
+            lv_keyboard_update_ctrl_map(obj);
+        }
+        else if (symbol_type == 2)
+        {
+            symbol_type = 1;
+            keyboard->mode = LV_KEYBOARD_MODE_SPECIAL;
+            lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_SPECIAL]);
+            lv_keyboard_update_ctrl_map(obj);
+        }
+        else
+        {
+            symbol_type = 0;
+            keyboard->mode = LV_KEYBOARD_MODE_SPECIAL_1;
+            lv_btnmatrix_set_map(obj, kb_map[LV_KEYBOARD_MODE_SPECIAL_1]);
+            lv_keyboard_update_ctrl_map(obj);
+        }
+        return;
+    }
+    else if(strcmp(txt, LV_SYMBOL_CLOSE) == 0 || strcmp(txt, LV_SYMBOL_KEYBOARD) == 0)
+    {
         lv_res_t res = lv_event_send(obj, LV_EVENT_CANCEL, NULL);
-        if(res != LV_RES_OK) return;
+        if (res != LV_RES_OK)
+        {
+            return;
+        }
 
-        if(keyboard->ta) {
+        if(keyboard->ta)
+        {
             res = lv_event_send(keyboard->ta, LV_EVENT_CANCEL, NULL);
             if(res != LV_RES_OK) return;
         }
         return;
     }
-    else if(strcmp(txt, LV_SYMBOL_OK) == 0) {
+    else if(strcmp(txt, LV_SYMBOL_OK) == 0)
+    {
         lv_res_t res = lv_event_send(obj, LV_EVENT_READY, NULL);
         if(res != LV_RES_OK) return;
 
-        if(keyboard->ta) {
+        if(keyboard->ta)
+        {
             res = lv_event_send(keyboard->ta, LV_EVENT_READY, NULL);
             if(res != LV_RES_OK) return;
         }
@@ -322,25 +532,37 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     }
 
     /*Add the characters to the text area if set*/
-    if(keyboard->ta == NULL) return;
+    if(keyboard->ta == NULL)
+    {
+        return;
+    }
 
-    if(strcmp(txt, "Enter") == 0 || strcmp(txt, LV_SYMBOL_NEW_LINE) == 0) {
+    if(strcmp(txt, "Enter") == 0 || strcmp(txt, LV_SYMBOL_NEW_LINE) == 0)
+    {
         lv_textarea_add_char(keyboard->ta, '\n');
-        if(lv_textarea_get_one_line(keyboard->ta)) {
+        if(lv_textarea_get_one_line(keyboard->ta))
+        {
             lv_res_t res = lv_event_send(keyboard->ta, LV_EVENT_READY, NULL);
-            if(res != LV_RES_OK) return;
+            if(res != LV_RES_OK) 
+            {
+                return;
+            }
         }
     }
-    else if(strcmp(txt, LV_SYMBOL_LEFT) == 0) {
+    else if(strcmp(txt, LV_SYMBOL_LEFT) == 0)
+    {
         lv_textarea_cursor_left(keyboard->ta);
     }
-    else if(strcmp(txt, LV_SYMBOL_RIGHT) == 0) {
+    else if(strcmp(txt, LV_SYMBOL_RIGHT) == 0)
+    {
         lv_textarea_cursor_right(keyboard->ta);
     }
-    else if(strcmp(txt, LV_SYMBOL_BACKSPACE) == 0) {
+    else if((strcmp(txt, LV_SYMBOL_BACKSPACE) == 0)||( strcmp(txt, "删除") == 0))
+    {
         lv_textarea_del_char(keyboard->ta);
     }
-    else if(strcmp(txt, "+/-") == 0) {
+    else if(strcmp(txt, "+/-") == 0)
+    {
         uint16_t cur        = lv_textarea_get_cursor_pos(keyboard->ta);
         const char * ta_txt = lv_textarea_get_text(keyboard->ta);
         if(ta_txt[0] == '-') {
@@ -349,19 +571,26 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
             lv_textarea_add_char(keyboard->ta, '+');
             lv_textarea_set_cursor_pos(keyboard->ta, cur);
         }
-        else if(ta_txt[0] == '+') {
+        else if(ta_txt[0] == '+')
+        {
             lv_textarea_set_cursor_pos(keyboard->ta, 1);
             lv_textarea_del_char(keyboard->ta);
             lv_textarea_add_char(keyboard->ta, '-');
             lv_textarea_set_cursor_pos(keyboard->ta, cur);
         }
-        else {
+        else
+        {
             lv_textarea_set_cursor_pos(keyboard->ta, 0);
             lv_textarea_add_char(keyboard->ta, '-');
             lv_textarea_set_cursor_pos(keyboard->ta, cur + 1);
         }
     }
-    else {
+    else if (strcmp(txt, "空格") == 0)
+    {
+        lv_textarea_add_text(keyboard->ta, " ");
+    }
+    else
+    {
         lv_textarea_add_text(keyboard->ta, txt);
     }
 }
@@ -409,8 +638,10 @@ static void lv_keyboard_update_ctrl_map(lv_obj_t * obj)
     if(keyboard->popovers) {
         /*Apply the current control map (already includes LV_BTNMATRIX_CTRL_POPOVER flags)*/
         lv_btnmatrix_set_ctrl_map(obj, kb_ctrl[keyboard->mode]);
+  
     }
     else {
+
         /*Make a copy of the current control map*/
         lv_btnmatrix_t * btnm = (lv_btnmatrix_t *)obj;
         lv_btnmatrix_ctrl_t * ctrl_map = lv_mem_alloc(btnm->btn_cnt * sizeof(lv_btnmatrix_ctrl_t));

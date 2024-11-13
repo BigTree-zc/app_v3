@@ -22,6 +22,9 @@
 #include "xkb.h"
 #endif /* USE_XKB */
 
+#include "/home/zc/nano/buildroot_v2/output/build/tslib-1.22/src/tslib.h"
+
+
 /*********************
  *      DEFINES
  *********************/
@@ -52,12 +55,15 @@ int evdev_key_val;
 /**********************
  *   GLOBAL FUNCTIONS
  **********************/
+struct tsdev *ts;
+struct ts_sample samp;
 
 /**
  * Initialize the evdev interface
  */
 void evdev_init(void)
 {
+#if 0
     if (!evdev_set_file(EVDEV_NAME)) {
         return;
     }
@@ -65,6 +71,19 @@ void evdev_init(void)
 #if USE_XKB
     xkb_init();
 #endif
+#endif
+    //以只读 & 非阻塞的形式打开事件节点
+    //调用ts_setup的条件是需要在环境变量中声明TSLIB_TSDEVICE变量
+    //否则推荐使用ts_open函数来进行初始化
+    ts = ts_setup(NULL, O_RDONLY | O_NONBLOCK);
+    if (!ts) 
+    {
+        perror("ts_setup");
+        return;
+    }
+    evdev_root_x = 0;
+    evdev_root_y = 0;
+    evdev_button = LV_INDEV_STATE_REL;
 }
 /**
  * reconfigure the device file for evdev
@@ -107,6 +126,33 @@ bool evdev_set_file(char* dev_name)
  */
 void evdev_read(lv_indev_drv_t * drv, lv_indev_data_t * data)
 {
+
+ //当获取到触摸时将读取到的点的坐标以及状态赋值给临时变量
+  while(ts_read(ts, &samp, 1) > 0)
+  {
+    evdev_root_x = samp.x ;
+    evdev_root_y = samp.y ;
+  }
+  if(0 == samp.pressure)
+    evdev_button = LV_INDEV_STATE_REL ;
+  else
+    evdev_button = LV_INDEV_STATE_PR ;
+  //将变量注册到LVGL输入设备接口的环境中
+  data->point.x = evdev_root_x ;
+  data->point.y = evdev_root_y ;
+  data->state = evdev_button ;
+  //坐标限幅
+  if(data->point.x < 0)
+     data->point.x = 0;
+  if(data->point.y < 0)
+     data->point.y = 0;
+  if(data->point.x >= drv->disp->driver->hor_res)
+     data->point.x = drv->disp->driver->hor_res - 1;
+  if(data->point.y >= drv->disp->driver->ver_res)
+     data->point.y = drv->disp->driver->ver_res - 1;
+  return ;
+
+#if 0
     struct input_event in;
 
     while(read(evdev_fd, &in, sizeof(struct input_event)) > 0) {
@@ -238,6 +284,8 @@ void evdev_read(lv_indev_drv_t * drv, lv_indev_data_t * data)
       data->point.y = drv->disp->driver->ver_res - 1;
 
     return ;
+#endif
+
 }
 
 /**********************

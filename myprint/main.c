@@ -45,11 +45,11 @@ int main(void)
 
 int main(void)
 {
-    int fd;
-	int val;
-    int i;
-    unsigned int keyCount;
-    pid_t status;
+    //int fd;
+	//int val;
+    //int i;
+    //unsigned int keyCount;
+    //pid_t status;
 
 #if 0
     for(i=0;i<1;i++)
@@ -140,7 +140,8 @@ int main(void)
 
     indev_drv.type = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = evdev_read;
-    lv_indev_t * my_indev = lv_indev_drv_register(&indev_drv); 
+    //lv_indev_t * my_indev = lv_indev_drv_register(&indev_drv); 
+    lv_indev_drv_register(&indev_drv); 
 
     initialize();
 
@@ -157,7 +158,7 @@ int main(void)
     
     return 0;
 }
-
+#if 0
 void msleep(unsigned int n)
 {
     unsigned int i;
@@ -166,6 +167,7 @@ void msleep(unsigned int n)
         usleep(1000);
     }
 }
+#endif
 /*
 void sleep(unsigned int n)
 {

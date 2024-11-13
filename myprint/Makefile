@@ -12,9 +12,9 @@ WARNINGS		:= -Wall -Wshadow -Wundef -Wmissing-prototypes -Wno-discarded-qualifie
 					-Wno-sign-compare -Wno-error=missing-prototypes -Wdouble-promotion -Wclobbered -Wdeprecated -Wempty-body -Wtype-limits -Wshift-negative-value -Wstack-usage=2048 \
 					-Wno-unused-value -Wno-unused-parameter -Wno-missing-field-initializers -Wuninitialized -Wmaybe-uninitialized -Wall -Wextra -Wno-unused-parameter \
 					-Wno-missing-field-initializers -Wtype-limits -Wsizeof-pointer-memaccess -Wno-format-nonliteral -Wpointer-arith -Wno-cast-qual -Wmissing-prototypes \
-					-Wunreachable-code -Wno-switch-default -Wreturn-type -Wmultichar -Wno-discarded-qualifiers -Wformat-security -Wno-ignored-qualifiers -Wno-sign-compare -std=c99
-CFLAGS 			?= -O3 -g0 -I$(LVGL_DIR)/ #$(WARNINGS)
-LDFLAGS 		?= -lm
+					-Wunreachable-code -Wno-switch-default -Wreturn-type -Wmultichar -Wno-discarded-qualifiers -Wformat-security -Wno-ignored-qualifiers -Wno-sign-compare -std=gnu99
+CFLAGS 			?= -O3 -g0 -I$(LVGL_DIR)/   $(WARNINGS)  -I  /home/zc/nano/buildroot_v2/output/build/tslib-1.22/src/  -I /home/zc/freetype_241029/freetype-2.10.0/INSTALL/include/freetype2/ -L/home/zc/freetype_241029/freetype-2.10.0/INSTALL/lib/
+LDFLAGS 		?= -lm  -lts -lpthread -L/home/zc/nano/buildroot_v2/output/build/tslib-1.22/src/  -L /home/zc/freetype_241029/freetype-2.10.0/INSTALL/lib -lfreetype
 BIN 			= demo
 BUILD_DIR 		= ./build
 BUILD_OBJ_DIR 	= $(BUILD_DIR)/obj
