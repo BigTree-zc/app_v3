@@ -32,6 +32,7 @@ CSRCS += lv_font_unscii_16.c
 CSRCS += heiFont16_1.c
 CSRCS += heiFont12.c
 CSRCS += heiFont7.c
+CSRCS += heiFont14.c
 
 DEPPATH += --dep-path $(LVGL_DIR)/$(LVGL_DIR_NAME)/src/font
 VPATH += :$(LVGL_DIR)/$(LVGL_DIR_NAME)/src/font
