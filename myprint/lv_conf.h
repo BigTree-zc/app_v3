@@ -660,7 +660,7 @@ uint32_t custom_tick_get(void);
 #define LV_USE_SJPG 1
 
 /*GIF decoder library*/
-#define LV_USE_GIF 0
+#define LV_USE_GIF 1
 
 /*QR code library*/
 #define LV_USE_QRCODE 1
@@ -705,7 +705,7 @@ uint32_t custom_tick_get(void);
  *----------*/
 
 /*1: Enable API to take snapshot for object*/
-#define LV_USE_SNAPSHOT 0
+#define LV_USE_SNAPSHOT 1
 
 /*1: Enable Monkey test*/
 #define LV_USE_MONKEY 0
