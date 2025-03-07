@@ -11,9 +11,9 @@
 #include <unistd.h>
 
 // item数组的大小，也是配置文件中有效的item项目的最大值
-#define CONFIGSTRUCTSIZE 80
+#define CONFIGSTRUCTSIZE 25
 #define CONFIGNAMESIZE 32
-#define CONFIGCONTENTSIZE 32
+#define CONFIGCONTENTSIZE 100
 
 struct ConfigStruct{
     char ItemName[CONFIGNAMESIZE];

@@ -23,6 +23,8 @@
 #include "../../examples/libs/Zint/stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../../examples/libs/Zint/stb_image_write.h"
+#include <dirent.h>
+
 
 
 
@@ -140,24 +142,30 @@ static lv_obj_t* win_obj;
 #define rPE_DAT 0XA0    //PE_DAT寄存器地址偏移
 #define rPE_PULL0 0XAC  //PE_PULL0寄存器地址偏移
 
+
+#define CANVAS_WIDTH_1  1000
+#define CANVAS_HEIGHT_1 150
+
 typedef struct _PRINT_DATA_
 {
-    unsigned int data_len;
-    unsigned int data_hight;
+    unsigned char concentration;
+    unsigned char word_width;
+    unsigned char nozzle; // 0:left;1:right
     unsigned int data_width;
-    unsigned int nozzle; // 0:left;1:right
-    unsigned char data[CANVAS_WIDTH * CANVAS_HEIGHT];
-}PRINT_DATA;          
+    unsigned int data_hight;
+    unsigned char data[CANVAS_WIDTH_1 * CANVAS_HEIGHT_1];
+}PRINT_DATA;
+static PRINT_DATA print_data;        
 
 /* 第一步：为画布申请缓冲区内存 */
-static lv_color_t cbuf[LV_CANVAS_BUF_SIZE_TRUE_COLOR(CANVAS_WIDTH,CANVAS_HEIGHT)];
+//static lv_color_t cbuf[LV_CANVAS_BUF_SIZE_TRUE_COLOR(CANVAS_WIDTH,CANVAS_HEIGHT)];
 static unsigned int buzzer_enable = 0;
 static unsigned int buzzer_count = 0;
 static int fd_buzzer;
 static int fd_mp1484_en;
 static int fd_bm8563;
 static int fd_adc;
-static int print_width[CANVAS_HEIGHT] = {0};
+//static int print_width[CANVAS_HEIGHT] = {0};
 static int print_button_enable = 0;
 static int fd_gpio_in;
 static unsigned int key_value;
@@ -297,6 +305,7 @@ typedef struct  _WORD_STRUCTURE_
 typedef struct  _QR_BAR_STRUCTURE_
 {
     unsigned char type;//字体
+    unsigned char symbology;
     unsigned char figure;//数字
     unsigned char borders;//边框
     unsigned char height;
@@ -502,6 +511,9 @@ TYPEFACE_OBJ typeface_obj[TYPEFACE_NUMBER];
 
 
 static int g_typeface = CHANG_YONG_SONG_TI;
+
+
+
 
 static lv_obj_t* set_tv;
 static lv_obj_t* set_tv_print;
@@ -836,8 +848,6 @@ lv_obj_t* label_addition_date_time_return;
 lv_obj_t* imgbtn_addition_date_time_return;
 lv_obj_t* imgbtn_addition_date_time_confirm;
 lv_obj_t* label_addition_date_time_confirm;
-
-
 lv_obj_t* addition_QR_code_head_bg;
 lv_obj_t* label_addition_QR_code_head;
 lv_obj_t* label_addition_QR_code_text;
@@ -1024,7 +1034,7 @@ lv_obj_t* label_addition_count_preview;
 static unsigned char QR_or_bar_code_flag = 0;
 static unsigned char QR_code_type = 0;
 static unsigned char bar_code_type = 0;
-static unsigned char figure_borders = 0;
+//static unsigned char figure_borders = 0;
 
 
 static char QR_code_name[4][16] = {
@@ -1053,6 +1063,51 @@ static unsigned char g_date_type = 0;
 static unsigned char g_time_type = 0;
 
 
+typedef struct _SET_PRINT_DATA_
+{
+    unsigned char trigger_mode;//触发方式： 0：编码器；1：光电
+    unsigned char nozzle;//喷头选择： 0：左喷；1：右喷
+    unsigned char concentration;//浓度：1,2,3,4：走1步，打印3次
+    unsigned char width;//宽度：1,2,3,4：走3步，打印1次
+    unsigned char encoder;//编码器：0：开启；1：关闭
+    unsigned char print_direction;//喷印方向：0：正向；1：逆向；2：正倒；3：逆倒
+    unsigned char print_voltage;//打印电压：0:8V——20:12V
+    unsigned char print_number;//连喷次数：1~9：连喷次数就是按一下之后滚动，如果连喷次数是1就喷一次，是3就喷三次，以此类推
+    unsigned char print_interval;//连喷间隔：就是按下喷印按键 机器不是要滚动然后喷出吗 间隔数值越大 需要滚动越远,单位是1mm
+    unsigned char trigger_delay;//触发延迟：100毫秒
+    unsigned char print_speed;//喷印速度：1微妙
+    unsigned char flash_set;//闪喷设置：1分钟
+}SET_PRINT_DATA;
+
+
+typedef struct _SET_SYSTEM_DATA_
+{
+    unsigned char buzzer;//蜂鸣器：0：开；1：关
+    unsigned char brightness;//屏幕亮度：0~100；
+    unsigned char USB_transfer;//USB传输:开关
+    unsigned char language;//语言：0：中文；1：英文；2：繁体
+    unsigned char screen_off;//息屏时间：0：1分钟；1:5分钟；2:30分钟；3：常亮
+}SET_SYSTEM_DATA;
+
+
+typedef struct _SET_DEVELOPER_DATA_
+{
+    unsigned char password[16];//密码
+    unsigned char bandwidth;//打印脉宽：0:1.5us——10:2.5us
+}SET_DEVELOPER_DATA;
+
+typedef struct _SYSTEM_DATA_
+{
+    unsigned char init;
+    unsigned int total_output;//总产量
+    SET_PRINT_DATA print;
+    SET_SYSTEM_DATA system;
+    SET_DEVELOPER_DATA develop;
+}SYSTEM_DATA;
+
+static SYSTEM_DATA system_data;
+
+
 
 static void textarea_text_event_cb(lv_event_t* e);
 static void drag_event_handler(lv_event_t* e);
@@ -1070,6 +1125,8 @@ void print_event_cb(lv_event_t *e);
 void slider_show_2(void);
 int pwm_voltage(int dutycycle);
 void slider_show_typeface(void);
+void get_system_data(void);
+void set_system_data(void);
 
 //获取1列的打印数据
 unsigned short get_print_data_for_each_column(unsigned int line_number,unsigned int A_number,unsigned char odd_even)
@@ -2789,6 +2846,8 @@ void function(void)
 }
 #endif
 
+#if 0
+
 int get_max(int buf[],int len)
 {
     int i;
@@ -2894,6 +2953,8 @@ void print_event_cb(lv_event_t *e)
         }
     }
 }
+
+#endif
 
 static void timer_100ms_cb(lv_timer_t * t)
 {
@@ -3511,11 +3572,12 @@ static void button_print_event_cb(lv_event_t* e)
     lv_event_code_t code;
     code = lv_event_get_code(e);
     unsigned char* pdata = NULL;
-    unsigned char* pdata1 = NULL;
+    //unsigned char* pdata1 = NULL;
     unsigned char* pdata2 = NULL;
     unsigned char data = 0;
     int i, j;
     static lv_img_dsc_t* snapshot = NULL;
+    unsigned int x1, y1, x2, y2,flag;
 
     if(code == LV_EVENT_CLICKED)
     {
@@ -3554,54 +3616,156 @@ static void button_print_event_cb(lv_event_t* e)
             //新建画布，获取图片，发送给底层
             pdata = (unsigned char*)canvasBuf;
 
-            for (i = 0; i < CANVAS_HEIGHT; i++)
-            {
-                for (j = CANVAS_WIDTH - 1; j >= 0; j--)
-                {
-                    data = *(pdata + (i * 1024 + j) * 4);
-                    if (data != 0xff)
-                    {
-                        print_width[i] = j;
-                        break;
-                    }
-                }
-            }
+                    //新建画布，获取图片，发送给底层
+            pdata = (unsigned char*)canvasBuf;
+
 #if 0
+
             for (i = 0; i < CANVAS_HEIGHT; i++)
             {
-                printf("%d\n", print_width[i]);
+                for (j = 0; j < 30; j++)
+                {
+                    data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
+                    printf("%02x ", data);
+                }
+
+                printf("\n\r");
             }
+
 #endif
 
-            print_data.data_width = get_max(print_width, CANVAS_HEIGHT);
-
-            pdata1 = (unsigned char*)canvasBuf;
-            print_data.data_hight = 0;
-            for (i = CANVAS_HEIGHT - 1; i >= 0; i--)
+            //获取x1,即图片的左上x坐标
+            flag = 0;
+            for (i = 2; i < CANVAS_WIDTH - 2; i++)
             {
-                for (j = 0; j < CANVAS_WIDTH; j++)
+                for (j = 2; j < CANVAS_HEIGHT - 2; j++)
                 {
-                    data = *(pdata1 + (i * 1024 + j) * 4);
+                    data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
                     if (data != 0xff)
                     {
-                        print_data.data_hight = i;
+                        flag = i;
                         break;
                     }
                 }
-                if (print_data.data_hight != 0)
+
+                if (flag != 0)
                 {
                     break;
                 }
             }
 
+            x1 = flag;
+            printf("x1=%d\n", x1);
+
+            //获取y1,即图片左上y坐标
+            flag = 0;
+            for (i = 2; i < CANVAS_WIDTH - 2; i++)
+            {
+                for (j = 2; j < CANVAS_HEIGHT - 2; j++)
+                {
+                    data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
+                    if (data != 0xff)
+                    {
+                        flag = i;
+                        break;
+                    }
+                }
+
+                if (flag != 0)
+                {
+                    break;
+                }
+            }
+
+            y1 = flag;
+            printf("y1=%d\n", y1);
+
+
+            //获取x2,即图片右下方x坐标
+            flag = 0;
+            for (i = CANVAS_WIDTH - 2; i >= 2; i--)
+            {
+                for (j = 2; j < CANVAS_HEIGHT - 2; j++)
+                {
+                    data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
+                    if (data != 0xff)
+                    {
+                        flag = i;
+                        break;
+                    }
+                }
+
+                if (flag != 0)
+                {
+                    break;
+                }
+            }
+
+            x2 = flag;
+            printf("x2=%d\n", x2);
+
+
+
+            //获取y2,即图片右下方x坐标
+            flag = 0;
+            for (i = CANVAS_HEIGHT - 3; i >= 2; i--)
+            {
+                for (j = 2; j < CANVAS_WIDTH - 2; j++)
+                {
+                    data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
+                    if (data != 0xff)
+                    {
+                        flag = i;
+                        break;
+                    }
+                }
+
+                if (flag != 0)
+                {
+                    break;
+                }
+            }
+
+            y2 = flag;
+            printf("y2=%d\n", y2);
+            print_data.data_width = x2 - x1 + 1;
+            print_data.data_hight = y2 - y1 + 1;
+
+            print_data.nozzle = system_data.print.nozzle;
+            print_data.concentration = system_data.print.concentration;
+            print_data.word_width = system_data.print.width;
+
             printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
-            print_data.nozzle = 0;
+            printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
+            printf("nozzle=%d\n", print_data.nozzle);
+            
+#if 0
+            pdata2 = (unsigned char*)canvasBuf;
+            for (i = y1; i <= y2; i++)
+            {
+                for (j = x1; j <= x2; j++)
+                {
+                    data = *(pdata2 + (i * 1024 + j) * 4);
+                    if (data > 127)
+                    {
+                        data = 0;
+                    }
+                    else
+                    {
+                        data = 1;
+                    }
+                    printf("%u ", data);
+                }
+                printf("\n");
+            }
+#endif
+
             pdata2 = (unsigned char*)canvasBuf;
             for (i = 0; i < print_data.data_hight; i++)
             {
                 for (j = 0; j < print_data.data_width; j++)
                 {
-                    data = *(pdata2 + (i * 1024 + j) * 4);
+                    data = *(pdata2 + ((i + y1) * 1024 + j + x1) * 4);
                     if (data > 127)
                     {
                         print_data.data[i * print_data.data_width + j] = 0;
@@ -3610,10 +3774,12 @@ static void button_print_event_cb(lv_event_t* e)
                     {
                         print_data.data[i * print_data.data_width + j] = 1;
                     }
-                    //printf("%u ", print_data.data[i*print_data.data_width + j]);
+                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
                 }
                 //printf("\n");
             }
+
+            print_button_enable = 1;
         }
         else
         {
@@ -3674,6 +3840,80 @@ static void button_file_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
         printf("file\n");
+        obj_addition_picture_head_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_head_bg, 480, 24);
+        lv_obj_align(obj_addition_picture_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(obj_addition_picture_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_head_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_head_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_head = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_head, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_head, "文件");
+        lv_obj_align(label_addition_picture_head, LV_ALIGN_TOP_LEFT, 200, 4);
+
+
+        obj_addition_picture_preview_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_preview_bg, 240, 150);
+        lv_obj_align(obj_addition_picture_preview_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_obj_set_style_border_width(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_preview_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_preview_bg, 0, LV_PART_SCROLLBAR);
+
+
+        obj_addition_picture_btn_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_btn_bg, 240, 98);
+        lv_obj_align(obj_addition_picture_btn_bg, LV_ALIGN_TOP_LEFT, 0, 174);
+        lv_obj_set_style_border_width(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_btn_bg, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_btn_bg, 0, LV_PART_SCROLLBAR);
+
+
+        obj_addition_table_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_table_bg, 264, 224);
+        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 216, 24);
+        lv_obj_set_style_border_width(obj_addition_table_bg, 2, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_table_bg, 0, LV_PART_SCROLLBAR);
+
+
+        table_addition_picture = lv_table_create(lv_scr_act());
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
+        lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
+        lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
+        lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+        lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 216, 24);
+        lv_table_set_col_width(table_addition_picture, 0, 65);
+        lv_table_set_col_width(table_addition_picture, 1, 65);
+        lv_table_set_col_width(table_addition_picture, 2, 65);
+        lv_table_set_col_width(table_addition_picture, 3, 65);
+
+        //遍历存储区
+        lv_fs_dir_t d;
+        if (lv_fs_dir_open(&d, "root:/file") == LV_FS_RES_OK)
+        {
+            printf("lv_fs_dir_open ok\n");
+            char b[100];
+            memset(b, 0, 100);
+            while (lv_fs_dir_read(&d, b) == LV_FS_RES_OK)
+            {
+                printf("%s\n", b);
+            }
+            lv_fs_dir_close(&d);
+        }
+        else
+        {
+            printf("lv_fs_dir_open error\n");
+        }
     }
 }
 
@@ -9104,6 +9344,555 @@ static void button_addition_date_event_cb(lv_event_t* e)
 
 
 
+
+static void btn_addition_picture_delete_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    lv_obj_t* obj = lv_event_get_target(e);
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_FOCUSED)
+    {
+        printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
+        lv_obj_t* label = lv_obj_get_child(obj, 0);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
+
+        for (i = 0; i < TYPEFACE_NUMBER; i++)
+        {
+            if (strncmp(lv_label_get_text(label), typeface_name[i], strlen(lv_label_get_text(label))) == 0)
+            {
+                break;
+            }
+        }
+        g_typeface = i;
+        printf("g_typeface=%d\n", g_typeface);
+    }
+    else if (code == LV_EVENT_DEFOCUSED)
+    {
+        printf("button_typeface_event_cb LV_EVENT_DEFOCUSED\n");
+        lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
+    }
+}
+
+
+
+static void btn_addition_picture_open_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    lv_obj_t* obj = lv_event_get_target(e);
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_FOCUSED)
+    {
+        printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
+        lv_obj_t* label = lv_obj_get_child(obj, 0);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
+
+        for (i = 0; i < TYPEFACE_NUMBER; i++)
+        {
+            if (strncmp(lv_label_get_text(label), typeface_name[i], strlen(lv_label_get_text(label))) == 0)
+            {
+                break;
+            }
+        }
+        g_typeface = i;
+        printf("g_typeface=%d\n", g_typeface);
+    }
+    else if (code == LV_EVENT_DEFOCUSED)
+    {
+        printf("button_typeface_event_cb LV_EVENT_DEFOCUSED\n");
+        lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
+    }
+}
+
+
+static void btn_addition_picture_search_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    lv_obj_t* obj = lv_event_get_target(e);
+
+    if (code == LV_EVENT_CLICKED)
+    {
+        typeface_head_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(typeface_head_bg, 480, 24);
+        lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(typeface_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(typeface_head_bg, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_radius(typeface_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(typeface_head_bg, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_head = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+        lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
+
+        if (obj == btn_file_management_word_space_label)
+        {
+            printf("btn_file_management_word_space_label\n");
+            lv_label_set_text(label_typeface_head, "间隔");
+        }
+        else if (obj == btn_file_management_word_size_label)
+        {
+            printf("btn_file_management_word_size_label\n");
+            lv_label_set_text(label_typeface_head, "字号");
+        }
+
+        typeface_slider_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(typeface_slider_bg, 480, 224);
+        lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_obj_set_style_border_width(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_radius(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT);
+
+        //数字键盘
+        pwd_text_area = lv_textarea_create(lv_scr_act());
+        if (pwd_text_area == NULL)
+        {
+            printf("[%s:%d] create pwd_text_area obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 密码框样式
+        static lv_style_t pwd_text_style;
+        lv_style_init(&pwd_text_style); // 初始化样式
+        lv_style_set_radius(&pwd_text_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&pwd_text_style, 1); // 设置边框宽度
+        lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
+        lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
+        //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
+        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
+        lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
+        lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
+        lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
+        lv_obj_align(pwd_text_area, LV_ALIGN_TOP_LEFT, 0, 24);
+
+        // 基于键盘背景对象创建密码校验提示标签
+        hint_label = lv_label_create(lv_scr_act());
+        if (hint_label == NULL)
+        {
+            printf("[%s:%d] create hint_label obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 密码提示文本样式
+        static lv_style_t hint_label_style;
+        lv_style_init(&hint_label_style); // 初始化样式
+        lv_style_set_radius(&hint_label_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&hint_label_style, 0); //设置边框宽度
+        lv_style_set_text_color(&hint_label_style, lv_palette_main(LV_PALETTE_RED));  // 字体颜色设置为红色
+        lv_style_set_text_font(&hint_label_style, &lv_font_montserrat_12); //设置字体
+        lv_label_set_long_mode(hint_label, LV_LABEL_LONG_SCROLL_CIRCULAR); // 长文本循环滚动
+        lv_obj_add_style(hint_label, &hint_label_style, 0); // 给btn_label添加样式
+        lv_obj_align(hint_label, LV_ALIGN_TOP_MID, 0, 110); // 顶部居中显示
+        lv_label_set_text(hint_label, ""); // 设置文本内容
+
+        // 基于键盘背景对象创建键盘对象
+        pwd_keyboard = lv_keyboard_create(lv_scr_act());
+        if (pwd_keyboard == NULL)
+        {
+            printf("[%s:%d] create pwd_keyboard obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        //键盘样式
+        static lv_style_t pwd_kb_style;
+        lv_style_init(&pwd_kb_style); // 初始化样式
+        lv_style_set_radius(&pwd_kb_style, 5); // 设置样式的圆角弧度
+        lv_style_set_border_width(&pwd_kb_style, 0); //设置边框宽度
+        lv_style_set_bg_color(&pwd_kb_style, lv_color_hex(0xF98E2D));
+        lv_style_set_text_opa(&pwd_kb_style, LV_OPA_COVER);
+        lv_style_set_text_font(&pwd_kb_style, &lv_font_montserrat_20); //设置字体
+        lv_obj_set_size(pwd_keyboard, 480, 174); //设置键盘大小
+        lv_keyboard_set_mode(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2); //设置键盘模式为数字键盘
+        lv_keyboard_set_map(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2, keyboard_map, keyboard_ctrl); // 设置键盘映射
+        lv_keyboard_set_textarea(pwd_keyboard, pwd_text_area); // 键盘对象和文本框绑定
+        lv_obj_add_style(pwd_keyboard, &pwd_kb_style, 0); // 添加样式
+        lv_obj_align(pwd_keyboard, LV_ALIGN_TOP_LEFT, 0, 74);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_typeface_return, "返回");
+        lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+        LV_IMG_DECLARE(get_back);
+        btn_typeface_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+        LV_IMG_DECLARE(confirm);
+        btn_typeface_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(btn_typeface_confirm, button_word_space_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_typeface_confirm, "确定");
+        lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
+
+
+
+static void imgbtn_addition_picture_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("get_back\n");
+        lv_obj_del(file_management_win);
+        lv_obj_del(file_management_head_bg);
+        lv_obj_del(label_file_management_total_output);
+        lv_obj_del(label_file_management);
+        lv_obj_del(label_file_management_date);
+        lv_obj_del(label_file_management_time);
+        lv_obj_del(img_file_management_battery_level);
+        lv_obj_del(label_file_management_label);
+        lv_obj_del(file_management_middle_bg);
+        lv_obj_del(img_file_management_text);
+        lv_obj_del(label_file_management_text);
+        lv_obj_del(label_file_management_text_label);
+        lv_obj_del(img_file_management_typeface);
+        lv_obj_del(label_file_management_typeface);
+        lv_obj_del(label_file_management_typeface_label);
+        lv_obj_del(img_file_management_word_space);
+        lv_obj_del(label_file_management_word_space);
+        lv_obj_del(label_file_management_word_space_label);
+        lv_obj_del(img_file_management_word_size);
+        lv_obj_del(label_file_management_word_size);
+        lv_obj_del(label_file_management_word_size_label);
+        lv_obj_del(img_file_management_spin);
+        lv_obj_del(label_file_management_spin);
+        lv_obj_del(label_file_management_spin_label);
+        lv_obj_del(img_file_management_width);
+        lv_obj_del(label_file_management_width);
+        lv_obj_del(label_file_management_width_label);
+        lv_obj_del(img_file_management_bold);
+        lv_obj_del(label_file_management_bold);
+        lv_obj_del(sw_file_management_bold);
+
+        lv_obj_del(img_management_line_italic);
+        lv_obj_del(label_management_line_italic);
+        lv_obj_del(sw_management_line_italic);
+        lv_obj_del(file_management_bottom_bg);
+        lv_obj_del(label_file_management_return);
+        lv_obj_del(imgbtn_file_management_get_back);
+        lv_obj_del(imgbtn_file_management_confirm);
+        lv_obj_del(label_file_management_confirm);
+        lv_obj_del(btn_file_management_text);
+        lv_obj_del(btn_file_management_typeface);
+        lv_obj_del(btn_file_management_word_space_label);
+        lv_obj_del(btn_file_management_word_size_label);
+    }
+}
+
+
+static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    char temp_typeface[128] = { 0 };
+    int i = 0;
+    int word_space = 0;
+    int word_size = 0;
+    int x_size = 0;
+    //int y_size = 0;
+    int win_content_child_num = 0;
+
+
+    //char tempString[128] = { 0 };
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("\nbutton_file_management_confirm_event_cb\n");
+
+        int len = strlen(lv_label_get_text(label_file_management_label)) + 1;
+        printf("len=%u\n\r", len);
+
+        win_content_child_num = lv_obj_get_child_cnt(win_content);
+
+        printf("win_content_child_num=%u\n\r", win_content_child_num);
+
+        if ((len > 1) && (win_content_child_num < NEW_TEXT_MAX_NUMBER))
+        {
+            lv_obj_t* temp_obj = lv_obj_create(win_content);
+
+            for (i = 0; i < TYPEFACE_NUMBER; i++)
+            {
+                if (strncmp(lv_label_get_text(label_file_management_typeface_label), typeface_name[i], strlen(lv_label_get_text(label_file_management_typeface_label))) == 0)
+                {
+                    break;
+                }
+            }
+
+            sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[i]);
+            data_structure[win_content_child_num].data.word.typeface = i;
+
+            //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
+            //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
+            //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
+            printf("%s\n", temp_typeface);
+
+            data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+
+            word_size = atoi(lv_label_get_text(label_file_management_word_size_label));
+
+            if (word_size < 12)
+            {
+                word_size = 12;
+            }
+
+            if (word_size > 200)
+            {
+                word_size = 200;
+            }
+
+            data_structure[win_content_child_num].data.word.info.weight = word_size;
+
+            data_structure[win_content_child_num].data.word.spin = atoi(lv_label_get_text(label_btn_addition_text_spin));
+
+            data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
+
+            if (lv_obj_has_state(sw_management_line_italic, LV_STATE_CHECKED) == 1)
+            {
+                data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_ITALIC;
+            }
+
+            if (lv_obj_has_state(sw_file_management_bold, LV_STATE_CHECKED) == 1)
+            {
+                data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_BOLD;
+            }
+
+            lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+
+            lv_point_t text_size;
+            lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+
+            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_style_init(&data_structure[win_content_child_num].data.word.style);
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+
+            word_space = atoi(lv_label_get_text(label_file_management_word_space_label));
+
+            if (word_space < 0)
+            {
+                word_space = 0;
+            }
+
+            if (word_space > 100)
+            {
+                word_space = 100;
+            }
+            printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+
+            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+
+            printf("x_size=%d\n\r", x_size);
+
+            lv_obj_set_size(temp_obj, x_size, text_size.y);
+            lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.word.spin * 10, 0);
+
+            if (data_structure[win_content_child_num].data.word.spin != 0)
+            {
+                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+            }
+
+            lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.word.style, word_space);
+            lv_obj_t* label1 = lv_label_create(temp_obj);
+            lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
+            lv_label_set_text(label1, lv_label_get_text(label_file_management_label));
+            lv_obj_center(label1);
+            strncpy(data_structure[win_content_child_num].data.word.text, lv_label_get_text(label_file_management_label), len);
+            data_structure[win_content_child_num].data.word.size = word_size;
+            data_structure[win_content_child_num].data.word.space = word_space;
+            data_structure[win_content_child_num].data.word.italic_bold = data_structure[win_content_child_num].data.word.info.style;
+            printf("italic_bold=%d\n\r", data_structure[win_content_child_num].data.word.italic_bold);
+            printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
+
+        }
+
+
+        lv_obj_del(file_management_win);
+        lv_obj_del(file_management_head_bg);
+        //lv_obj_del(label_file_management_total_output);
+        lv_obj_del(label_file_management);
+        //lv_obj_del(label_file_management_date);
+        //lv_obj_del(label_file_management_time);
+        //lv_obj_del(img_file_management_battery_level);
+        lv_obj_del(label_file_management_label);
+        lv_obj_del(file_management_middle_bg);
+        lv_obj_del(img_file_management_text);
+        lv_obj_del(label_file_management_text);
+        lv_obj_del(label_file_management_text_label);
+
+        lv_obj_del(img_file_management_typeface);
+        lv_obj_del(label_file_management_typeface);
+        lv_obj_del(label_file_management_typeface_label);
+
+        lv_obj_del(img_file_management_word_space);
+        lv_obj_del(label_file_management_word_space);
+        lv_obj_del(label_file_management_word_space_label);
+
+        lv_obj_del(img_file_management_word_size);
+        lv_obj_del(label_file_management_word_size);
+        lv_obj_del(label_file_management_word_size_label);
+
+        lv_obj_del(img_file_management_spin);
+        lv_obj_del(label_file_management_spin);
+        lv_obj_del(label_btn_addition_text_spin);
+
+        // lv_obj_del(img_file_management_width);
+        // lv_obj_del(label_file_management_width);
+       //  lv_obj_del(label_file_management_width_label);
+
+
+        lv_obj_del(img_file_management_bold);
+        lv_obj_del(label_file_management_bold);
+        lv_obj_del(sw_file_management_bold);
+
+        lv_obj_del(img_management_line_italic);
+        lv_obj_del(label_management_line_italic);
+        lv_obj_del(sw_management_line_italic);
+
+        lv_obj_del(file_management_bottom_bg);
+        lv_obj_del(label_file_management_return);
+        lv_obj_del(imgbtn_file_management_get_back);
+        lv_obj_del(imgbtn_file_management_confirm);
+        lv_obj_del(label_file_management_confirm);
+
+        lv_obj_del(btn_file_management_text);
+        lv_obj_del(btn_file_management_typeface);
+        lv_obj_del(btn_file_management_word_space_label);
+        lv_obj_del(btn_file_management_word_size_label);
+        lv_obj_del(btn_addition_text_spin);
+
+        //删除添加界面
+        lv_obj_del(addition_head_bg);
+        lv_obj_del(label_addition_head);
+        lv_obj_del(addition_bottom_bg);
+        lv_obj_del(label_addition_middle_bg);
+        lv_obj_del(label_addition_return);
+        lv_obj_del(imgbtn_addition_return);
+        lv_obj_del(imgbtn_addition_confirm);
+        lv_obj_del(label_addition_confirm);
+#if 0
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+#endif
+
+#if 0
+        lv_obj_t* addition_head_bg;
+        lv_obj_t* label_addition_head;
+        lv_obj_t* label_addition_middle_bg;
+        lv_obj_t* addition_bottom_bg;
+        lv_obj_t* label_addition_return;
+        lv_obj_t* imgbtn_addition_return;
+        lv_obj_t* imgbtn_addition_confirm;
+        lv_obj_t* label_addition_confirm;
+        lv_obj_t* btn_addition_text;
+        lv_obj_t* label_btn_addition_text;
+        lv_obj_t* btn_addition_date;
+        lv_obj_t* label_btn_addition_date;
+        lv_obj_t* btn_addition_picture;
+        lv_obj_t* label_btn_addition_picture;
+        lv_obj_t* btn_addition_QR_code;
+        lv_obj_t* label_btn_addition_QR_code;
+        lv_obj_t* btn_addition_bar_code;
+        lv_obj_t* label_btn_addition_bar_code;
+        lv_obj_t* btn_addition_count;
+        lv_obj_t* label_btn_addition_count;
+        lv_obj_t* btn_addition_subsection;
+        lv_obj_t* label_btn_addition_subsection;
+        lv_obj_t* btn_addition_symbol;
+        lv_obj_t* label_btn_addition_symbol;
+        lv_obj_t* btn_addition_icon;
+        lv_obj_t* label_btn_addition_icon;
+        lv_obj_t* btn_addition_more_functions;
+        lv_obj_t* label_btn_addition_more_functions;
+#endif
+    }
+}
+
+void list_directory_contents(const char *path) 
+{
+    struct dirent *entry;
+    DIR *dir = opendir(path);
+    struct stat file_stat;
+    char time_str[30];
+ 
+    if (dir == NULL) 
+    {
+        perror("opendir");
+        return;
+    }
+ 
+    while ((entry = readdir(dir)) != NULL) 
+    {
+        // 跳过 . 和 .. 目录
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) 
+        {
+            continue;
+        }
+ 
+        // 构建完整的文件路径
+        char full_path[1024];
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+ 
+        // 获取文件状态信息
+        if (stat(full_path, &file_stat) == -1) 
+        {
+            perror("stat");
+            continue;
+        }
+ 
+        // 格式化时间信息
+        struct tm *tm = localtime(&file_stat.st_mtime);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
+ 
+        // 打印文件信息
+        if (S_ISDIR(file_stat.st_mode)) 
+        {
+            printf("[DIR]  %s\n", entry->d_name);
+        } 
+        else 
+        {
+            printf("%-30s %10lld bytes %s\n", entry->d_name, file_stat.st_size, time_str);
+        }
+    }
+ 
+    closedir(dir);
+}
+
+
 static void button_addition_picture_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -9113,13 +9902,214 @@ static void button_addition_picture_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("button_addition_picture_event_cb\n");
+        obj_addition_picture_head_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_head_bg, 480, 24);
+        lv_obj_align(obj_addition_picture_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(obj_addition_picture_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_head_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_head_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_head = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_head, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_head, "图片");
+        lv_obj_align(label_addition_picture_head, LV_ALIGN_TOP_LEFT, 200, 4);
+
+
+        obj_addition_picture_preview_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_preview_bg, 240, 150);
+        lv_obj_align(obj_addition_picture_preview_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_obj_set_style_border_width(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_preview_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_preview_bg, 0, LV_PART_SCROLLBAR);
+
+
+        obj_addition_picture_btn_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_btn_bg, 240, 98);
+        lv_obj_align(obj_addition_picture_btn_bg, LV_ALIGN_TOP_LEFT, 0, 174);
+        lv_obj_set_style_border_width(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_btn_bg, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_btn_bg, 0, LV_PART_SCROLLBAR);
+
+
+        obj_addition_table_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_table_bg, 264, 224);
+        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 216, 24);
+        lv_obj_set_style_border_width(obj_addition_table_bg, 2, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_table_bg, 0, LV_PART_SCROLLBAR);
+
+
+        table_addition_picture = lv_table_create(lv_scr_act());
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
+        lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
+        lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
+        lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+        lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 216, 24);
+        lv_table_set_col_width(table_addition_picture, 0, 65);
+        lv_table_set_col_width(table_addition_picture, 1, 65);
+        lv_table_set_col_width(table_addition_picture, 2, 65);
+        lv_table_set_col_width(table_addition_picture, 3, 65);
+
+#if 0
+        //PICTURE_DATA
+        printf("1111111111111111111111111\n");
+        lv_fs_dir_t d;
+        if (lv_fs_dir_open(&d, "D:/test_sd") == LV_FS_RES_OK)
+        {
+            printf("lv_fs_dir_open ok\n");
+            char b[100];
+            memset(b, 0, 100);
+            while (lv_fs_dir_read(&d, b) == LV_FS_RES_OK)
+            {
+                printf("%s\n", b);
+            }
+            lv_fs_dir_close(&d);
+        }
+        else
+        {
+            printf("lv_fs_dir_open error\n");
+        }
+#endif
+
+        //list_directory_contents(D:/test_sd);
+
+
+
+        btn_addition_picture_delete = lv_btn_create(lv_scr_act());
+        lv_obj_set_size(btn_addition_picture_delete, 80, 30);
+        lv_obj_align(btn_addition_picture_delete, LV_ALIGN_TOP_LEFT, 10, 180);
+        lv_obj_set_style_border_width(btn_addition_picture_delete, 1, LV_PART_MAIN); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(btn_addition_picture_delete, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
+        lv_obj_set_style_radius(btn_addition_picture_delete, 10, LV_PART_MAIN); /* 设置圆角 */
+        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(btn_addition_picture_delete, 0, LV_PART_MAIN);
+        lv_obj_add_event_cb(btn_addition_picture_delete, btn_addition_picture_delete_event_cb, LV_EVENT_ALL, NULL);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_btn_addition_picture_delete = lv_label_create(btn_addition_picture_delete);
+        lv_obj_set_style_text_font(label_btn_addition_picture_delete, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_label_set_text(label_btn_addition_picture_delete, "删除");
+        lv_obj_center(label_btn_addition_picture_delete);
+        lv_obj_set_style_text_color(label_btn_addition_picture_delete, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+
+
+        btn_addition_picture_open = lv_btn_create(lv_scr_act());
+        lv_obj_set_size(btn_addition_picture_open, 80, 30);
+        lv_obj_align(btn_addition_picture_open, LV_ALIGN_TOP_LEFT, 125, 180);
+        lv_obj_set_style_border_width(btn_addition_picture_open, 1, LV_PART_MAIN); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(btn_addition_picture_open, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
+        lv_obj_set_style_radius(btn_addition_picture_open, 10, LV_PART_MAIN); /* 设置圆角 */
+        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(btn_addition_picture_open, 0, LV_PART_MAIN);
+        lv_obj_add_event_cb(btn_addition_picture_open, btn_addition_picture_open_event_cb, LV_EVENT_ALL, NULL);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_btn_addition_picture_open = lv_label_create(btn_addition_picture_open);
+        lv_obj_set_style_text_font(label_btn_addition_picture_open, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_label_set_text(label_btn_addition_picture_open, "打开");
+        lv_obj_center(label_btn_addition_picture_open);
+        lv_obj_set_style_text_color(label_btn_addition_picture_open, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+
+
+        LV_IMG_DECLARE(spin);
+        img_addition_picture_search = lv_img_create(lv_scr_act());
+        lv_img_set_src(img_addition_picture_search, &spin);
+        lv_obj_align(img_addition_picture_search, LV_ALIGN_TOP_LEFT, 10, 218);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_search = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_search, "搜索");
+        lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 40, 222);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        btn_addition_picture_search = lv_btn_create(lv_scr_act());
+        lv_obj_set_size(btn_addition_picture_search, 125, 24);
+        lv_obj_align(btn_addition_picture_search, LV_ALIGN_TOP_LEFT, 80, 218);
+        lv_obj_set_style_border_width(btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(btn_addition_picture_search, 10, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(btn_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        label_btn_addition_picture_search = lv_label_create(btn_addition_picture_search);
+        lv_obj_set_style_text_font(label_btn_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_btn_addition_picture_search, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
+        lv_label_set_text(label_btn_addition_picture_search, "");
+        lv_obj_align(label_btn_addition_picture_search, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_border_width(label_btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(label_btn_addition_picture_search, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(label_btn_addition_picture_search, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(label_btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_opa(label_btn_addition_picture_search, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(label_btn_addition_picture_search, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_add_event_cb(btn_addition_picture_search, btn_addition_picture_search_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+
+        obj_addition_picture_bottom_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_bottom_bg, 480, 24);
+        lv_obj_align(obj_addition_picture_bottom_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(obj_addition_picture_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_bottom_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_bottom_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_return, "返回");
+        lv_obj_align(label_addition_picture_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+
+        LV_IMG_DECLARE(get_back);
+        imgbtn_addition_picture_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_picture_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(imgbtn_addition_picture_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_picture_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(imgbtn_addition_picture_return, imgbtn_addition_picture_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_IMG_DECLARE(confirm);
+        imgbtn_addition_picture_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_picture_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(imgbtn_addition_picture_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(imgbtn_addition_picture_confirm, imgbtn_addition_picture_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_confirm, "确定");
+        lv_obj_align(label_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
 
 //预览更新函数
 static void update_preview_QR_bar_code(void)
 {
-    if (strlen(lv_label_get_text(label_btn_addition_QR_code_text)) == 0)
+    int str_len = 0;
+    int width_len = 0;
+    int height_len = 0;
+    int width, height, channels;
+    unsigned char* pdata = NULL;
+    unsigned char* pnew_data = NULL;
+     lv_obj_t* img = NULL;
+
+    str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
+    if (str_len == 0)
     {
         return;
     }
@@ -9127,169 +10117,388 @@ static void update_preview_QR_bar_code(void)
     printf("QR_or_bar_code_flag=%u\n\r",QR_or_bar_code_flag);
     printf("QR_code_type=%u\n\r",QR_code_type);
     printf("bar_code_type=%u\n\r",bar_code_type);
+    printf("str_len=%u\n\r",str_len);
 
     if (QR_or_bar_code_flag == 0)
     {
-        if (strlen(lv_label_get_text(label_btn_addition_QR_code_height)) == 0)
-        {
-            return;
-        }
-
         struct zint_symbol* my_symbol;
         my_symbol = ZBarcode_Create();
         switch (QR_code_type)
         {
             case 0:
+            default:
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
                 my_symbol->symbology = BARCODE_QRCODE;
+                my_symbol->scale = 1;
+                my_symbol->option_1 = 2; //容错级别
+
+                if(str_len < 20)
+                {
+                    my_symbol->option_2 = 1;
+                }
+                else if(str_len < 38)
+                {
+                    my_symbol->option_2 = 2;
+                }
+                else if(str_len < 61)
+                {
+                    my_symbol->option_2 = 3;
+                }
+                else if(str_len < 90)
+                {
+                    my_symbol->option_2 = 4;
+                }
+                else if(str_len < 122)
+                {
+                    my_symbol->option_2 = 5;
+                }
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                    //figure_borders |= 0x01;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                    //figure_borders |= 0x02;
+                }
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                //ZBarcode_Delete(my_symbol);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);
+
                 break;
             case 1:
-                my_symbol->symbology = BARCODE_PDF417;
+                my_symbol->symbology = BARCODE_PDF417;   
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);
+     
                 break;
             case 2:
                 my_symbol->symbology = BARCODE_DATAMATRIX;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);
+
                 break;
             case 3:
                 my_symbol->symbology = BARCODE_HANXIN;
-                break;
-            default:
-                my_symbol->symbology = BARCODE_QRCODE;
-                break;
-        }
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
     
-        my_symbol->scale = 2;
-        strcpy(my_symbol->outfile, "out.bmp");
-        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
-        //my_symbol->height = lv_label_get_text(label_btn_addition_QR_code_height);
-        //my_symbol->height = 100.0;
-        //my_symbol->width = 100;
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
 
-        my_symbol->scale = 1;
-	    my_symbol->option_1 = 3; //容错级别
-		my_symbol->option_2 = 5; //版本，决定图片大小
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
-        figure_borders = 0;
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
 
-        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-        {
-            my_symbol->show_hrt = 1;
-            memcpy( my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-            figure_borders |= 0x01;
-        }
-
-        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-        {
-            my_symbol->output_options = BARCODE_BOX;
-            figure_borders |= 0x02;
-        }
-
-        ZBarcode_Print(my_symbol, 0);
-        ZBarcode_Delete(my_symbol);
-
-        int width, height, channels;
-        unsigned char* data = stbi_load("out.bmp", &width, &height, &channels, 1);
-        printf("width=%d\n\r", width);
-        printf("height=%d\n\r", height);
-        printf("channels=%d\n\r", channels);
-
-        unsigned char* new_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
-        if (!new_data) {
-            fprintf(stderr, "Memory allocation failed\n");
-            stbi_image_free(data);
-            return;
-        }
-
-    #if 0
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int index = y * width + x; // 计算当前像素在原始数据中的索引
-                unsigned char color = data[index]; // 获取当前像素的灰度值（0或255）
-                // 映射到RGBA值
-            // new_data[index * 4 + 0] = color * 255; // R
-            // new_data[index * 4 + 1] = color * 255; // G
-            // new_data[index * 4 + 2] = color * 255; // B
-            // new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
-                printf("%02x ",color);
-            }
-
-            printf("\n\r");
-        }
-    #endif
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int index = y * width + x; // 计算当前像素在原始数据中的索引
-                unsigned char color = data[index]; // 获取当前像素的灰度值（0或255）
-                // 映射到RGBA值
-    #if 0
-                new_data[index * 4 + 0] = color * 255; // R
-                new_data[index * 4 + 1] = color * 255; // G
-                new_data[index * 4 + 2] = color * 255; // B
-                new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
-    #endif
-                if (color == 0)
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
                 {
-                    new_data[index * 4 + 0] = 0; // R
-                    new_data[index * 4 + 1] = 0; // G
-                    new_data[index * 4 + 2] = 0; // B
-                    new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
                 }
                 else
                 {
-                    new_data[index * 4 + 0] = 255; // R
-                    new_data[index * 4 + 1] = 255; // G
-                    new_data[index * 4 + 2] = 255; // B
-                    new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                    printf("lv_mem_alloc ok\n\r");
                 }
-            }
-        }
-        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, new_data);
-        // 使用data进行图像处理...
-        lv_mem_free(new_data);
-        stbi_image_free(data); // 释放内存
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
 
 #if 0
+                width_len = strlen(lv_label_get_text(label_btn_addition_QR_code_width));
 
-        printf("zhangchuan\n\r");
+                if (width_len == 0)
+                {
+                    return;
+                }
 
-        lv_fs_dir_t d;
-        if (lv_fs_dir_open(&d, "A:/root") == LV_FS_RES_OK)
-        {
-#if 0
-            char b[100];
-            memset(b, 0, 100);
-            while (lv_fs_dir_read(&d, b) == LV_FS_RES_OK)
-            {
-                printf("%s\n", b);
-            }
+                printf("width_len=%u\n\r",width_len);
 #endif
-            printf("lv_fs_dir_open ok\n\r");
-
-
-            char buff[257] = {0};
-	        while(lv_fs_dir_read(&d, buff) == LV_FS_RES_OK)
-            {
-                if('\0' == buff[0])
-                {
-                    printf("read dir done\n");
-                    lv_fs_dir_close(&d);
-                    printf("lv_fs_dir_close success\n");
-                    break;
-                }
-                else
-                {
-                    printf("%s\n", buff);
-                }
-            }
-
-          //  lv_fs_dir_close(&d);
+                break;
         }
-#endif
-
-
-        //显示图像
-        lv_obj_t* img = lv_img_create(addition_QR_code_middle_bg);
-        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-        lv_obj_center(img);
     }
     else
     {
@@ -9298,144 +10507,738 @@ static void update_preview_QR_bar_code(void)
         switch (bar_code_type)
         {
             case 0:
+            default:
+
                 my_symbol->symbology = BARCODE_CODE39;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
                 break;
             case 1:
                 my_symbol->symbology = BARCODE_CODE128;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
                 break;
             case 2:
             case 3:
                 my_symbol->symbology = BARCODE_EANX;
-                break;
-            case 4:
-                my_symbol->symbology = BARCODE_GS1_128;
-                break;
-            case 5:
-                my_symbol->symbology = BARCODE_UPCA;
-                break;
-            case 6:
-                my_symbol->symbology = BARCODE_UPCE;
-                break;
-            case 7:
-                my_symbol->symbology = BARCODE_ITF14;
-                break;
-            case 8:
-                my_symbol->symbology = BARCODE_C25INTER;
-                break;
-            case 9:
-                my_symbol->symbology = BARCODE_EAN14;
-                break;
-            default:
-                my_symbol->symbology = BARCODE_CODE39;
-                break;
-        }
 
-        my_symbol->scale = 2;
-        strcpy(my_symbol->outfile, "out.bmp");
-        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
-        //my_symbol->height = lv_label_get_text(label_btn_addition_QR_code_height);
-        //my_symbol->height = 100.0;
-        //my_symbol->width = 100;
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
 
-        my_symbol->scale = 2;
-	    my_symbol->option_1 = 3; //容错级别
-		my_symbol->option_2 = 10; //版本，决定图片大小
+                printf("height_len=%u\n\r",height_len);
 
-        if (lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-        {
-            my_symbol->show_hrt = 1;
-            memcpy( my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-        }
+                my_symbol->scale = 1;
 
-        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-        {
-            my_symbol->output_options = BARCODE_BOX;
-        }
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
-        ZBarcode_Print(my_symbol, 0);
-        ZBarcode_Delete(my_symbol);
+                ZBarcode_Print(my_symbol, 0);
 
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
 
-        int width, height, channels;
-        unsigned char* data = stbi_load("out.bmp", &width, &height, &channels, 1);
-        printf("width=%d\n\r", width);
-        printf("height=%d\n\r", height);
-        printf("channels=%d\n\r", channels);
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
-        unsigned char* new_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
-        if (!new_data) {
-            fprintf(stderr, "Memory allocation failed\n");
-            stbi_image_free(data);
-            return;
-        }
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
 
-    #if 0
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int index = y * width + x; // 计算当前像素在原始数据中的索引
-                unsigned char color = data[index]; // 获取当前像素的灰度值（0或255）
-                // 映射到RGBA值
-            // new_data[index * 4 + 0] = color * 255; // R
-            // new_data[index * 4 + 1] = color * 255; // G
-            // new_data[index * 4 + 2] = color * 255; // B
-            // new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
-                printf("%02x ",color);
-            }
-
-            printf("\n\r");
-        }
-    #endif
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int index = y * width + x; // 计算当前像素在原始数据中的索引
-                unsigned char color = data[index]; // 获取当前像素的灰度值（0或255）
-                // 映射到RGBA值
-    #if 0
-                new_data[index * 4 + 0] = color * 255; // R
-                new_data[index * 4 + 1] = color * 255; // G
-                new_data[index * 4 + 2] = color * 255; // B
-                new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
-    #endif
-                if (color == 0)
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
                 {
-                    new_data[index * 4 + 0] = 0; // R
-                    new_data[index * 4 + 1] = 0; // G
-                    new_data[index * 4 + 2] = 0; // B
-                    new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
                 }
                 else
                 {
-                    new_data[index * 4 + 0] = 255; // R
-                    new_data[index * 4 + 1] = 255; // G
-                    new_data[index * 4 + 2] = 255; // B
-                    new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                    printf("lv_mem_alloc ok\n\r");
                 }
-            }
-        }
-        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, new_data);
-        // 使用data进行图像处理...
-        lv_mem_free(new_data);
-        stbi_image_free(data); // 释放内存
-#if 0
-        lv_fs_dir_t d;
-        if (lv_fs_dir_open(&d, "A:/root") == LV_FS_RES_OK)
-        {
-            char b[100];
-            memset(b, 0, 100);
-            while (lv_fs_dir_read(&d, b) == LV_FS_RES_OK)
-            {
-                printf("%s\n", b);
-            }
 
-            lv_fs_dir_close(&d);
-        }
-#endif
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
 
-        //显示图像
-        lv_obj_t* img = lv_img_create(addition_QR_code_middle_bg);
-        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-        lv_obj_center(img);
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
+                break;
+            case 4:
+                my_symbol->symbology = BARCODE_GS1_128;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
+                break;
+            case 5:
+                my_symbol->symbology = BARCODE_UPCA;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
+                break;
+            case 6:
+                my_symbol->symbology = BARCODE_UPCE;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
+                break;
+            case 7:
+                my_symbol->symbology = BARCODE_ITF14;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
+                break;
+            case 8:
+                my_symbol->symbology = BARCODE_C25INTER;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
+                break;
+            case 9:
+                my_symbol->symbology = BARCODE_EAN14;
+
+                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                printf("height_len=%u\n\r",height_len);
+
+                my_symbol->scale = 1;
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+    
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                printf("scale=%f\n\r", my_symbol->scale);
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                ZBarcode_Print(my_symbol, 0);
+                ZBarcode_Delete(my_symbol);
+                stbi_image_free(pdata);
+        
+                pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                printf("width=%d\n\r", width);
+                printf("height=%d\n\r", height);
+                printf("channels=%d\n\r", channels);
+
+                pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                if (!pnew_data) 
+                {
+                    fprintf(stderr, "Memory allocation failed\n");
+                    stbi_image_free(pdata);
+                    return;
+                }
+                else
+                {
+                    printf("lv_mem_alloc ok\n\r");
+                }
+
+                for (int y = 0; y < height; y++) 
+                {
+                    for (int x = 0; x < width; x++) 
+                    {
+                        int index = y * width + x; // 计算当前像素在原始数据中的索引
+                        unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                        // 映射到RGBA值
+
+                        if (color == 0)
+                        {
+                            pnew_data[index * 4 + 0] = 0; // R
+                            pnew_data[index * 4 + 1] = 0; // G
+                            pnew_data[index * 4 + 2] = 0; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                        else
+                        {
+                            pnew_data[index * 4 + 0] = 255; // R
+                            pnew_data[index * 4 + 1] = 255; // G
+                            pnew_data[index * 4 + 2] = 255; // B
+                            pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                        }
+                    }
+                }
+                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);               
+
+                break;
+        }
     }
 }
 
@@ -9735,13 +11538,13 @@ static void button_QR_code_height_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 100)
             {
-                i = 150;
+                i = 100;
             }
-            else if (i < 70)
+            else if (i < 50)
             {
-                i = 70;
+                i = 50;
             }
         }
 
@@ -10082,13 +11885,13 @@ static void button_QR_code_width_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 100)
             {
-                i = 150;
+                i = 100;
             }
-            else if (i < 70)
+            else if (i < 50)
             {
-                i = 70;
+                i = 50;
             }
         }
 
@@ -10268,20 +12071,27 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
     lv_event_code_t code;
     int win_content_child_num = 0;
     struct zint_symbol* my_symbol = NULL;
+    int str_len;
+    int width_len;
+    int height_len;
+    int width, height, channels;
+    unsigned char* pdata = NULL; 
+    unsigned char* pnew_data = NULL;
+    lv_obj_t* img = NULL;
 
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_QR_code_confirm_event_cb\n");
         //在主界面显示二维码
-        int len = strlen(lv_label_get_text(label_btn_addition_QR_code_text)) + 1;
-        printf("len=%u\n\r", len);
+        str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text)) + 1;
+        printf("str_len=%u\n\r", str_len);
 
         win_content_child_num = lv_obj_get_child_cnt(win_content);
 
         printf("win_content_child_num=%u\n\r", win_content_child_num);
 
-        if ((len > 1) && (win_content_child_num < NEW_TEXT_MAX_NUMBER))
+        if ((str_len > 0) && (win_content_child_num < NEW_TEXT_MAX_NUMBER))
         {
             lv_obj_t* temp_obj = lv_obj_create(win_content);
 
@@ -10293,250 +12103,1604 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
             lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
-
             printf("QR_or_bar_code_flag=%u\n\r",QR_or_bar_code_flag);
             printf("QR_code_type=%u\n\r",QR_code_type);
             printf("bar_code_type=%u\n\r",bar_code_type);
 
-            if (strlen(lv_label_get_text(label_btn_addition_QR_code_text)) == 0)
-            {
-                return;
-            }
-
-
+            memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+    
             if (QR_or_bar_code_flag == 0)
             {
-                if (strlen(lv_label_get_text(label_btn_addition_QR_code_height)) == 0)
-                {
-                    return;
-                }
-
                 my_symbol = ZBarcode_Create();
+
+                data_structure[win_content_child_num].data.qr_bar.type = QR_or_bar_code_flag;
+                data_structure[win_content_child_num].data.qr_bar.symbology = QR_code_type;
+                data_structure[win_content_child_num].type = TYPE_QR;
+
                 switch (QR_code_type)
                 {
                     case 0:
-                        my_symbol->symbology = BARCODE_QRCODE;
-                        break;
-                    case 1:
-                        my_symbol->symbology = BARCODE_PDF417;
-                        break;
-                    case 2:
-                        my_symbol->symbology = BARCODE_DATAMATRIX;
-                        break;
-                    case 3:
-                        my_symbol->symbology = BARCODE_HANXIN;
-                        break;
                     default:
-                        my_symbol->symbology = BARCODE_QRCODE;
-                        break;
-                }
-    
-                my_symbol->scale = 2;
-                strcpy(my_symbol->outfile, "out.bmp");
-                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
-                my_symbol->scale = 1;
-                my_symbol->option_1 = 3; //容错级别
-                my_symbol->option_2 = 5; //版本，决定图片大小
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                figure_borders = 0;
-
-                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                {
-                    my_symbol->show_hrt = 1;
-                    memcpy( my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                    figure_borders |= 0x01;
-                }
-
-                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                {
-                    my_symbol->output_options = BARCODE_BOX;
-                    figure_borders |= 0x02;
-                }
-
-                ZBarcode_Print(my_symbol, 0);
-                ZBarcode_Delete(my_symbol);
-
-                int width, height, channels;
-                unsigned char* data = stbi_load("out.bmp", &width, &height, &channels, 1);
-                printf("width=%d\n\r", width);
-                printf("height=%d\n\r", height);
-                printf("channels=%d\n\r", channels);
-
-                lv_obj_set_size(temp_obj, width, height);
-
-                unsigned char* new_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
-                if (!new_data) {
-                    fprintf(stderr, "Memory allocation failed\n");
-                    stbi_image_free(data);
-                    return;
-                }
-
-
-                for (int y = 0; y < height; y++) 
-                {
-                    for (int x = 0; x < width; x++) 
-                    {
-                        int index = y * width + x; // 计算当前像素在原始数据中的索引
-                        unsigned char color = data[index]; // 获取当前像素的灰度值（0或255）
-                        // 映射到RGBA值
-
-                        if (color == 0)
+                        if (height_len > 100)
                         {
-                            new_data[index * 4 + 0] = 0; // R
-                            new_data[index * 4 + 1] = 0; // G
-                            new_data[index * 4 + 2] = 0; // B
-                            new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->symbology = BARCODE_QRCODE;
+                        my_symbol->scale = 1;
+                        my_symbol->option_1 = 2; //容错级别
+
+                        if(str_len < 20)
+                        {
+                            my_symbol->option_2 = 1;
+                        }
+                        else if(str_len < 38)
+                        {
+                            my_symbol->option_2 = 2;
+                        }
+                        else if(str_len < 61)
+                        {
+                            my_symbol->option_2 = 3;
+                        }
+                        else if(str_len < 90)
+                        {
+                            my_symbol->option_2 = 4;
+                        }
+                        else if(str_len < 122)
+                        {
+                            my_symbol->option_2 = 5;
+                        }
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
                         }
                         else
                         {
-                            new_data[index * 4 + 0] = 255; // R
-                            new_data[index * 4 + 1] = 255; // G
-                            new_data[index * 4 + 2] = 255; // B
-                            new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                            printf("lv_mem_alloc ok\n\r");
                         }
-                    }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+
+                        break;
+                    case 1:
+                      
+#if 0
+                        width_len = atoi(lv_label_get_text(label_btn_addition_QR_code_width));
+
+                        if (width_len > 100)
+                        {
+                            width_len = 100;
+                        }
+                        else if (width_len < 50)
+                        {
+                            width_len = 50;
+                        }
+
+                        printf("width_len=%u\n\r",width_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.width = width_len;
+#endif
+                        my_symbol->symbology = BARCODE_PDF417;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+            
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        lv_obj_t* img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+
+                        break;
+                    case 2:
+                        my_symbol->symbology = BARCODE_DATAMATRIX;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+
+                        break;
+                    case 3:
+                        my_symbol->symbology = BARCODE_HANXIN;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+
+                        break;
                 }
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, new_data);
-                // 使用data进行图像处理...
-                lv_mem_free(new_data);
-                stbi_image_free(data); // 释放内存
-
-
-                //显示图像
-                lv_obj_t* img = lv_img_create(temp_obj);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);
             }
             else
             {
                 
+                data_structure[win_content_child_num].data.qr_bar.type = QR_or_bar_code_flag;
+                data_structure[win_content_child_num].data.qr_bar.symbology = bar_code_type;
+                data_structure[win_content_child_num].type = TYPE_BAR;
                 my_symbol = ZBarcode_Create();
                 switch (bar_code_type)
                 {
                     case 0:
+                    default:
                         my_symbol->symbology = BARCODE_CODE39;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
                         break;
                     case 1:
                         my_symbol->symbology = BARCODE_CODE128;
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
                         break;
                     case 2:
                     case 3:
                         my_symbol->symbology = BARCODE_EANX;
-                        break;
-                    case 4:
-                        my_symbol->symbology = BARCODE_GS1_128;
-                        break;
-                    case 5:
-                        my_symbol->symbology = BARCODE_UPCA;
-                        break;
-                    case 6:
-                        my_symbol->symbology = BARCODE_UPCE;
-                        break;
-                    case 7:
-                        my_symbol->symbology = BARCODE_ITF14;
-                        break;
-                    case 8:
-                        my_symbol->symbology = BARCODE_C25INTER;
-                        break;
-                    case 9:
-                        my_symbol->symbology = BARCODE_EAN14;
-                        break;
-                    default:
-                        my_symbol->symbology = BARCODE_CODE39;
-                        break;
-                }
 
-                my_symbol->scale = 2;
-                strcpy(my_symbol->outfile, "out.bmp");
-                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
-                //my_symbol->height = lv_label_get_text(label_btn_addition_QR_code_height);
-                //my_symbol->height = 100.0;
-                //my_symbol->width = 100;
+                                                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                my_symbol->scale = 2;
-                my_symbol->option_1 = 3; //容错级别
-                my_symbol->option_2 = 10; //版本，决定图片大小
-
-                if (lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                {
-                    my_symbol->show_hrt = 1;
-                    memcpy( my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                }
-
-                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                {
-                    my_symbol->output_options = BARCODE_BOX;
-                }
-
-                ZBarcode_Print(my_symbol, 0);
-                ZBarcode_Delete(my_symbol);
-
-
-                int width, height, channels;
-                unsigned char* data = stbi_load("out.bmp", &width, &height, &channels, 1);
-                printf("width=%d\n\r", width);
-                printf("height=%d\n\r", height);
-                printf("channels=%d\n\r", channels);
-
-                lv_obj_set_size(temp_obj, width, height);
-
-                unsigned char* new_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
-                if (!new_data) {
-                    fprintf(stderr, "Memory allocation failed\n");
-                    stbi_image_free(data);
-                    return;
-                }
-
-                for (int y = 0; y < height; y++) 
-                {
-                    for (int x = 0; x < width; x++) 
-                    {
-                        int index = y * width + x; // 计算当前像素在原始数据中的索引
-                        unsigned char color = data[index]; // 获取当前像素的灰度值（0或255）
-                        // 映射到RGBA值
-                        if (color == 0)
+                        if (height_len > 100)
                         {
-                            new_data[index * 4 + 0] = 0; // R
-                            new_data[index * 4 + 1] = 0; // G
-                            new_data[index * 4 + 2] = 0; // B
-                            new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
                         }
                         else
                         {
-                            new_data[index * 4 + 0] = 255; // R
-                            new_data[index * 4 + 1] = 255; // G
-                            new_data[index * 4 + 2] = 255; // B
-                            new_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                            printf("lv_mem_alloc ok\n\r");
                         }
-                    }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+                        break;
+                    case 4:
+                        my_symbol->symbology = BARCODE_GS1_128;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+
+                        break;
+                    case 5:
+                        my_symbol->symbology = BARCODE_UPCA;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+                        break;
+                    case 6:
+                        my_symbol->symbology = BARCODE_UPCE;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);         
+                        break;
+                    case 7:
+                        my_symbol->symbology = BARCODE_ITF14;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+
+                        break;
+                    case 8:
+                        my_symbol->symbology = BARCODE_C25INTER;
+
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+                        break;
+                    case 9:
+                        my_symbol->symbology = BARCODE_EAN14;
+
+                                                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                        if (height_len > 100)
+                        {
+                            height_len = 100;
+                        }
+                        else if (height_len < 50)
+                        {
+                            height_len = 50;
+                        }
+
+                        printf("height_len=%u\n\r",height_len);
+
+                        data_structure[win_content_child_num].data.qr_bar.height = height_len;
+
+                        my_symbol->scale = 1;
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+
+                        //figure_borders = 0;
+#if 0
+                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->show_hrt = 1;
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            //figure_borders |= 0x01;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+
+                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                        {
+                            my_symbol->output_options = BARCODE_BOX;
+                            my_symbol->whitespace_width = 3;
+                            my_symbol-> whitespace_height = 3; 
+                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                            //figure_borders |= 0x02;
+                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                        }
+#endif
+
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        //ZBarcode_Delete(my_symbol);
+
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+            
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        printf("scale=%lf\n\r", my_symbol->scale);
+   
+                        strcpy(my_symbol->outfile, "out.bmp");
+                        ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+
+                        ZBarcode_Print(my_symbol, 0);
+                        ZBarcode_Delete(my_symbol);
+                        stbi_image_free(pdata);
+                
+                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                        printf("width=%d\n\r", width);
+                        printf("height=%d\n\r", height);
+                        printf("channels=%d\n\r", channels);
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                        if (!pnew_data) 
+                        {
+                            fprintf(stderr, "Memory allocation failed\n");
+                            stbi_image_free(pdata);
+                            return;
+                        }
+                        else
+                        {
+                            printf("lv_mem_alloc ok\n\r");
+                        }
+
+                        for (int y = 0; y < height; y++) 
+                        {
+                            for (int x = 0; x < width; x++) 
+                            {
+                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                // 映射到RGBA值
+
+                                if (color == 0)
+                                {
+                                    pnew_data[index * 4 + 0] = 0; // R
+                                    pnew_data[index * 4 + 1] = 0; // G
+                                    pnew_data[index * 4 + 2] = 0; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                                else
+                                {
+                                    pnew_data[index * 4 + 0] = 255; // R
+                                    pnew_data[index * 4 + 1] = 255; // G
+                                    pnew_data[index * 4 + 2] = 255; // B
+                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                }
+                            }
+                        }
+                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+
+                        break;
                 }
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, new_data);
-                // 使用data进行图像处理...
-                lv_mem_free(new_data);
-                stbi_image_free(data); // 释放内存
-
-                //显示图像
-                lv_obj_t* img = lv_img_create(temp_obj);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);
             }
-        }
-
-        if(my_symbol != NULL)
-        {
-
-            data_structure[win_content_child_num].data.qr_bar.type = my_symbol->symbology;
-            memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-        }
-
-        if(QR_or_bar_code_flag == 0)
-        {
-            data_structure[win_content_child_num].type = TYPE_QR;
-        }
-        else
-        {
-            data_structure[win_content_child_num].type = TYPE_BAR;
         }
 
         lv_obj_del(btn_addition_QR_code_confirm);
@@ -12038,9 +15202,33 @@ static void imgbtn_set_tv_bottom_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
+    //int concentration;
+    //int width;
+    //char buf[12] = { 0 };
+
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_set_tv_bottom_confirm_event_cb\n");
+#if 0
+        lv_dropdown_get_selected_str(concentration_mode, buf, sizeof(buf));
+        concentration = atoi(buf);
+        system_data.print.concentration = concentration;
+        print_data.concentration = concentration;
+
+        lv_dropdown_get_selected_str(width_mode, buf, sizeof(buf));
+        width = atoi(buf);
+        system_data.print.width = width;
+        print_data.word_width = width;
+#endif
+
+        system_data.print.concentration = lv_dropdown_get_selected(concentration_mode);
+        system_data.print.width = lv_dropdown_get_selected(width_mode);
+        system_data.print.nozzle = lv_dropdown_get_selected(nozzle_mode);
+        printf("concentration=%d\n", system_data.print.concentration);
+        printf("width=%d\n", system_data.print.width);
+        printf("nozzle=%d\n", system_data.print.nozzle);
+
+        set_system_data();
 
         lv_obj_del(set_tv);
         lv_obj_del(set_tv_bottom_bg);
@@ -12798,6 +15986,8 @@ static void set_tv_print_create(lv_obj_t* parent)
     lv_dropdown_set_symbol(width_mode, &dropdown);
     lv_obj_add_event_cb(width_mode, width_mode_event_handler, LV_EVENT_ALL, NULL);
 
+    lv_dropdown_set_selected(width_mode,system_data.print.width);
+
 
     LV_FONT_DECLARE(heiFont16_1);
     label_encoder_mode = lv_label_create(set_print_obj);
@@ -12846,6 +16036,8 @@ static void set_tv_print_create(lv_obj_t* parent)
     lv_dropdown_set_symbol(nozzle_mode, &dropdown);
     lv_obj_add_event_cb(nozzle_mode, nozzle_mode_event_handler, LV_EVENT_ALL, NULL);
 
+    lv_dropdown_set_selected(nozzle_mode,system_data.print.nozzle);
+
 
     LV_FONT_DECLARE(heiFont16_1);
     label_concentration_mode = lv_label_create(set_print_obj);
@@ -12853,7 +16045,7 @@ static void set_tv_print_create(lv_obj_t* parent)
     lv_obj_set_style_text_color(label_concentration_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
     lv_label_set_text(label_concentration_mode, "喷墨浓度");
     lv_obj_align(label_concentration_mode, LV_ALIGN_TOP_LEFT, 2, 120);
-    static const char* opts_concentration = "1\n2\n3\n4\n5\n";
+    static const char* opts_concentration = "1\n2\n3\n4\n";
     concentration_mode = lv_dropdown_create(set_print_obj);
     lv_obj_set_style_border_width(concentration_mode, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     //lv_obj_set_style_radius(concentration_mode, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -12868,6 +16060,8 @@ static void set_tv_print_create(lv_obj_t* parent)
     LV_IMG_DECLARE(dropdown);
     lv_dropdown_set_symbol(concentration_mode, &dropdown);
     lv_obj_add_event_cb(concentration_mode, concentration_mode_event_handler, LV_EVENT_ALL, NULL);
+
+    lv_dropdown_set_selected(concentration_mode,system_data.print.concentration);
 
     //连喷次数就是按一下之后滚动，如果连喷次数是1就喷一次，是3就喷三次，以此类推
     LV_FONT_DECLARE(heiFont16_1);
@@ -14203,6 +17397,141 @@ static void button_set_event_cb(lv_event_t* e)
 extern int LoadConfigFile(const char* pconfName);
 extern int GetConfigIntDefault(const char* p_itemname, const int def);
 
+
+void get_system_data(void)
+{
+    lv_fs_file_t lv_file;
+    lv_fs_res_t  lv_res;
+    uint32_t bw;
+
+    lv_res = lv_fs_open(&lv_file, "A:/root/system_data.dat", LV_FS_MODE_RD);
+    if (lv_res != LV_FS_RES_OK)
+    {
+        printf("LVGL FS open error\n");
+    }
+    else
+    {
+        printf("LVGL FS open Ok\n");
+        memset(&system_data, 0, sizeof(system_data));
+        lv_res = lv_fs_read(&lv_file, &system_data, sizeof(system_data), &bw);
+        if (lv_res != LV_FS_RES_OK)
+        {
+            printf("lv_fs_read error\n");
+        }
+        else
+        {
+            printf("init=%d\n", system_data.init);
+            printf("concentration=%d\n", system_data.print.concentration);
+            printf("nozzle=%d\n", system_data.print.nozzle);
+            printf("width=%d\n", system_data.print.width);
+            lv_fs_close(&lv_file);
+        }
+    }
+
+    if (system_data.init == 0)
+    {
+        system_data.init = 1;
+        system_data.print.concentration = 1;
+        system_data.print.nozzle = 0;
+        system_data.print.width = 1;
+        lv_res = lv_fs_open(&lv_file, "A:/root/system_data.dat", LV_FS_MODE_WR);
+        if (lv_res != LV_FS_RES_OK)
+        {
+            printf("LVGL FS open error\n");
+        }
+        else
+        {
+            printf("LVGL FS open error\n");   
+            lv_fs_write(&lv_file, &system_data, sizeof(system_data), &bw);
+            if (lv_res != LV_FS_RES_OK)
+            {
+                printf("lv_fs_write error\n");
+            }
+            else
+            {
+                printf("lv_fs_write ok\n");
+                lv_fs_close(&lv_file);
+            }
+        }
+    }
+
+    lv_res = lv_fs_open(&lv_file, "A:/root/system_data.dat", LV_FS_MODE_RD);
+    if (lv_res != LV_FS_RES_OK)
+    {
+        printf("LVGL FS open error\n");
+    }
+    else
+    {
+        printf("LVGL FS open Ok\n");
+        memset(&system_data, 0, sizeof(system_data));
+        lv_res = lv_fs_read(&lv_file, &system_data, sizeof(system_data), &bw);
+        if (lv_res != LV_FS_RES_OK)
+        {
+            printf("lv_fs_read error\n");
+        }
+        else
+        {
+            printf("init=%d\n", system_data.init);
+            printf("concentration=%d\n", system_data.print.concentration);
+            printf("nozzle=%d\n", system_data.print.nozzle);
+            printf("width=%d\n", system_data.print.width);
+            lv_fs_close(&lv_file);
+        }
+    }
+}
+
+
+void set_system_data(void)
+{
+    lv_fs_file_t lv_file;
+    lv_fs_res_t  lv_res;
+    uint32_t bw;
+
+    lv_res = lv_fs_open(&lv_file, "A:/root/system_data.dat", LV_FS_MODE_WR);
+    if (lv_res != LV_FS_RES_OK)
+    {
+        printf("LVGL FS open error\n");
+    }
+    else
+    {
+        printf("LVGL FS open Ok\n");
+        lv_fs_write(&lv_file, &system_data, sizeof(system_data), &bw);
+        if (lv_res != LV_FS_RES_OK)
+        {
+            printf("lv_fs_write error\n");
+        }
+        else
+        {
+            printf("lv_fs_write ok\n");
+            lv_fs_close(&lv_file);
+        } 
+    }
+
+    lv_res = lv_fs_open(&lv_file, "A:/root/system_data.dat", LV_FS_MODE_RD);
+    if (lv_res != LV_FS_RES_OK)
+    {
+        printf("LVGL FS open error\n");
+    }
+    else
+    {
+        printf("LVGL FS open Ok\n");
+        memset(&system_data, 0, sizeof(system_data));
+        lv_res = lv_fs_read(&lv_file, &system_data, sizeof(system_data), &bw);
+        if (lv_res != LV_FS_RES_OK)
+        {
+            printf("lv_fs_read error\n");
+        }
+        else
+        {
+            printf("init=%d\n", system_data.init);
+            printf("concentration=%d\n", system_data.print.concentration);
+            printf("nozzle=%d\n", system_data.print.nozzle);
+            printf("width=%d\n", system_data.print.width);
+            lv_fs_close(&lv_file);
+        }
+    }
+}
+
 void lv_demo_widgets(void)
 {
     //int retvalue;
@@ -14365,7 +17694,7 @@ void lv_demo_widgets(void)
     lv_font_free(my_font);
 
 #endif
-
+    get_system_data();
 
     LV_IMG_DECLARE(head_background_image);
     Head_background_image = lv_img_create(lv_scr_act()); /* 创建图片部件 */
@@ -14377,9 +17706,9 @@ void lv_demo_widgets(void)
     LV_FONT_DECLARE(heiFont16_1);
     Total_output_label = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(Total_output_label, (const lv_font_t *)&heiFont16_1, 0);
-    LoadConfigFile(config_file);
-    g_total_output = GetConfigIntDefault("g_total_output",0);
-    sprintf(databuf,"总产量:%u",g_total_output);
+    //LoadConfigFile(config_file);
+    //g_total_output = GetConfigFromString("system_data");
+    //sprintf(databuf,"总产量:%u",g_total_output);
     lv_label_set_text(Total_output_label, databuf);
     lv_obj_align(Total_output_label, LV_ALIGN_TOP_LEFT, 0, 5);
     lv_obj_set_style_text_color(Total_output_label, lv_color_hex(0xffffff),LV_STATE_DEFAULT);

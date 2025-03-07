@@ -561,6 +561,10 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     {
         lv_textarea_del_char(keyboard->ta);
     }
+    else if ((strcmp(txt, "x") == 0)&&(keyboard->mode == LV_KEYBOARD_MODE_NUMBER_2))
+    {
+        lv_textarea_del_char(keyboard->ta);
+    }
     else if(strcmp(txt, "+/-") == 0)
     {
         uint16_t cur        = lv_textarea_get_cursor_pos(keyboard->ta);
