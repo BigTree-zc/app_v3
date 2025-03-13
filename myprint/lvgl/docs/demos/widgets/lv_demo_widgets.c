@@ -1107,6 +1107,12 @@ typedef struct _SYSTEM_DATA_
 
 static SYSTEM_DATA system_data;
 
+#define MOUNT_POINT "/mnt/"
+
+char usb_command[256];
+char usb_device[32];
+#define USB_PICTURE_NUMBER   50
+char usb_picture[USB_PICTURE_NUMBER][128]={0};
 
 
 static void textarea_text_event_cb(lv_event_t* e);
@@ -2576,6 +2582,17 @@ void initialize(void)
 #endif
  
     // 这里可以执行你的代码，进程将不会被抢占
+    strcpy(usb_device, "/dev/mmcblk0p3");
+    snprintf(usb_command, sizeof(usb_command), "mount -o iocharset=utf8 %s %s", usb_device, MOUNT_POINT);
+
+    if (system(usb_command) == 0) 
+    {
+        printf("U盘第三个分区已成功挂载到 %s\n", MOUNT_POINT);
+    } 
+    else 
+    {
+        printf("挂载失败，请检查设备名称或挂载点\n");
+    }
 
 #if 0
     fd_ph45 = open("/dev/mem", O_RDWR | O_SYNC);
@@ -3583,7 +3600,7 @@ static void button_print_event_cb(lv_event_t* e)
     {
         if (print_status == 0)
         {
-             printf("\n****************************************\n");
+            printf("\n****************************************\n");
             printf("printing\n");
             print_status = 1;
             LV_IMG_DECLARE(print_2);
@@ -3600,6 +3617,15 @@ static void button_print_event_cb(lv_event_t* e)
 
             snapshot = lv_snapshot_take(win_content, LV_IMG_CF_TRUE_COLOR_ALPHA);
 
+            if(snapshot == NULL)
+            {
+                printf("lv_snapshot_take error\n");
+            }
+            else
+            {
+                 printf("lv_snapshot_take ok\n");
+            }
+
             lv_draw_img_dsc_t img_dsc;
             lv_draw_img_dsc_init(&img_dsc);
 
@@ -3612,18 +3638,14 @@ static void button_print_event_cb(lv_event_t* e)
 
             lv_canvas_draw_img(canvas, 0, 0, snapshot, &img_dsc);
 
-
             //新建画布，获取图片，发送给底层
             pdata = (unsigned char*)canvasBuf;
 
-                    //新建画布，获取图片，发送给底层
-            pdata = (unsigned char*)canvasBuf;
-
-#if 0
+#if 1
 
             for (i = 0; i < CANVAS_HEIGHT; i++)
             {
-                for (j = 0; j < 30; j++)
+                for (j = 0; j < 50; j++)
                 {
                     data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
                     printf("%02x ", data);
@@ -9893,6 +9915,68 @@ void list_directory_contents(const char *path)
 }
 
 
+
+// 检查文件是否为图片文件
+int is_image_file(const char *filename) 
+{
+    const char *ext = strrchr(filename, '.');
+    if (ext != NULL) 
+    {
+#if 0
+        if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
+            strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
+            strcmp(ext, ".bmp") == 0 || strcmp(ext, ".tiff") == 0) 
+#endif
+        if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
+            strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
+            strcmp(ext, ".bmp") == 0) 
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+int get_image_file_type(const char *filename) 
+{
+    const char *ext = strrchr(filename, '.');
+    if (ext != NULL) 
+    {
+        if(strcmp(ext, ".jpg") == 0)
+        {
+            return 0;
+        }
+        else if(strcmp(ext, ".jpeg") == 0)
+        {
+            return 1;
+        }
+        else if(strcmp(ext, ".png") == 0)
+        {
+            return 2;
+        }
+        else if(strcmp(ext, ".gif") == 0)
+        {
+            return 3;
+        }
+        else if(strcmp(ext, ".bmp") == 0) 
+        {
+            return 4;
+        }
+    }
+    return 0;
+}
+
+// 打印文件信息
+void print_file_info(const char *filename, const struct stat *file_stat) {
+    printf("File: %s\n", filename);
+    printf("Type: %s\n", is_image_file(filename) ? "Image" : "Other");
+    printf("Size: %ld bytes\n", file_stat->st_size);
+    printf("Created: %s", ctime(&file_stat->st_ctime));
+    printf("\n");
+}
+
+
 static void button_addition_picture_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -9959,30 +10043,90 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_table_set_col_width(table_addition_picture, 2, 65);
         lv_table_set_col_width(table_addition_picture, 3, 65);
 
-#if 0
         //PICTURE_DATA
-        printf("1111111111111111111111111\n");
-        lv_fs_dir_t d;
-        if (lv_fs_dir_open(&d, "D:/test_sd") == LV_FS_RES_OK)
+        lv_fs_dir_t mysd_3;
+        if (lv_fs_dir_open(&mysd_3, "/mnt") == LV_FS_RES_OK)
         {
             printf("lv_fs_dir_open ok\n");
-            char b[100];
-            memset(b, 0, 100);
-            while (lv_fs_dir_read(&d, b) == LV_FS_RES_OK)
+            char file_name[100]={0};
+            while (lv_fs_dir_read(&mysd_3, file_name) == LV_FS_RES_OK)
             {
-                printf("%s\n", b);
+                printf("%s\n", file_name);
             }
-            lv_fs_dir_close(&d);
+            lv_fs_dir_close(&mysd_3);
         }
         else
         {
             printf("lv_fs_dir_open error\n");
         }
-#endif
+
 
         //list_directory_contents(D:/test_sd);
+        DIR *dir;
+        struct dirent *entry;
+        struct stat file_stat;
+        char path[128];
+        unsigned char picture_count = 0;
+        int picture_type = 0;
+        char str_picture_size[10] = {0};
+        char created_time[20] ={0};
 
+        dir = opendir("/mnt");
+        if (dir == NULL) 
+        {
+            perror("opendir");
+            exit(EXIT_FAILURE);
+        }
 
+        while ((entry = readdir(dir)) != NULL) 
+        {
+            snprintf(path, sizeof(path), "%s/%s", "/mnt", entry->d_name);
+            if (stat(path, &file_stat) == -1) 
+            {
+                perror("stat");
+                continue;
+            }
+
+            if ((S_ISREG(file_stat.st_mode))&&(picture_count < USB_PICTURE_NUMBER))
+            {  
+                // 只处理普通文件
+                if (is_image_file(entry->d_name)) 
+                {
+                    print_file_info(entry->d_name, &file_stat);
+
+                    lv_table_set_cell_value(table_addition_picture, picture_count + 1, 0, entry->d_name);
+                    picture_type = get_image_file_type(entry->d_name);
+                    switch(picture_type)
+                    {
+                        case 0:
+                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "jpg");
+                            break;
+                        case 1:
+                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "jpeg");
+                            break;
+                        case 2:
+                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "png");
+                            break;
+                        case 3:
+                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "gif");
+                            break;
+                        case 4:
+                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "bmp");
+                            break;
+                    }
+                    sprintf(str_picture_size,"%s",file_stat.st_size);
+                    lv_table_set_cell_value(table_addition_picture, picture_count + 1, 2, str_picture_size);
+                    sprintf(created_time,"%s",file_stat.st_ctime);
+                    lv_table_set_cell_value(table_addition_picture, picture_count + 1, 3, created_time);
+                    memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
+                    picture_count++;
+                }
+            }
+        }
+
+        closedir(dir);
+
+        
 
         btn_addition_picture_delete = lv_btn_create(lv_scr_act());
         lv_obj_set_size(btn_addition_picture_delete, 80, 30);
@@ -10128,7 +10272,16 @@ static void update_preview_QR_bar_code(void)
             case 0:
             default:
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10184,7 +10337,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10248,7 +10401,16 @@ static void update_preview_QR_bar_code(void)
                 break;
             case 1:
                 my_symbol->symbology = BARCODE_PDF417;   
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10264,7 +10426,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10329,7 +10491,16 @@ static void update_preview_QR_bar_code(void)
             case 2:
                 my_symbol->symbology = BARCODE_DATAMATRIX;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10345,7 +10516,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10410,7 +10581,16 @@ static void update_preview_QR_bar_code(void)
             case 3:
                 my_symbol->symbology = BARCODE_HANXIN;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10426,7 +10606,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10511,7 +10691,16 @@ static void update_preview_QR_bar_code(void)
 
                 my_symbol->symbology = BARCODE_CODE39;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10527,7 +10716,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10592,7 +10781,16 @@ static void update_preview_QR_bar_code(void)
             case 1:
                 my_symbol->symbology = BARCODE_CODE128;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10608,7 +10806,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10674,7 +10872,16 @@ static void update_preview_QR_bar_code(void)
             case 3:
                 my_symbol->symbology = BARCODE_EANX;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10690,7 +10897,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10753,16 +10960,27 @@ static void update_preview_QR_bar_code(void)
 
                 break;
             case 4:
-                my_symbol->symbology = BARCODE_GS1_128;
+                my_symbol->symbology = BARCODE_EAN128;
+                my_symbol->input_mode |= GS1PARENS_MODE;
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
 
                 strcpy(my_symbol->outfile, "out.bmp");
-                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+                //ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+                ZBarcode_Encode(my_symbol, (unsigned char *)"(01)98898765432106(3202)012345(15)991231", 0);
+
 
                 ZBarcode_Print(my_symbol, 0);
 
@@ -10771,11 +10989,12 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)90.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+                //ZBarcode_Encode(my_symbol, (unsigned char *)"(01)98898765432106(3202)012345(15)991231", 0);
 
                 ZBarcode_Print(my_symbol, 0);
                 ZBarcode_Delete(my_symbol);
@@ -10836,7 +11055,16 @@ static void update_preview_QR_bar_code(void)
             case 5:
                 my_symbol->symbology = BARCODE_UPCA;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10852,7 +11080,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10917,7 +11145,16 @@ static void update_preview_QR_bar_code(void)
             case 6:
                 my_symbol->symbology = BARCODE_UPCE;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -10933,7 +11170,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -10998,7 +11235,16 @@ static void update_preview_QR_bar_code(void)
             case 7:
                 my_symbol->symbology = BARCODE_ITF14;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -11014,7 +11260,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -11079,7 +11325,16 @@ static void update_preview_QR_bar_code(void)
             case 8:
                 my_symbol->symbology = BARCODE_C25INTER;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -11095,7 +11350,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -11160,7 +11415,16 @@ static void update_preview_QR_bar_code(void)
             case 9:
                 my_symbol->symbology = BARCODE_EAN14;
 
-                height_len = strlen(lv_label_get_text(label_btn_addition_QR_code_height));
+                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+
+                if (height_len > 100)
+                {
+                    height_len = 100;
+                }
+                else if (height_len < 50)
+                {
+                    height_len = 50;
+                }
 
                 printf("height_len=%u\n\r",height_len);
 
@@ -11176,7 +11440,7 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)width);
+                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
                 printf("scale=%f\n\r", my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -12331,7 +12595,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -12449,7 +12713,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -12567,7 +12831,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -12697,7 +12961,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -12813,7 +13077,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -12880,7 +13144,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                     case 3:
                         my_symbol->symbology = BARCODE_EANX;
 
-                                                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
                         if (height_len > 100)
                         {
@@ -12931,7 +13195,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -12995,8 +13259,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_obj_center(img);
                         break;
                     case 4:
-                        my_symbol->symbology = BARCODE_GS1_128;
-
+                        my_symbol->symbology = BARCODE_EAN128;
+                        my_symbol->input_mode |= GS1PARENS_MODE;
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
                         if (height_len > 100)
@@ -13013,6 +13277,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         data_structure[win_content_child_num].data.qr_bar.height = height_len;
 
                         my_symbol->scale = 1;
+
+                        //memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
@@ -13036,9 +13302,10 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
 #endif
-
                         strcpy(my_symbol->outfile, "out.bmp");
+
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+                        //ZBarcode_Encode(my_symbol, (unsigned char *)"(01)98898765432106(3202)012345(15)991231", 0);
 
                         ZBarcode_Print(my_symbol, 0);
                         //ZBarcode_Delete(my_symbol);
@@ -13048,7 +13315,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -13166,7 +13433,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -13283,7 +13550,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -13400,7 +13667,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -13518,7 +13785,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -13635,7 +13902,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
                         printf("scale=%lf\n\r", my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");

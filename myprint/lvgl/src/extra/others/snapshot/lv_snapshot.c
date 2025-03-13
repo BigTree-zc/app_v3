@@ -166,20 +166,28 @@ lv_img_dsc_t * lv_snapshot_take(lv_obj_t * obj, lv_img_cf_t cf)
     LV_ASSERT_NULL(obj);
     uint32_t buff_size = lv_snapshot_buf_size_needed(obj, cf);
 
+    printf("buff_size=%u\n\r",buff_size);
+
     void * buf = lv_mem_alloc(buff_size);
     LV_ASSERT_MALLOC(buf);
-    if(buf == NULL) {
+    if(buf == NULL) 
+    {
+        printf("lv_mem_alloc 1 error\n\r");
         return NULL;
     }
 
     lv_img_dsc_t * dsc = lv_mem_alloc(sizeof(lv_img_dsc_t));
-    LV_ASSERT_MALLOC(buf);
-    if(dsc == NULL) {
+    LV_ASSERT_MALLOC(dsc);
+    if(dsc == NULL) 
+    {
+        printf("lv_mem_alloc 2 error\n\r");
         lv_mem_free(buf);
         return NULL;
     }
 
-    if(lv_snapshot_take_to_buf(obj, cf, dsc, buf, buff_size) == LV_RES_INV) {
+    if(lv_snapshot_take_to_buf(obj, cf, dsc, buf, buff_size) == LV_RES_INV) 
+    {
+        printf("lv_mem_alloc 3 error\n\r");
         lv_mem_free(buf);
         lv_mem_free(dsc);
         return NULL;
