@@ -145,6 +145,48 @@ int main(void)
 
     initialize();
 
+
+#if 0
+#include <stdio.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#define EFUSE_BASE 0x1C14200  // F1C100s eFUSE 物理地址
+#define UID_OFFSET 0x24       // UID 偏移量
+#define PAGE_SIZE 4096
+
+
+    int fd;
+    void *map_base;
+    volatile uint32_t *uid_ptr;
+
+    // 1. 打开 /dev/mem
+    fd = open("/dev/mem", O_RDONLY | O_SYNC);
+    if (fd == -1) {
+        perror("open /dev/mem failed");
+        return -1;
+    }
+
+    // 2. 映射物理内存（按页对齐）
+    map_base = mmap(NULL, PAGE_SIZE, PROT_READ, MAP_SHARED, fd, EFUSE_BASE & ~(PAGE_SIZE-1));
+    if (map_base == MAP_FAILED) {
+        perror("mmap failed");
+        close(fd);
+        return -1;
+    }
+
+    // 3. 计算 UID 地址并读取
+    uid_ptr = (uint32_t *)((char *)map_base + (EFUSE_BASE & (PAGE_SIZE-1)) + UID_OFFSET);
+    printf("UID: %08x %08x %08x %08x\n", 
+           uid_ptr[0], uid_ptr[1], uid_ptr[2], uid_ptr[3]);
+
+    // 4. 清理
+    munmap(map_base, PAGE_SIZE);
+    close(fd);
+#endif
+
+
     /*Create a Demo*/
     lv_demo_widgets();
 

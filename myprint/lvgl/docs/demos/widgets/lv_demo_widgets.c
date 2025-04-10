@@ -277,14 +277,15 @@ int fd_enable;
 
 enum
 {
-    TYPE_WORD = 0,
-    TYPE_QR = 1,
-    TYPE_BAR = 2,
+    TYPE_WORD = 1,
+    TYPE_QR = 2,
+    TYPE_BAR = 3,
     TYPE_PITCTURE,
     TYPE_ICON,
     TYPE_COUNT,
     TYPE_DATE,
     TYPE_BREAK,
+    TYPE_SYMBOL,
 };
 
 
@@ -346,7 +347,7 @@ typedef struct  _COUNT_STRUCTURE_
 
 typedef struct  _DATA_STRUCTURE_
 {
-    unsigned char type;  //0:文字；1:二维码；2：条形码；3：图片；4：图标；5：计数；6：日期；7:分段
+    unsigned char type;  //1:文字；2:二维码；3：条形码；4：图片；5：图标；6：计数；7：日期；8:分段;9,fuhao
     unsigned int x;//位置
     unsigned int y;//位置
     union _UNION_DATA_
@@ -500,6 +501,9 @@ lv_obj_t* typeface_slider_bg;
 lv_obj_t* slider_typeface;
 
 #define TYPEFACE_NUMBER   37
+#define QR_CODE_NUMBER    4
+#define BAR_CODE_NUMBER   10
+#define SYMBOL_NUMBER     119
 
 typedef struct  _TYPEFACE_OBJ_
 {
@@ -507,7 +511,7 @@ typedef struct  _TYPEFACE_OBJ_
     lv_obj_t* obj_typeface_label;
 }TYPEFACE_OBJ;
 
-TYPEFACE_OBJ typeface_obj[TYPEFACE_NUMBER];
+TYPEFACE_OBJ typeface_obj[120];
 
 
 static int g_typeface = CHANG_YONG_SONG_TI;
@@ -598,6 +602,9 @@ static const char* keyboard_map[] =
 };
 
 
+static lv_obj_t* pwd_main_cont = NULL; // 密码输入界面的容器
+
+
 static const lv_btnmatrix_ctrl_t keyboard_ctrl[] =
 {
     LV_BTNMATRIX_CTRL_NO_REPEAT, LV_BTNMATRIX_CTRL_NO_REPEAT, LV_BTNMATRIX_CTRL_NO_REPEAT,
@@ -632,6 +639,7 @@ lv_obj_t* system_date_roller_second;
 
 
 lv_obj_t* addition_head_bg;
+lv_obj_t* img_addition_bg;
 lv_obj_t* label_addition_head;
 lv_obj_t* label_addition_middle_bg;
 lv_obj_t* addition_bottom_bg;
@@ -659,6 +667,7 @@ lv_obj_t* btn_addition_icon;
 lv_obj_t* label_btn_addition_icon;
 lv_obj_t* btn_addition_more_functions;
 lv_obj_t* label_btn_addition_more_functions;
+lv_obj_t* btn_addition_return;
 
 
 
@@ -908,6 +917,7 @@ lv_obj_t* label_addition_picture_search;
 lv_obj_t* btn_addition_picture_search;
 lv_obj_t* label_btn_addition_picture_search;
 lv_obj_t* table_addition_picture;
+lv_obj_t* table_addition_picture_1;
 
 lv_obj_t* btn_file_save;
 lv_obj_t* label_btn_file_save;
@@ -918,7 +928,23 @@ lv_obj_t* label_btn_file_save_as;
 #define TYPEFACE_NUMBER   37
 #define QR_CODE_NUMBER    4
 #define BAR_CODE_NUMBER   10
+#define SYMBOL_NUMBER     119
 
+
+static const char* const g_addition_symbol[] = {
+            "€","￡","₣","₧","p","₴","¥","₩","₹","฿","₨","₪","₫","₭","₱","₤","₺",
+            "₵","©","®","°","℃","℉","№","Ω","μ","π","φ","ø","Ψ","※","㎡","℡","²",
+            "Σ","θ","λ","ω","∮","←","↑","→","↓","~","√","∞","∴","∵","∷","∽","≠",
+            "≤","≥","≦","≧","⊙","⊕","〈","〉","《","》","「","」","『","』","【","】","〔",
+            "〕","〖","〗","︗","︘","︵","︶","︷","︸","︹","︺","︻","︼","︽","︾","︿","﹀",
+            "﹁","﹂","﹃","﹄","{","|","}","«","»","^","˄","˅","ˆ","ˇ","►","◄","㏗",
+            "㏋","｟","｠","■","□","▲","△","▼","▽","◆","◇","○","◎","★","☆","ˆ","ˇ",
+};
+
+//static char g_addition_symbol[] = "€￡₣₧p₴¥₩₹฿₨₪₫₭₱₤₺₵©®°℃℉№ΩμπφøΨ※㎡℡²Σθλω∮←↑→↓~√∞∴∵∷∽≠≤≥≦≧⊙⊕〈〉《》「」『』【】〔〕〖〗︗︘︵︶︷︸︹︺︻︼︽︾︿﹀﹁﹂﹃﹄{|}«»^˄˅ˆˇ►◄㏗㏋｟｠■□▲△▼▽◆◇○◎★☆ˆˇ";
+
+
+static int g_symbol_flag = 0;
 
 
 lv_obj_t* addition_head_bg;
@@ -1036,6 +1062,10 @@ static unsigned char QR_code_type = 0;
 static unsigned char bar_code_type = 0;
 //static unsigned char figure_borders = 0;
 
+static unsigned char g_system_time[6]={0};
+
+static int set_system_time_flag = 0;
+static int read_writer_rtc_enable = 1;
 
 static char QR_code_name[4][16] = {
     "QR CODE",
@@ -1111,8 +1141,34 @@ static SYSTEM_DATA system_data;
 
 char usb_command[256];
 char usb_device[32];
-#define USB_PICTURE_NUMBER   50
+#define USB_PICTURE_NUMBER   100
 char usb_picture[USB_PICTURE_NUMBER][128]={0};
+static uint16_t g_row;
+lv_obj_t* picture_img;
+
+
+
+
+lv_obj_t* set_developer_bg;
+lv_obj_t* label_set_developer_head;
+lv_obj_t* set_developer_middle_bg;
+lv_obj_t* img_Rf_frequency;
+lv_obj_t* label_Rf_frequency_text;
+lv_obj_t* label_Rf_frequency_label;
+lv_obj_t* img_surrogate_information;
+lv_obj_t* label_surrogate_information_name;
+lv_obj_t* label_surrogate_information_label;
+lv_obj_t* img_print_pulse_width;
+lv_obj_t* label_print_pulse_width;
+lv_obj_t* dropdown_print_pulse_width;
+lv_obj_t* img_yield_reset;
+lv_obj_t* label_yield_reset;
+lv_obj_t* btn_yield_reset;
+lv_obj_t* label_btn_yield_reset;
+
+unsigned char g_file_num = 0;
+
+static int set_linux_time_flag = 0;
 
 
 static void textarea_text_event_cb(lv_event_t* e);
@@ -2366,160 +2422,7 @@ void delay_100ns(unsigned char ns)
     unsigned char i;
     for(i=0;i<ns;i++);
 }
-#if 0
-void p_74hc595d(unsigned short data)
-{
-    int i;
-    unsigned char ser1;
-    unsigned char ser2;
-    unsigned int PE_DAT;
-/*
-    PS1 = Q20 = SER2
-    PS2 = Q21 = SER2
-    PS3 = Q22 = SER2
-    PS4 = Q23 =SER2
-    PS5 = Q24 = SER2
-    PS6 = Q25 = SER2
-    PS7 = Q26 = SER2
-    PS8 = Q10 = SER1
-    PS9 = Q11 = SER1
-    PS10 = Q12 = SER1
-    PS11 = Q13 = SER1
-    PS12 = Q14 = SER1
-    PS13 = Q15 = SER1
-    PS14 = Q16 = SER1
-*/
-#if 0
-    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
-    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
-    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
-    delay_100ns(1);
-    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
-    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);  
-#endif
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF)); //PE9,PE10,LOW
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,HIGI
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF) | 0x00000600); //PE9,PE10,HIGH
 
-    ser1 = (data >> 8) & 0xff;
-    ser2 = data & 0xff;
-  
-    for(i=0;i<7;i++)
-    {
-        //delay_100ns(1);
-        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
-        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW       
-        //delay_100ns(1);
-        if((ser1 >> i) & 0x01)
-        {
-            //set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
-            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFBFF)); //PE10,LOW                
-        }
-        else
-        {
-            //set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
-            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFBFF) | 0X00000400); //PE10,HIGH
-        }
-
-        if((ser2 >> i) & 0x01)
-        {
-            //set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
-            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFDFF)); //PE9,LOW    
-        }
-        else
-        {
-            //set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);
-            PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFDFF) | 0x00000200); //PE9,HIGH    
-        }
-        
-        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0x00000040); //PE6,high   
-    }
-
-#if 0
-    delay_100ns(1);
-    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_LOW);
-    delay_100ns(1);
-    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
-    delay_100ns(1);
-#endif
-    delay_100ns(1);
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF)); //PE5,LOW
-    delay_100ns(1);
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF) | 0X00000020); //PE5,high
-
-#if 0
-    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
-    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
-    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
-    delay_100ns(1);
-    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-    set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
-    set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);  
-#endif
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF)); //PE9,PE10,LOW
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,HIGH
-    //delay_100ns(1);
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF) | 0x00000600); //PE9,PE10,HIGH
-
-
-    for(i=0;i<7;i++)
-    {
-        //delay_100ns(1);
-        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
-        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW   
-        //delay_100ns(1);
-        //set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-        PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-        *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0x00000040); //PE6,high  
-    }
-
-#if 0
-    delay_100ns(1);
-    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_LOW);
-    delay_100ns(1);
-    set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
-    delay_100ns(1);
-#endif
-    //delay_100ns(1);
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF)); //PE5,LOW
-    //delay_100ns(1);
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF) | 0X00000020); //PE5,high
-
-    //set_PH45_GPIO(PH45_164_AB_NUM,PH45_GPIO_STATUS_LOW);
-    //set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_LOW);
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFF7F)); //PE7,LOW
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF)); //PE8,LOW
-    //delay_100ns(1);
-    //set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF) | 0X00000100); //PE8,HIGH
-}
-#endif
 
 void initialize(void)
 {
@@ -2534,13 +2437,6 @@ void initialize(void)
         printf("initialize hp45 ok\n");
     }
 
-#if 0
-    unsigned int PE_CFG0;
-    unsigned int PE_CFG1;
-    unsigned int PE_PULL0;
-#endif
-
-
     fd_gpio_in = open("/dev/key_print", O_RDWR);
 	if (fd_gpio_in < 0)
 	{
@@ -2550,36 +2446,6 @@ void initialize(void)
     {
         printf("open file gpio_in ok\n");
     }
-
-
-#if 0
-    fd_ph45 = open("/dev/hp45",O_RDWR | O_SYNC);
-	if (fd_ph45 < 0)
-	{
-		printf("can not open file hp45\n");
-	}
-    else
-    {
-        printf("initialize\n");
-        set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
-        set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);
-        set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-        set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
-        set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-        set_PH45_GPIO(PH45_164_AB_NUM,PH45_GPIO_STATUS_HIGH);
-    }
-#endif
-#if 0
-    // 设置当前进程的优先级为最高
-    if (setpriority(PRIO_PROCESS, 0, -20) == -1) 
-    {
-        printf("setpriority error \n");
-    }
- 
-    // 输出当前进程的优先级
-    int priority = getpriority(PRIO_PROCESS, 0);
-    printf("Current priority: %d\n", priority);
-#endif
  
     // 这里可以执行你的代码，进程将不会被抢占
     strcpy(usb_device, "/dev/mmcblk0p3");
@@ -2593,28 +2459,6 @@ void initialize(void)
     {
         printf("挂载失败，请检查设备名称或挂载点\n");
     }
-
-#if 0
-    fd_ph45 = open("/dev/mem", O_RDWR | O_SYNC);
-    if (fd_ph45 < 0) 
-    {
-        printf("open error\n");
-    }
-    map_base = (unsigned char *)mmap(NULL, 0x400,PROT_READ | PROT_WRITE, MAP_SHARED,fd_ph45, GPIO_PAGE_OFFSET); //把物理地址映射到虚拟地址
-    if(*map_base)  
-    {
-        printf("mmap_fail!\n"); //是否映射成功
-    }
-
-    PE_CFG0=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG0);
-    PE_CFG1=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG1);
-    PE_PULL0=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_PULL0);
-
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG0)=((PE_CFG0 & 0X9998F8FF)|0X00080000);//PE2,PE4,PE5,PE6,PE7
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_CFG1)=((PE_CFG1 & 0XFFFFF000)|0X00000111);//PE8,PE9,PE10
-    *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_PULL0)=((PE_PULL0 & 0XFFFFFCCF)|0X00000220);//
-#endif
-
 }
 
 
@@ -2641,337 +2485,88 @@ void function_20240522(void)
         }
 
         lv_timer_resume(timer_100ms);
+
+        system_data.total_output++;
+
+        set_system_data();
     }   
 }
 
-#if 0
-void function(void)
-{
-    unsigned short data;
-    int i,j,k;
-    static int column = 0;
-    unsigned int PE_CFG0;
-    unsigned int PE_CFG1;
-    unsigned int PE_DAT;
-    unsigned char writeData;
 
-    read(fd_gpio_in, &key_value, 4); 
-    if((key_value >> 8) == PRINT_KEY_NUM)
-    {
-        if((key_value & 0xff)== 0x00)
-        {
-            printf("PRINT_KEY_NUM\n");
-            buzzer_enable = 1;
-            if((print_button_enable == 1)&&(encoder_enalbe == 0))
-            {
-                encoder_enalbe = 1;
-                encoder_count = 0;
-                encoder_low_flag = 0;
-            }
-        }
+
+typedef struct {
+    unsigned long total;     // 总内存 (KB)
+    unsigned long free;      // 空闲内存 (KB)
+    unsigned long available; // 可用内存 (KB)
+    unsigned long buffers;   // 缓冲区内存 (KB)
+    unsigned long cached;    // 缓存内存 (KB)
+} MemoryInfo;
+
+// 从 /proc/meminfo 中提取内存信息
+int get_memory_info(MemoryInfo *mem) {
+    FILE *fp;
+    char line[256];
+    char key[32];
+    unsigned long value;
+    int found = 0;
+
+    fp = fopen("/proc/meminfo", "r");
+    if (fp == NULL) {
+        perror("Failed to open /proc/meminfo");
+        return -1;
     }
 
-#if 0
-    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
+    // 初始化结构体
+    memset(mem, 0, sizeof(MemoryInfo));
 
-    if((PE_DAT & 0x00000004) == 0x00000000)
-    {
-         msleep(100);
-        if((PE_DAT & 0x00000004) == 0x00000000)
-        {
-            printf("PRINT_KEY_NUM\n");
-            buzzer_enable = 1;
-            if((print_button_enable == 1)&&(encoder_enalbe == 0))
-            {
-                encoder_enalbe = 1;
-                encoder_count = 0;
-                encoder_low_flag = 0;
-            }
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "%s %lu kB", key, &value) != 2) {
+            continue; // 跳过格式不匹配的行
         }
+
+        // 匹配关键字段
+        if (strcmp(key, "MemTotal:") == 0) {
+            mem->total = value;
+            found++;
+        } else if (strcmp(key, "MemFree:") == 0) {
+            mem->free = value;
+            found++;
+        } else if (strcmp(key, "MemAvailable:") == 0) {
+            mem->available = value;
+            found++;
+        } else if (strcmp(key, "Buffers:") == 0) {
+            mem->buffers = value;
+            found++;
+        } else if (strcmp(key, "Cached:") == 0) {
+            mem->cached = value;
+            found++;
+        }
+
+        // 如果所有字段都已找到，提前退出
+        if (found >= 5) break;
     }
 
-    if(encoder_enalbe == 2)
-    {
-        
-        if((PE_DAT & 0x00000010) == 0x00000010)
-        {
-            if(encoder_low_flag == 0)
-            {
-                encoder_low_flag = 1;
-            }
-        }
-        else if((PE_DAT & 0x00000010) == 0x00000000)
-        {
-            if(encoder_low_flag == 1)
-            {
-                encoder_low_flag = 0;
-                encoder_count++;
-            }
-        }
-#endif
-
-    if(print_button_enable == 1)
-    {
-        //printf("key_value=0x%x\n",key_value);
-        //if((key_value >> 8) == ENCODER_KEY_NUM)
-        {
-            encoder_count++;
-            //printf("%u\n",encoder_count);
-            if(encoder_count> 1000)
-            {
-                //printf("ENCODER_KEY_NUM\n");
-
-                writeData = 0;
-                write(fd_gpio_in, &writeData, 1); 
-
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=(PE_DAT & 0XFFFFFF7F); //PE5,PE6,PE8,PE9,PE10,HIGH,PE7,LOW
-
-                //一列打印150个像素点
-                //一次上升沿打印7个地址位
-                //7*22=154
-                //打印第一列，获取A1所有的地址位
-                //单数喷嘴
-                //unsigned char print_data[22] = {0};
-                data = 0;
-        
-                //printf("column=%d\n",column);
-#if 0
-                set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_LOW);
-                set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_LOW);
-                set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
-                delay_100ns(1);
-                set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-                set_PH45_GPIO(PH45_595_SER1_NUM,PH45_GPIO_STATUS_HIGH);
-                set_PH45_GPIO(PH45_595_SER2_NUM,PH45_GPIO_STATUS_HIGH);
-#endif
-
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF)); //PE9,PE10,LOW
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,high
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFF9FF) | 0x00000600); //PE9,PE10,HIGH
-            
-#if 0
-                for(i=0;i<7;i++)
-                {
-                    delay_100ns(1);
-                    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_LOW);
-                    delay_100ns(1);
-                    set_PH45_GPIO(PH45_595_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-                }
-#endif
-                for(i=0;i<7;i++)
-                {
-                    delay_100ns(1);
-                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF)); //PE6,LOW
-                    delay_100ns(1);
-                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFBF) | 0X00000040); //PE6,high
-                }
-
-#if 0
-                set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_LOW);
-                delay_100ns(1);
-                set_PH45_GPIO(PH45_595_RCK_NUM,PH45_GPIO_STATUS_HIGH);
-#endif
-
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF)); //PE5,LOW
-                delay_100ns(1);
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFFDF) | 0X00000020); //PE5,high
-
-#if 0
-                for(i=0;i<21;i++)
-                {
-                    set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_LOW);
-                    delay_100ns(1);
-                    set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-                    delay_100ns(1);
-                }   
-#endif
-                for(i=0;i<21;i++)
-                {
-                    delay_100ns(1);
-                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF)); //PE8,LOW
-                    delay_100ns(1);
-                    PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	                *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF) | 0X00000100); //PE8,high
-                }   
-#if 0
-                set_PH45_GPIO(PH45_164_AB_NUM,PH45_GPIO_STATUS_HIGH);
-                set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_LOW);
-                delay_100ns(1);
-                set_PH45_GPIO(PH45_164_CLK_NUM,PH45_GPIO_STATUS_HIGH);
-#endif
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFF7F) | 0X00000080); //PE7,high
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF)); //PE8,LOW  
-                PE_DAT=*(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT);
-	            *(volatile unsigned int *)(map_base+GPIO_BASE_OFFSET+rPE_DAT)=((PE_DAT & 0XFFFFFEFF) | 0X00000100); //PE8,HIGH             
-
-                for(k=0;k<22;k++)
-                { 
-                    for (j = 0; j < printHeight; j++)
-                    {
-                        if (printBuffer[j * printWidth + column] == 1)
-                        {
-                            //printf("j=%d i=%d\n", j, i);
-                            data |= get_print_data_for_each_column(j, k, g_odd_even);
-                        }
-                    }
-                    //printf("A=%d data=%u\n", k+1,data);
-                    p_74hc595d(data);
-                    
-                    data = 0x00;
-                }
-#if 0
-                if(fd_ph45) 
-                {
-                    close(fd_ph45);
-                }
-                munmap(map_base,MAP_SIZE);//解除映射关系
-#endif
-                writeData = 1;
-                write(fd_gpio_in, &writeData, 1); 
-
-                column++;
-                if(column >= printWidth)
-                {
-                    encoder_enalbe = 0;
-                    buzzer_enable = 1;
-                    printf("end\n");
-                    lv_timer_enable(1);
-                    print_button_enable = 0;
-                    encoder_count = 0;
-                }
-            }
-            else
-            {
-                column = 0;
-            }
-
-        }      
-    }
+    fclose(fp);
+    return 0;
 }
-#endif
 
-#if 0
+// 示例：打印内存信息
+void print_memory_info(const MemoryInfo *mem) {
+    printf("Memory Info (KB):\n");
+    printf("  Total:     %lu\n", mem->total);
+    printf("  Free:      %lu\n", mem->free);
+    printf("  Available: %lu\n", mem->available);
+    printf("  Buffers:   %lu\n", mem->buffers);
+    printf("  Cached:    %lu\n", mem->cached);
 
-int get_max(int buf[],int len)
-{
-    int i;
-    int ret;
-    ret = buf[0];
-    for(i=0;i<len;i++)
-    {
-        if(ret < buf[i])
-        {
-            ret = buf[i];
-        }
-    }
-
-    return ret;
+    // 转换为 MB/GB 更友好显示（可选）
+    printf("\nHuman-readable:\n");
+    printf("  Total:     %.2f GB\n", mem->total / 1024.0 / 1024.0);
+    printf("  Available: %.2f GB\n", mem->available / 1024.0 / 1024.0);
 }
 
 
-void print_event_cb(lv_event_t *e)
-{
-    unsigned char *pdata = NULL;
-    unsigned char *pdata1 = NULL;
-    unsigned char *pdata2 = NULL;
-    unsigned char data = 0;
-    int i,j;
 
-    lv_event_code_t code = lv_event_get_code(e); /* 获取事件类型 */
-  
-    if (code == LV_EVENT_CLICKED)
-    {
-        printf("print_event_cb\n");
-        buzzer_enable = 1;
-        //get image
-        //Gets the width you want to print
-        if(print_button_enable == 0)
-        {
-            pdata = (unsigned char *)cbuf;
-
-            for(i=0;i<CANVAS_HEIGHT;i++)
-            {
-                for(j=CANVAS_WIDTH-1;j>=0;j--)
-                {
-                    data = *(pdata + (i*1024+j) * 4);
-                    if(data != 0xff)
-                    {
-                        print_width[i] = j;
-                        break;
-                    }
-                }
-            }
-    #if 0
-            for(i=0;i<CANVAS_HEIGHT;i++)
-            {
-                printf("%d\n",print_width[i]);
-            }
-    #endif
-            
-            print_data.data_width = get_max(print_width,CANVAS_HEIGHT);
-
-            pdata1 = (unsigned char *)cbuf;
-            print_data.data_hight = 0;
-            for(i=CANVAS_HEIGHT-1;i>=0;i--)
-            {
-                for(j=0;j<CANVAS_WIDTH;j++)
-                {
-                    data = *(pdata1 + (i*1024+j) * 4);
-                    if(data != 0xff)
-                    {
-                        print_data.data_hight = i;
-                        break;
-                    }
-                }
-                if(print_data.data_hight != 0)
-                {
-                    break;
-                }
-            }
-
-            printf("printWidth=%d printHeight=%d\n",print_data.data_width,print_data.data_hight);
-            print_data.nozzle = 0;
-            pdata2 = (unsigned char *)cbuf;
-            for(i=0;i<print_data.data_hight;i++)
-            {
-                for(j=0;j<print_data.data_width;j++)
-                {
-                    data = *(pdata2 + (i * 1024 + j)*4);
-                    if (data > 127)
-                    {
-                        print_data.data[i*print_data.data_width + j] = 0;
-                    }
-                    else
-                    {
-                        print_data.data[i*print_data.data_width + j] = 1;
-                    }
-                    //printf("%u ", print_data.data[i*print_data.data_width + j]);
-                }
-                //printf("\n");
-            }
-            print_button_enable  = 1;
-        }
-        else if(print_button_enable == 1)
-        {
-            print_button_enable = 0;
-        }
-    }
-}
-
-#endif
 
 static void timer_100ms_cb(lv_timer_t * t)
 {
@@ -2981,32 +2576,69 @@ static void timer_100ms_cb(lv_timer_t * t)
     static int time_count_1s = 0;
     static int adc_count_5s = 0;
     int voltage = 0;
+    char cmd[64]={0};
 
     time_count_1s++;
     if(time_count_1s >= 10)
     {
         time_count_1s = 0;
-        memset(databuf,0,sizeof(databuf));
-        databuf[0] = 0x02;
-        
-        retvalue = read(fd_bm8563, databuf, 6);
-        if(retvalue < 0)
+
+        if(read_writer_rtc_enable == 1)
         {
-            printf("fd_bm8563 Failed!\r\n");
-            close(fd_bm8563);
+            memset(databuf,0,sizeof(databuf));
+            databuf[0] = 0x02;
+            
+            retvalue = read(fd_bm8563, databuf, 6);
+            if(retvalue < 0)
+            {
+                printf("fd_bm8563 Failed!\r\n");
+                close(fd_bm8563);
+            }
+            
+            //printf("%u %u %u %u %u %u\n\r",databuf[0],databuf[1],databuf[2],databuf[3],databuf[4],databuf[5]);
+            sprintf(g_time_data_string,"%04u/%02u/%02u",2000+databuf[0],databuf[1],databuf[2]);
+            sprintf(g_time_time_string,"%02u:%02u:%02u",databuf[3],databuf[4],databuf[5]);
+            memcpy(g_system_time,databuf,6);
+            //printf("%u %u %u %u %u %u\n\r",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]); 
+            lv_label_set_text(Date_label, g_time_data_string);
+            lv_label_set_text(Time_label, g_time_time_string);
+
+            if(set_system_time_flag == 1)
+            {
+                sprintf(g_time_data_string,"%04u-%02u-%02u",2000+databuf[0],databuf[1],databuf[2]);
+                lv_label_set_text(label_btn_system_date, g_time_data_string);
+                sprintf(g_time_time_string,"%02u:%02u:%02u",databuf[3],databuf[4],databuf[5]);
+                lv_label_set_text(label_btn_system_time, g_time_time_string);            
+            }
+
+            if(set_linux_time_flag == 0)
+            {
+                set_linux_time_flag = 1;
+                printf("%u %u %u %u %u %u\n\r",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                //设置系统时间
+                snprintf(cmd, sizeof(cmd), "date -s '%04d-%02d-%02d %02d:%02d:%02d'", 2000+g_system_time[0],g_system_time[1],g_system_time[2], g_system_time[3],g_system_time[4],g_system_time[5]);
+                system(cmd);               
+            }
         }
-        
-        //printf("%u %u %u %u %u %u\n\r",databuf[0],databuf[1],databuf[2],databuf[3],databuf[4],databuf[5]);
-        sprintf(g_time_data_string,"%04u/%02u/%02u",2000+databuf[0],databuf[1],databuf[2]);
-        sprintf(g_time_time_string,"%02u:%02u:%02u",databuf[3],databuf[4],databuf[5]);
-        lv_label_set_text(Date_label, g_time_data_string);
-        lv_label_set_text(Time_label, g_time_time_string);
     }
 
     adc_count_5s++;
     if(adc_count_5s >= 500)
     {
         adc_count_5s = 0;
+    }
+
+    if((adc_count_5s %100) == 0)
+    {
+        MemoryInfo mem;
+        if (get_memory_info(&mem) == 0) 
+        {
+            print_memory_info(&mem);
+        } 
+        else 
+        {
+            printf("Failed to get memory info.\n");
+        }
     }
 
     if(adc_count_5s == 5)
@@ -3855,9 +3487,2582 @@ static void button_up_event_cb(lv_event_t* e)
 }
 
 
+
+static void btn_file_delete_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    char file_name[128]={0};
+    char image_name[128]={0};
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_file_delete_event_cb\n");
+
+        if(g_file_num > 0)
+        {
+            //删除选中的文件，重新新建表格
+            sprintf(file_name, "/media/file/%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0));
+            if (unlink(file_name) == -1)
+            {
+                perror("unlink");
+            }
+
+            // 获取表格的行数和列数
+            uint16_t row_cnt = lv_table_get_row_cnt(table_addition_picture_1);
+            uint16_t col_cnt = lv_table_get_col_cnt(table_addition_picture_1);
+
+            // 将选中行下方的所有行上移
+            for (uint16_t r = g_row; r < row_cnt - 1; r++)
+            {
+                for (uint16_t c = 0; c < col_cnt; c++)
+                {
+                    const char* value = lv_table_get_cell_value(table_addition_picture_1, r + 1, c);
+                    lv_table_set_cell_value(table_addition_picture_1, r, c, value);
+                }
+            }
+
+            // 删除最后一行
+            lv_table_set_row_cnt(table_addition_picture_1, row_cnt - 1);
+
+            // 刷新表格
+            lv_obj_invalidate(table_addition_picture_1);  // 刷新表格，触发重绘
+
+
+            memset(file_name,0,sizeof(file_name)); 
+            remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
+
+            printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,g_row,0));
+            sprintf(image_name,"/media/img/%s.bmp", file_name);
+
+            if (unlink(image_name) == -1)
+            {
+                perror("unlink");
+            }
+
+            g_file_num--;
+        }
+    }
+}
+
+
+static void btn_file_open_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_file_open_event_cb\n");
+    }
+}
+
+
+static void button_file_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_keyboard_return_event_cb\n");
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+    }
+}
+
+static void imgbtn_file_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("imgbtn_file_return_event_cb\n");
+        lv_obj_del(obj_addition_picture_head_bg);
+        lv_obj_del(label_addition_picture_head);
+        lv_obj_del(obj_addition_picture_preview_bg);
+        lv_obj_del(table_addition_picture);
+        lv_obj_del(win_content_typeface);   
+        lv_obj_del(typeface_slider_bg);   
+        lv_obj_del(obj_addition_table_bg);
+        lv_obj_del(left_stop_img_typeface);
+        lv_obj_del(right_stop_img_typeface);
+        lv_obj_del(slider_typeface);
+        lv_obj_del(obj_addition_picture_btn_bg);
+        lv_obj_del(btn_addition_picture_delete);
+        lv_obj_del(btn_addition_picture_open);
+        lv_obj_del(obj_addition_picture_bottom_bg);
+        lv_obj_del(img_addition_picture_search);
+        lv_obj_del(label_addition_picture_search);
+        lv_obj_del(label_btn_addition_picture_search);
+        lv_obj_del(btn_addition_picture_search);
+        lv_obj_del(label_addition_picture_return);
+        lv_obj_del(imgbtn_addition_picture_return);
+        lv_obj_del(imgbtn_addition_picture_confirm);
+        lv_obj_del(label_addition_picture_confirm);
+    }
+}
+
+
+static void imgbtn_file_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int win_content_child_num = 0;
+    int i;
+    char file_name[128]={ 0 };
+    char temp_typeface[128] = { 0 };
+    int word_space = 0;
+    int word_size = 0;
+    int x_size = 0;
+    int y_size = 0;
+    struct zint_symbol* my_symbol = NULL;
+    int str_len;
+    int width_len;
+    int height_len;
+    int width, height, channels;
+    unsigned char* pdata = NULL; 
+    unsigned char* pnew_data = NULL;
+    lv_obj_t* img = NULL;
+    lv_obj_t* temp_obj = NULL;
+    char tempString[32] = { 0 };
+    lv_point_t text_size;
+    lv_obj_t* label1; 
+    char bmp_name[64]={0};
+    char bmp_name_1[64]={0};  
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("imgbtn_file_confirm_event_cb\n");
+
+        win_content_child_num = lv_obj_get_child_cnt(win_content);
+
+        if(win_content_child_num != 0)
+        {
+            for(i=0;i<win_content_child_num;i++)
+            {
+                if((data_structure[i].type == TYPE_WORD)||(data_structure[i].type == TYPE_DATE))
+                {
+                    //删除所有数据
+                    lv_style_reset(&data_structure[i].data.word.style);
+                    lv_ft_font_destroy(data_structure[i].data.word.info.font);   
+                }
+                else if(data_structure[i].type == TYPE_PITCTURE)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_QR)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_BAR)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_COUNT)
+                {
+                    lv_style_reset(&data_structure[i].data.count.style);
+                    lv_ft_font_destroy(data_structure[i].data.count.info.font);  
+                }
+                else if(data_structure[i].type == TYPE_BREAK)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_SYMBOL)
+                {
+                    //删除所有数据
+                    lv_style_reset(&data_structure[i].data.word.style);
+                    lv_ft_font_destroy(data_structure[i].data.word.info.font);  
+                }
+            }   
+
+            for(i=0;i<win_content_child_num;i++)
+            {
+                lv_obj_del(lv_obj_get_child(win_content, 0)); 
+            }
+        }
+
+        memset(&data_structure, 0, sizeof(data_structure));
+
+
+        //获取文件名称
+        sprintf(file_name, "/media/file/%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0));
+
+        printf("file_name=%s\n\r",file_name);
+
+        // 打开文件以写入二进制数据
+        FILE* file = fopen(file_name, "rb");
+        if (file == NULL) 
+        {
+            perror("Failed to open file");
+        }
+        else
+        {
+            // 将结构体写入文件
+            size_t written = fread(&data_structure, sizeof(data_structure), 1, file);
+            if (written != 1) {
+                perror("Failed to read data to file");
+                fclose(file);
+                //
+                return EXIT_FAILURE;
+            }
+            else
+            {
+                // 关闭文件
+                fclose(file);
+
+                for(i = 0; i < NEW_TEXT_MAX_NUMBER; i++)
+                {
+                    printf("data_structure[%d].type=%d\n\r",i,data_structure[i].type);
+                    if(data_structure[i].type == 0)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        switch(data_structure[i].type)
+                        {
+                            case TYPE_WORD:
+                            case TYPE_DATE:
+
+                                temp_obj = lv_obj_create(win_content);          
+                                sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.word.typeface]);
+                                data_structure[i].data.word.info.name = temp_typeface;
+                                printf("%s\n\r", temp_typeface);
+                                data_structure[i].data.word.info.weight = data_structure[i].data.word.size;
+                                data_structure[i].data.word.info.style = data_structure[i].data.word.italic_bold;
+                                lv_ft_font_init(&data_structure[i].data.word.info);
+
+                                lv_txt_get_size(&text_size, data_structure[i].data.word.text, data_structure[i].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+                            
+                                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                                lv_style_init(&data_structure[i].data.word.style);
+                                lv_style_set_text_font(&data_structure[i].data.word.style, data_structure[i].data.word.info.font);
+                                word_space = data_structure[i].data.word.space;
+                                printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+
+                                x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+
+                                printf("x_size=%d\n\r", x_size);
+
+                                lv_obj_set_size(temp_obj, x_size, text_size.y);
+                                lv_obj_set_style_transform_angle(temp_obj, data_structure[i].data.word.spin*10, 0);
+
+                                if (data_structure[i].data.word.spin != 0)
+                                {
+                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                                }
+
+                                lv_style_set_text_letter_space(&data_structure[i].data.word.style, word_space);
+                                label1 = lv_label_create(temp_obj);
+                                lv_obj_add_style(label1, &data_structure[i].data.word.style, 0);
+                                lv_label_set_text(label1, data_structure[i].data.word.text);
+                                lv_obj_center(label1);     
+                                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+                                break;
+                            case TYPE_QR:
+
+                                str_len = strlen(data_structure[i].data.qr_bar.text) + 1;
+                                
+                                temp_obj = lv_obj_create(win_content);
+                                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                                my_symbol = ZBarcode_Create();
+
+                                switch (data_structure[i].data.qr_bar.symbology)
+                                {
+                                    case 0:
+                                    default:
+
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->symbology = BARCODE_QRCODE;
+                                        my_symbol->scale = 1;
+                                        my_symbol->option_1 = 2; //容错级别
+
+                                        if(str_len < 20)
+                                        {
+                                            my_symbol->option_2 = 1;
+                                        }
+                                        else if(str_len < 38)
+                                        {
+                                            my_symbol->option_2 = 2;
+                                        }
+                                        else if(str_len < 61)
+                                        {
+                                            my_symbol->option_2 = 3;
+                                        }
+                                        else if(str_len < 90)
+                                        {
+                                            my_symbol->option_2 = 4;
+                                        }
+                                        else if(str_len < 122)
+                                        {
+                                            my_symbol->option_2 = 5;
+                                        }
+
+                                        if( data_structure[i].data.qr_bar.figure== 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,data_structure[i].data.qr_bar.text,str_len);
+                                        }
+
+                                        if (data_structure[win_content_child_num].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 1:
+                            
+        #if 0
+                                width_len = atoi(lv_label_get_text(label_btn_addition_QR_code_width));
+
+                                if (width_len > 100)
+                                {
+                                    width_len = 100;
+                                }
+                                else if (width_len < 50)
+                                {
+                                    width_len = 50;
+                                }
+
+                                printf("width_len=%u\n\r",width_len);
+
+                                data_structure[win_content_child_num].data.qr_bar.width = width_len;
+        #endif
+                                        my_symbol->symbology = BARCODE_PDF417;
+                                        height_len =  data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+
+                                        //figure_borders = 0;
+                #if 0
+                                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                            //figure_borders |= 0x01;
+                                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                        }
+
+                                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                            //figure_borders |= 0x02;
+                                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                        }
+                #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                            
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        lv_obj_t* img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 2:
+                                        my_symbol->symbology = BARCODE_DATAMATRIX;
+                                        height_len =  data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+
+
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 3:
+                                        my_symbol->symbology = BARCODE_HANXIN;
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+            
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                }
+                                break;
+                            case TYPE_BAR:
+
+                                str_len = strlen(data_structure[i].data.qr_bar.text) + 1;
+                                
+                                temp_obj = lv_obj_create(win_content);
+                                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                                my_symbol = ZBarcode_Create();
+                                switch (data_structure[i].data.qr_bar.symbology )
+                                {
+                                    case 0:
+                                    default:
+                                        my_symbol->symbology = BARCODE_CODE39;
+                                        height_len =  data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 1:
+                                        my_symbol->symbology = BARCODE_CODE128;
+                                        height_len = data_structure[win_content_child_num].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+                                        //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 2:
+                                    case 3:
+                                        my_symbol->symbology = BARCODE_EANX;
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 4:
+                                        my_symbol->symbology = BARCODE_EAN128;
+                                        my_symbol->input_mode |= GS1PARENS_MODE;
+                                        height_len =  data_structure[i].data.qr_bar.height ;
+                                        my_symbol->scale = 1;
+
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+                                        strcpy(my_symbol->outfile, "out.bmp");
+
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+                                        //ZBarcode_Encode(my_symbol, (unsigned char *)"(01)98898765432106(3202)012345(15)991231", 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 5:
+                                        my_symbol->symbology = BARCODE_UPCA;
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+
+
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
+
+                                        break;
+                                    case 6:
+                                        my_symbol->symbology = BARCODE_UPCE;
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);     
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img); 
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+
+                                        break;
+                                    case 7:
+                                        my_symbol->symbology = BARCODE_ITF14;
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+
+                                        break;
+                                    case 8:
+                                        my_symbol->symbology = BARCODE_C25INTER;
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+                
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                        
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+
+                                        break;
+                                    case 9:
+                                        my_symbol->symbology = BARCODE_EAN14;
+                                        height_len = data_structure[i].data.qr_bar.height;
+                                        my_symbol->scale = 1;
+                                //figure_borders = 0;
+        #if 0
+                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    //figure_borders |= 0x01;
+                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+
+                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    //figure_borders |= 0x02;
+                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
+                                }
+        #endif
+
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        //ZBarcode_Delete(my_symbol);
+
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+                            
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        printf("scale=%lf\n\r", my_symbol->scale);
+        
+                                        strcpy(my_symbol->outfile, "out.bmp");
+                                        ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
+
+                                        ZBarcode_Print(my_symbol, 0);
+                                        ZBarcode_Delete(my_symbol);
+                                        stbi_image_free(pdata);
+                                
+                                        pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
+                                        printf("width=%d\n\r", width);
+                                        printf("height=%d\n\r", height);
+                                        printf("channels=%d\n\r", channels);
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
+                                        pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
+                                        if (!pnew_data) 
+                                        {
+                                            fprintf(stderr, "Memory allocation failed\n");
+                                            stbi_image_free(pdata);
+                                            return;
+                                        }
+                                        else
+                                        {
+                                            printf("lv_mem_alloc ok\n\r");
+                                        }
+
+                                        for (int y = 0; y < height; y++) 
+                                        {
+                                            for (int x = 0; x < width; x++) 
+                                            {
+                                                int index = y * width + x; // 计算当前像素在原始数据中的索引
+                                                unsigned char color = pdata[index]; // 获取当前像素的灰度值（0或255）
+                                                // 映射到RGBA值
+
+                                                if (color == 0)
+                                                {
+                                                    pnew_data[index * 4 + 0] = 0; // R
+                                                    pnew_data[index * 4 + 1] = 0; // G
+                                                    pnew_data[index * 4 + 2] = 0; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                                else
+                                                {
+                                                    pnew_data[index * 4 + 0] = 255; // R
+                                                    pnew_data[index * 4 + 1] = 255; // G
+                                                    pnew_data[index * 4 + 2] = 255; // B
+                                                    pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
+                                                }
+                                            }
+                                        }
+
+#if 0
+                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                                        lv_obj_center(img);
+#endif
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                                        // 使用data进行图像处理...
+                                        lv_mem_free(pnew_data);
+                                        stbi_image_free(pdata); // 释放内存
+
+                                        //显示图像
+                                        img = lv_img_create(temp_obj);
+                                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                                        lv_img_set_src(img, bmp_name_1);
+                                        lv_obj_center(img);
+
+                                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+
+                                        break;
+                                }
+                                break;
+                            case TYPE_PITCTURE:
+
+                                temp_obj = lv_obj_create(win_content);
+
+                                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                                // 假设你有一个图片对象
+                                lv_obj_t* img_obj = lv_img_create(temp_obj);
+                                lv_img_set_src(img_obj, data_structure[i].data.picture.text);
+
+                                lv_obj_align(img_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+
+                                // 获取图片对象
+                                lv_img_t* img = (lv_img_t*)img_obj;
+
+                                // 获取图片的源文件
+                                lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img->src;
+
+                                // 获取图片的宽和高
+                                lv_coord_t width = img_dsc->header.w;
+                                lv_coord_t height = img_dsc->header.h;
+
+                                // 打印宽和高
+                                printf("Image width: %d, height: %d\n", width, height);
+                                lv_obj_set_size(temp_obj, width, height);
+                                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                                break;
+                            case TYPE_BREAK:
+                                temp_obj = lv_obj_create(win_content);
+                                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_COVER, 0);
+                                lv_obj_set_style_bg_color(temp_obj, lv_color_hex(0xFF6A6A), LV_STATE_DEFAULT);
+                                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                                lv_obj_set_size(temp_obj, 5, 150);
+
+                                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                                break;
+                            case TYPE_COUNT:
+                                //保存所有数据
+                                //data_structure[win_content_child_num].data.count.law = lv_dropdown_get_selected(dropdown_addition_count_law);
+                                //data_structure[win_content_child_num].data.count.repetition = atoi(lv_label_get_text(label_btn_addition_count_times_repetition));
+
+                                temp_obj = lv_obj_create(win_content);
+                                sprintf(temp_typeface, "/media/%s", typeface_buf[data_structure[win_content_child_num].data.count.typeface]);
+                                data_structure[win_content_child_num].data.count.typeface = i;
+                                printf("%s\n", temp_typeface);
+                                data_structure[win_content_child_num].data.count.info.name = temp_typeface;
+                                data_structure[win_content_child_num].data.count.info.weight = data_structure[win_content_child_num].data.count.size;
+
+                                lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+
+                                printf("lead_zero=%d\n\r", data_structure[win_content_child_num].data.count.lead_zero);
+                                printf("law=%d\n\r", data_structure[win_content_child_num].data.count.law);
+
+                                //确定显示值的位数
+                                //递增
+                                if (data_structure[win_content_child_num].data.count.law == 0)
+                                {
+                                    if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                                    {
+                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                                    }
+                                    else if(data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                                    {
+                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                                    }
+
+                                    if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                                    {
+                                        formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                                    }
+                                    else
+                                    {
+                                        sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                                    }
+                                }
+                                else
+                                {
+                                    if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                                    {
+                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                                    }
+                                    else if (data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                                    {
+                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                                    }
+
+                                    if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                                    {
+                                        formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                                    }
+                                    else
+                                    {
+                                        sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                                    }       
+                                }
+
+                                printf("tempString=%s\n\r", tempString);
+
+                            
+                                lv_txt_get_size(&text_size, tempString, data_structure[win_content_child_num].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+                                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                                lv_style_init(&data_structure[win_content_child_num].data.count.style);
+                                lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, data_structure[win_content_child_num].data.count.info.font);
+
+                                word_space =  data_structure[win_content_child_num].data.count.space;
+
+                                printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+
+                                x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+
+                                printf("x_size=%d\n\r", x_size);
+
+                                lv_obj_set_size(temp_obj, x_size, text_size.y);
+
+                                lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
+                                label1 = lv_label_create(temp_obj);
+                                lv_obj_add_style(label1, &data_structure[win_content_child_num].data.count.style, 0);
+                                lv_label_set_text(label1, tempString);
+                                lv_obj_center(label1);
+        
+                                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+
+                                break;
+                            case TYPE_SYMBOL:
+                                temp_obj = lv_obj_create(win_content);
+
+                                sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
+                                //data_structure[win_content_child_num].data.word.typeface = 0;
+                                //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
+                                //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
+                                //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
+                                printf("%s\n", temp_typeface);
+
+                                data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+
+                                data_structure[win_content_child_num].data.word.info.weight = data_structure[win_content_child_num].data.word.size;
+
+                                data_structure[win_content_child_num].data.word.spin = 0;
+
+                                data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
+
+                                lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+
+                                lv_txt_get_size(&text_size, typeface_buf[0], data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+                                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                                lv_style_init(&data_structure[win_content_child_num].data.word.style);
+                                lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+
+                                lv_obj_set_size(temp_obj, text_size.x, text_size.y);
+
+                                label1 = lv_label_create(temp_obj);
+                                lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
+                                lv_label_set_text(label1, data_structure[win_content_child_num].data.word.text);
+                                lv_obj_center(label1);
+                                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                                break;
+                        }     
+                    }
+                }
+            }
+        }
+
+        lv_obj_del(obj_addition_picture_head_bg);
+        lv_obj_del(label_addition_picture_head);
+        lv_obj_del(obj_addition_picture_preview_bg);
+        lv_obj_del(table_addition_picture);
+        lv_obj_del(win_content_typeface);   
+        lv_obj_del(typeface_slider_bg);   
+        lv_obj_del(obj_addition_table_bg);
+        lv_obj_del(left_stop_img_typeface);
+        lv_obj_del(right_stop_img_typeface);
+        lv_obj_del(slider_typeface);
+        lv_obj_del(obj_addition_picture_btn_bg);
+        lv_obj_del(btn_addition_picture_delete);
+        lv_obj_del(btn_addition_picture_open);
+        lv_obj_del(obj_addition_picture_bottom_bg);
+        lv_obj_del(img_addition_picture_search);
+        lv_obj_del(label_addition_picture_search);
+        lv_obj_del(label_btn_addition_picture_search);
+        lv_obj_del(btn_addition_picture_search);
+        lv_obj_del(label_addition_picture_return);
+        lv_obj_del(imgbtn_addition_picture_return);
+        lv_obj_del(imgbtn_addition_picture_confirm);
+        lv_obj_del(label_addition_picture_confirm);
+    }
+}
+
+static void file_slider_event_cb(lv_event_t* e)
+{
+    lv_obj_t* target = lv_event_get_target(e); /* 获取触发源 */
+    lv_event_code_t code = lv_event_get_code(e); /* 获取事件类型 */
+    int32_t temp;
+    static int32_t temp_last = 0;
+    int x_data = 0;
+    if ((code == LV_EVENT_VALUE_CHANGED) && (print_status == 0))
+    {
+        temp = lv_slider_get_value(target);
+        printf("temp=%d\n", temp);
+
+        x_data = (100 - temp) * 6;
+
+        if (temp_last != temp)
+        {
+            lv_obj_set_pos(win_content_typeface, -15, -15 - x_data);//Limit drag boundaries 
+        }
+        temp_last = temp;
+    }
+}
+
+
+
+static void slider_show_file()
+{
+    static const lv_style_prop_t props[] = { LV_STYLE_BG_COLOR,0 };  //设置位置参数
+    static lv_style_transition_dsc_t transition_dsc;               //设置转换变量
+    lv_style_transition_dsc_init(&transition_dsc, props, lv_anim_path_linear, 200, 0, NULL); //初始化转换
+
+    static lv_style_t style_main;                                  //创建样式
+    static lv_style_t style_indicator;                             //创建样式
+    static lv_style_t style_knob;                                  //创建样式
+    static lv_style_t style_pressed_color;                         //创建样式
+    lv_style_init(&style_main);                                    //初始化样式
+    lv_style_set_bg_opa(&style_main, LV_OPA_TRANSP);                 //设置背景透明度
+    lv_style_set_bg_color(&style_main, lv_color_hex3(0xffffff));        //设置背景颜色
+    lv_style_set_size_A(&style_main, 20, 142);
+    lv_style_set_pad_ver(&style_main, 0);                          //设置上下边距
+    lv_style_init(&style_indicator);                               //初始化样式
+    lv_style_set_bg_opa(&style_indicator, LV_OPA_TRANSP);            //设置背景透明度
+    lv_style_set_bg_color(&style_indicator, lv_color_hex3(0xffffff));//设置背景颜色
+    lv_style_set_transition(&style_indicator, &transition_dsc);     //设置转化
+
+    LV_IMG_DECLARE(img_slider_typeface);
+
+    lv_style_init(&style_knob);                                    //初始化样式
+    lv_style_set_bg_opa(&style_knob, LV_OPA_TRANSP);                 //设置背景透明度
+    lv_style_set_bg_img_src(&style_knob, &img_slider_typeface);
+    lv_style_set_border_color(&style_knob, lv_palette_darken(LV_PALETTE_GREY, 3));//设置边框背景颜色
+    lv_style_set_border_width(&style_knob, 0);                      //设置边框宽度
+    lv_style_set_pad_all(&style_knob, 20);                           //设置边距
+    lv_style_set_size_A(&style_knob, 20, 10);
+    lv_style_set_transition(&style_knob, &transition_dsc);          //设置转化
+
+    lv_style_init(&style_pressed_color);                           //初始化样式
+    lv_style_set_bg_color(&style_pressed_color, lv_color_hex3(0xAAAAAA));//设置背景颜色
+
+    slider_typeface = lv_slider_create(lv_scr_act());            //创建滑块
+    lv_obj_remove_style_all(slider_typeface);                               //移除所有样式
+
+    lv_obj_add_style(slider_typeface, &style_main, LV_PART_MAIN);             //添加样式
+    lv_obj_add_style(slider_typeface, &style_indicator, LV_PART_INDICATOR);   //添加样式 指示器
+    lv_obj_add_style(slider_typeface, &style_pressed_color, LV_PART_INDICATOR | LV_STATE_PRESSED); //添加样式 指示器 按压状态
+    lv_obj_add_style(slider_typeface, &style_knob, LV_PART_KNOB);             //添加样式 圆头
+    lv_obj_add_style(slider_typeface, &style_pressed_color, LV_PART_KNOB | LV_STATE_PRESSED);      //添加样式 圆头 按压状态
+    lv_obj_align(slider_typeface, LV_ALIGN_TOP_LEFT, 460, 65);
+    //lv_obj_center(slider);                                         //居中显示
+    lv_obj_add_event_cb(slider_typeface, file_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_slider_set_value(slider_typeface, 100, LV_ANIM_ON);
+}
+
+
+// 检查文件是否为图片文件
+static int is_dat_file(const char *filename) 
+{
+    const char *ext = strrchr(filename, '.');
+    if (ext != NULL) 
+    {
+        if (strcmp(ext, ".dat") == 0)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+static void file_draw_event_cb(lv_event_t* e)
+{
+    lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+    /*If the cells are drawn...*/
+    if (dsc->part == LV_PART_ITEMS)
+    {
+        //printf("dsc->id=%d\n\r", dsc->id);
+        if ((dsc->id / 2) == g_row)
+        {
+            dsc->rect_dsc->bg_color = lv_color_hex(0x00FF00);  // 绿色
+            dsc->rect_dsc->bg_opa = LV_OPA_COVER;  // 完全不透明
+        }
+        else {
+            dsc->rect_dsc->bg_color = lv_color_hex(0xFFFFFF);  // 白色
+            dsc->rect_dsc->bg_opa = LV_OPA_COVER;  // 完全不透明
+        }
+    }
+}
+
+
+// 将月份名称转换为数字
+static int month_to_num(const char *month) {
+    const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    for (int i = 0; i < 12; i++) {
+        if (strcmp(month, months[i]) == 0) {
+            return i + 1; // 返回月份数字（1-12）
+        }
+    }
+    return 0; // 如果未找到，返回0
+}
+
+
+// 格式化时间字符串为年/月/日
+static void format_time(const char *ctime_str, char *output) {
+    char month[4];
+    int day, year;
+
+    // 从ctime字符串中提取月份、日期和年份
+    sscanf(ctime_str, "%*s %3s %d %*d:%*d:%*d %d", month, &day, &year);
+
+    // 将月份名称转换为数字
+    int month_num = month_to_num(month);
+
+    // 格式化输出为年/月/日（年份取后两位）
+    snprintf(output, 20, "%02d/%02d/%02d", year, month_num, day);
+}
+
+
+// 函数：去掉 .dat 后缀，结果通过指针输出
+void remove_dat_suffix(const char *filename, char *output) {
+    // 获取字符串长度
+    int length = strlen(filename);
+
+    // 检查字符串是否以 .dat 结尾
+    if (length >= 4 && strcmp(filename + length - 4, ".dat") == 0) {
+        // 去掉 .dat 后缀，复制到输出参数
+        strncpy(output, filename, length - 4);
+        output[length - 4] = '\0'; // 确保字符串以 \0 结尾
+    } else {
+        // 如果不是以 .dat 结尾，直接复制原字符串
+        strcpy(output, filename);
+    }
+}
+
+
+static int isSubstring(char* str, char* subStr) 
+{
+    if (strstr(str, subStr) != NULL) {
+        return 1;
+    }
+    return 0;
+}
+
+
+static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    char file_name[100]={0};
+    DIR *dir;
+    struct dirent *entry;
+    struct stat file_stat;
+    char path[128];
+    unsigned char picture_count = 0;
+    int picture_type = 0;
+    char created_time[20] ={0};
+    char size_str[20]; // 存储转换后的字符串
+    char image_name[50]; // 存储提取的图片名称
+    char file_name_short[100]={0};
+
+    code = lv_event_get_code(e);
+    int len = 0;
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_file_search_keyboard_confirm_event_cb\n");
+        //获取输入框数据给到文本显示框
+        lv_label_set_text(label_btn_addition_picture_search, lv_textarea_get_text(textarea_text_keyboard));
+        len = strlen(lv_label_get_text(label_btn_addition_picture_search));
+        printf("len=%d\n\r", len);
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        lv_obj_del(table_addition_picture_1);
+
+        static lv_style_t table_cell_style1;
+        lv_style_init(&table_cell_style1);
+        lv_style_set_pad_all(&table_cell_style1, 2); // 设置所有方向的填充为5像素
+
+        table_addition_picture_1 = lv_table_create(win_content_typeface);
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_add_style(table_addition_picture_1, &table_cell_style1, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
+
+        lv_table_set_col_width(table_addition_picture_1, 0, 210);
+        lv_table_set_col_width(table_addition_picture_1, 1, 90);
+
+        //重新绘制表格
+        if (len == 0)
+        {
+            DIR *dir;
+            struct dirent *entry;
+            struct stat file_stat;
+            char path[128];
+            //unsigned char picture_count = 0;
+            int picture_type = 0;
+            char created_time[20] ={0};
+            char size_str[20]; // 存储转换后的字符串
+            char image_name[128]; // 存储提取的图片名称
+
+            g_file_num = 0;
+
+            dir = opendir("/media/file");
+            if (dir == NULL) 
+            {
+                perror("opendir");
+                exit(EXIT_FAILURE);
+            }
+
+            while ((entry = readdir(dir)) != NULL) 
+            {
+                snprintf(path, sizeof(path), "%s/%s", "/media/file", entry->d_name);
+                if (stat(path, &file_stat) == -1) 
+                {
+                    perror("stat");
+                    continue;
+                }
+
+                if ((S_ISREG(file_stat.st_mode))&&(g_file_num < USB_PICTURE_NUMBER))
+                {  
+                    // 只处理普通文件
+                    if (is_dat_file(entry->d_name)) 
+                    {
+                        //print_file_info(entry->d_name, &file_stat);
+                        lv_table_set_cell_value(table_addition_picture_1, g_file_num, 0, entry->d_name);
+                        printf("Created: %s", ctime(&file_stat.st_ctime));
+                        format_time(ctime(&file_stat.st_ctime), created_time);
+                        printf("created_time=%s\n\r",created_time);
+                        lv_table_set_cell_value(table_addition_picture_1, g_file_num, 1, created_time);
+                        g_file_num++;
+                    }
+                }
+            }
+
+            closedir(dir);
+
+            remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
+
+            printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,g_row,0));
+            sprintf(image_name,"A:/media/img/%s.bmp", file_name);
+
+            //显示图片
+            picture_img = lv_img_create(obj_addition_picture_preview_bg);
+            lv_img_set_src(picture_img, image_name);
+            //lv_obj_align(picture_img, LV_ALIGN_CENTER, 0, 10);
+            //lv_img_set_zoom(picture_img, 128); 
+        }
+        else
+        {
+            //显示含有输入字符的内容
+            strcpy(file_name_short,lv_label_get_text(label_btn_addition_picture_search));
+
+            DIR *dir;
+            struct dirent *entry;
+            struct stat file_stat;
+            char path[128];
+            unsigned char picture_count = 0;
+            int picture_type = 0;
+            char created_time[20] ={0};
+            char size_str[20]; // 存储转换后的字符串
+            char image_name[128]; // 存储提取的图片名称
+
+            dir = opendir("/media/file");
+            if (dir == NULL) 
+            {
+                perror("opendir");
+                exit(EXIT_FAILURE);
+            }
+
+            while ((entry = readdir(dir)) != NULL) 
+            {
+                snprintf(path, sizeof(path), "%s/%s", "/media/file", entry->d_name);
+                if (stat(path, &file_stat) == -1) 
+                {
+                    perror("stat");
+                    continue;
+                }
+
+                if ((S_ISREG(file_stat.st_mode))&&(picture_count < USB_PICTURE_NUMBER)&&(isSubstring(entry->d_name,file_name_short)))
+                {  
+                    // 只处理普通文件
+                    if (is_dat_file(entry->d_name)) 
+                    {
+                        //print_file_info(entry->d_name, &file_stat);
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 0, entry->d_name);
+                        printf("Created: %s", ctime(&file_stat.st_ctime));
+                        format_time(ctime(&file_stat.st_ctime), created_time);
+                        printf("created_time=%s\n\r",created_time);
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, created_time);
+                        picture_count++;
+                    }
+                }
+            }
+
+            closedir(dir);
+
+            remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
+
+            printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,g_row,0));
+            sprintf(image_name,"A:/media/img/%s.bmp", file_name);
+
+            //显示图片
+            picture_img = lv_img_create(obj_addition_picture_preview_bg);
+            lv_img_set_src(picture_img, image_name);
+            //lv_obj_align(picture_img, LV_ALIGN_CENTER, 0, 10);
+            //lv_img_set_zoom(picture_img, 128); 
+        }
+    }
+}
+
+
+
+
+static void file_change_event_cb(lv_event_t* e)
+{
+    lv_obj_t* obj = lv_event_get_target(e);
+    uint16_t col;
+    uint16_t row;
+    char picture_name[128] = { 0 };
+    char picture_name_1[128] = { 0 };
+
+    lv_table_get_selected_cell(obj, &row, &col);
+    printf("row=%d\n\r", row);
+
+    g_row = row;
+    lv_obj_invalidate(obj);  // 刷新表格，触发重绘
+
+    remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),picture_name);
+    sprintf(picture_name_1,"A:/media/img/%s.bmp", picture_name);
+    
+    lv_img_set_src(picture_img, picture_name_1);
+    //lv_obj_align(picture_img, LV_ALIGN_CENTER, 0, 10);
+    //lv_img_set_zoom(picture_img, 128); 
+}
+
+static void btn_file_search_event_cb(lv_event_t* e)
+{
+     lv_event_code_t code;
+    int len;
+    code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_file_search_event_cb\n\r");
+        textarea_bg_keyboard = lv_obj_create(lv_scr_act());
+        /* 设置大小 */
+
+        lv_obj_set_size(textarea_bg_keyboard, 480, 272);
+        lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(textarea_bg_keyboard, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        //lv_obj_set_style_border_opa(file_management_win, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(textarea_bg_keyboard, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+
+        //输入框+键盘
+        LV_FONT_DECLARE(heiFont16_1);
+        pinyin_ime = lv_ime_pinyin_create(lv_scr_act());
+        lv_obj_set_style_text_font(pinyin_ime, &heiFont16_1, 0);
+        //lv_obj_set_style_text_font(pinyin_ime, &lv_font_simsun_16_cjk, 0);
+        //lv_ime_pinyin_set_dict(pinyin_ime, your_dict); // Use a custom dictionary. If it is not set, the built-in dictionary will be used.
+
+        textarea_text_keyboard = lv_textarea_create(lv_scr_act());
+        //lv_textarea_set_one_line(textarea_text_keyboard, true);
+        lv_obj_set_size(textarea_text_keyboard, 480, 95);
+        lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont16_1, 0);
+        lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_textarea_set_max_length(textarea_text_keyboard, 100);
+        //lv_textarea_set_placeholder_text(textarea_text_keyboard, "Smart printer");
+        //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
+        lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(textarea_text_keyboard, lv_color_hex(0xAAAAAA), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(textarea_text_keyboard, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(textarea_text_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+
+        len = strlen(lv_label_get_text(label_btn_addition_picture_search));
+
+        printf("len=%u\n\r", len);
+
+        if (strlen(lv_label_get_text(label_btn_addition_picture_search)) != 0)
+        {
+            lv_textarea_set_text(textarea_text_keyboard, lv_label_get_text(label_btn_addition_picture_search));
+        }
+
+        /*Create a keyboard and add it to ime_pinyin*/
+        text_edit_keyboard = lv_keyboard_create(lv_scr_act());
+        lv_ime_pinyin_set_keyboard(pinyin_ime, text_edit_keyboard);
+        lv_keyboard_set_textarea(text_edit_keyboard, textarea_text_keyboard);
+        //lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0xff4040), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0x1fadd3), LV_PART_MAIN);
+        lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, text_edit_keyboard);
+        lv_obj_align(text_edit_keyboard, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(text_edit_keyboard, 480, 133);
+
+        /*Get the cand_panel, and adjust its size and position*/
+        keyboard_cand_panel = lv_ime_pinyin_get_cand_panel(pinyin_ime);
+        lv_obj_set_size(keyboard_cand_panel, LV_PCT(100), LV_PCT(10));
+        lv_obj_align_to(keyboard_cand_panel, text_edit_keyboard, LV_ALIGN_OUT_TOP_MID, 0, 5);
+        lv_obj_set_style_bg_color(keyboard_cand_panel, lv_color_hex(0x8B1A1A), LV_PART_MAIN);
+        lv_obj_set_style_text_font(keyboard_cand_panel, &heiFont16_1, 0);
+
+        keyboard_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(keyboard_bg, 480, 24);
+        lv_obj_align(keyboard_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(keyboard_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(keyboard_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_keyboard_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_keyboard_return, "返回");
+        lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+        LV_IMG_DECLARE(get_back);
+        btn_keyboard_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_IMG_DECLARE(confirm);
+        btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_keyboard_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(btn_keyboard_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_keyboard_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(btn_keyboard_confirm, button_file_search_keyboard_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_keyboard_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_keyboard_confirm, "确定");
+        lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
+
+
 static void button_file_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+    char file_name[128]={0};
     code = lv_event_get_code(e);
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
@@ -3880,7 +6085,7 @@ static void button_file_event_cb(lv_event_t* e)
 
 
         obj_addition_picture_preview_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_picture_preview_bg, 240, 150);
+        lv_obj_set_size(obj_addition_picture_preview_bg, 240, 160);
         lv_obj_align(obj_addition_picture_preview_bg, LV_ALIGN_TOP_LEFT, 0, 24);
         lv_obj_set_style_border_width(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -3888,8 +6093,138 @@ static void button_file_event_cb(lv_event_t* e)
         lv_obj_remove_style(obj_addition_picture_preview_bg, 0, LV_PART_SCROLLBAR);
 
 
+        static lv_style_t table_cell_style;
+        lv_style_init(&table_cell_style);
+        lv_style_set_pad_all(&table_cell_style, 2); // 设置所有方向的填充为5像素
+
+        table_addition_picture = lv_table_create(lv_scr_act());
+        lv_obj_add_style(table_addition_picture, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
+        lv_table_set_cell_value(table_addition_picture, 0, 1, "时间");
+        lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 160, 24);
+        lv_table_set_col_width(table_addition_picture, 0, 210);
+        lv_table_set_col_width(table_addition_picture, 1, 90);
+
+
+
+        obj_addition_table_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_table_bg, 300, 203);
+        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 160, 45);
+        lv_obj_set_style_border_width(obj_addition_table_bg, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_table_bg, 0, LV_PART_SCROLLBAR);
+
+        win_content_typeface = lv_obj_create(obj_addition_table_bg);
+        lv_obj_set_size(win_content_typeface, 300, 500);
+        lv_obj_align(win_content_typeface, LV_ALIGN_TOP_LEFT, -16, -16);
+        lv_obj_set_style_bg_color(win_content_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(win_content_typeface, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(win_content_typeface, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(win_content_typeface, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(win_content_typeface, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_pad_all(win_content_typeface, 0, LV_STATE_DEFAULT);
+
+
+        table_addition_picture_1 = lv_table_create(win_content_typeface);
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_add_style(table_addition_picture_1, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
+
+        lv_table_set_col_width(table_addition_picture_1, 0, 210);
+        lv_table_set_col_width(table_addition_picture_1, 1, 90);
+
+        DIR *dir;
+        struct dirent *entry;
+        struct stat file_stat;
+        char path[128];
+        //unsigned char picture_count = 0;
+        int picture_type = 0;
+        char created_time[20] ={0};
+        char size_str[20]; // 存储转换后的字符串
+        char image_name[128]; // 存储提取的图片名称
+
+        g_file_num = 0;
+
+        dir = opendir("/media/file");
+        if (dir == NULL) 
+        {
+            perror("opendir");
+            exit(EXIT_FAILURE);
+        }
+
+        while ((entry = readdir(dir)) != NULL) 
+        {
+            snprintf(path, sizeof(path), "%s/%s", "/media/file", entry->d_name);
+            if (stat(path, &file_stat) == -1) 
+            {
+                perror("stat");
+                continue;
+            }
+
+            if ((S_ISREG(file_stat.st_mode))&&(g_file_num < USB_PICTURE_NUMBER))
+            {  
+                // 只处理普通文件
+                if (is_dat_file(entry->d_name)) 
+                {
+                    //print_file_info(entry->d_name, &file_stat);
+                    lv_table_set_cell_value(table_addition_picture_1, g_file_num, 0, entry->d_name);
+                    printf("Created: %s", ctime(&file_stat.st_ctime));
+                    format_time(ctime(&file_stat.st_ctime), created_time);
+                    printf("created_time=%s\n\r",created_time);
+                    lv_table_set_cell_value(table_addition_picture_1, g_file_num, 1, created_time);
+                    g_file_num++;
+                }
+            }
+        }
+
+        closedir(dir);
+
+        remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
+
+        printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,g_row,0));
+        sprintf(image_name,"A:/media/img/%s.bmp", file_name);
+
+        printf("file_name=%s\n\r", file_name);
+
+        //显示图片
+        picture_img = lv_img_create(obj_addition_picture_preview_bg);
+        lv_img_set_src(picture_img, image_name);
+
+        //lv_img_set_zoom(picture_img, 128); 
+
+        lv_obj_add_event_cb(table_addition_picture_1, file_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
+        lv_obj_add_event_cb(table_addition_picture_1, file_change_event_cb, LV_EVENT_PRESSED, NULL);
+
+
+        typeface_slider_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(typeface_slider_bg, 20, 224);
+        lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 460, 24);
+        lv_obj_set_style_border_width(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_radius(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT);
+
+        //左滑块停止
+        LV_IMG_DECLARE(left_stop_typeface);
+        left_stop_img_typeface = lv_img_create(lv_scr_act());
+        lv_img_set_src(left_stop_img_typeface, &left_stop_typeface);
+        lv_obj_align(left_stop_img_typeface, LV_ALIGN_TOP_LEFT, 460, 228);
+
+        slider_show_file();
+
+        //右滑块停止
+        LV_IMG_DECLARE(right_stop_typeface);
+        right_stop_img_typeface = lv_img_create(lv_scr_act());
+        lv_img_set_src(right_stop_img_typeface, &right_stop_typeface);
+        lv_obj_align(right_stop_img_typeface, LV_ALIGN_TOP_LEFT, 460, 24);
+
+
         obj_addition_picture_btn_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_picture_btn_bg, 240, 98);
+        lv_obj_set_size(obj_addition_picture_btn_bg, 160, 98);
         lv_obj_align(obj_addition_picture_btn_bg, LV_ALIGN_TOP_LEFT, 0, 174);
         lv_obj_set_style_border_width(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -3897,55 +6232,577 @@ static void button_file_event_cb(lv_event_t* e)
         lv_obj_remove_style(obj_addition_picture_btn_bg, 0, LV_PART_SCROLLBAR);
 
 
-        obj_addition_table_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_table_bg, 264, 224);
-        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 216, 24);
-        lv_obj_set_style_border_width(obj_addition_table_bg, 2, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_obj_remove_style(obj_addition_table_bg, 0, LV_PART_SCROLLBAR);
+        LV_IMG_DECLARE(picture_delete);
+        btn_addition_picture_delete = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_picture_delete, LV_IMGBTN_STATE_RELEASED, NULL, &picture_delete, NULL);
+        lv_obj_set_size(btn_addition_picture_delete, picture_delete.header.w, picture_delete.header.h);
+        lv_obj_align(btn_addition_picture_delete, LV_ALIGN_TOP_LEFT, 10, 180);
+        lv_obj_add_event_cb(btn_addition_picture_delete, btn_file_delete_event_cb, LV_EVENT_CLICKED, NULL);
+
+        //打开
+        LV_IMG_DECLARE(open_25_1);
+        btn_addition_picture_open = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_picture_open, LV_IMGBTN_STATE_RELEASED, NULL, &open_25_1, NULL);
+        lv_obj_set_size(btn_addition_picture_open, open_25_1.header.w, open_25_1.header.h);
+        lv_obj_align(btn_addition_picture_open, LV_ALIGN_TOP_LEFT, 90, 180);
+        lv_obj_add_event_cb(btn_addition_picture_open, imgbtn_file_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
 
-        table_addition_picture = lv_table_create(lv_scr_act());
+        obj_addition_picture_bottom_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_bottom_bg, 480, 24);
+        lv_obj_align(obj_addition_picture_bottom_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(obj_addition_picture_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_bottom_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_bottom_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_IMG_DECLARE(search);
+        img_addition_picture_search = lv_img_create(lv_scr_act());
+        lv_img_set_src(img_addition_picture_search, &search);
+        lv_obj_align(img_addition_picture_search, LV_ALIGN_TOP_LEFT, 10, 218);
+
         LV_FONT_DECLARE(heiFont16_1);
-        lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
-        lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
-        lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
-        lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
-        lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 216, 24);
-        lv_table_set_col_width(table_addition_picture, 0, 65);
-        lv_table_set_col_width(table_addition_picture, 1, 65);
-        lv_table_set_col_width(table_addition_picture, 2, 65);
-        lv_table_set_col_width(table_addition_picture, 3, 65);
+        label_addition_picture_search = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_search, "搜索");
+        lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 42, 222);
 
-        //遍历存储区
-        lv_fs_dir_t d;
-        if (lv_fs_dir_open(&d, "root:/file") == LV_FS_RES_OK)
-        {
-            printf("lv_fs_dir_open ok\n");
-            char b[100];
-            memset(b, 0, 100);
-            while (lv_fs_dir_read(&d, b) == LV_FS_RES_OK)
-            {
-                printf("%s\n", b);
-            }
-            lv_fs_dir_close(&d);
-        }
-        else
-        {
-            printf("lv_fs_dir_open error\n");
-        }
+
+        LV_FONT_DECLARE(heiFont16_1);
+        btn_addition_picture_search = lv_btn_create(lv_scr_act());
+        lv_obj_set_size(btn_addition_picture_search, 70, 24);
+        lv_obj_align(btn_addition_picture_search, LV_ALIGN_TOP_LEFT, 82, 218);
+        lv_obj_set_style_border_width(btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(btn_addition_picture_search, 10, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(btn_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        label_btn_addition_picture_search = lv_label_create(btn_addition_picture_search);
+        lv_obj_set_style_text_font(label_btn_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_btn_addition_picture_search, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
+        lv_label_set_text(label_btn_addition_picture_search, "");
+        lv_obj_align(label_btn_addition_picture_search, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_border_width(label_btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(label_btn_addition_picture_search, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(label_btn_addition_picture_search, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(label_btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_opa(label_btn_addition_picture_search, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(label_btn_addition_picture_search, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_add_event_cb(btn_addition_picture_search, btn_file_search_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_return, "返回");
+        lv_obj_align(label_addition_picture_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+
+        LV_IMG_DECLARE(get_back);
+        imgbtn_addition_picture_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_picture_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(imgbtn_addition_picture_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_picture_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(imgbtn_addition_picture_return, imgbtn_file_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_IMG_DECLARE(confirm);
+        imgbtn_addition_picture_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_picture_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(imgbtn_addition_picture_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(imgbtn_addition_picture_confirm, imgbtn_file_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_picture_confirm, "确定");
+        lv_obj_align(label_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
+
+
+
+static void button_save_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    int len = 0;
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_save_keyboard_return_event_cb\n");
+        //获取输入框数据给到文本显示框
+        lv_label_set_text(label_btn_addition_picture_search, lv_textarea_get_text(textarea_text_keyboard));
+        len = strlen(lv_label_get_text(label_btn_addition_picture_search));
+        printf("len=%d\n\r", len);
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+    }
+}
+
+
+// 保存截图为 BMP 文件的函数
+void save_as_bmp(const char *filename, const lv_img_dsc_t *img) {
+    FILE *file = fopen(filename, "wb");
+    if (!file) {
+        printf("Failed to open file for writing\n");
+        return;
+    }
+
+    // 缩小后的尺寸（原尺寸的 50%）
+    uint32_t new_width = img->header.w / 2;
+    uint32_t new_height = img->header.h / 2;
+
+    // BMP 文件头
+    uint32_t file_size = 54 + new_width * new_height * 3; // 54字节头 + 数据大小
+    uint32_t data_offset = 54;
+    uint32_t header_size = 40;
+    uint16_t planes = 1;
+    uint16_t bpp = 24; // 24位真彩色
+    uint32_t compression = 0;
+    uint32_t data_size = new_width* new_height * 3;
+    uint32_t temp_w = new_width;
+    uint32_t temp_h = new_height;
+
+    // 写入 BMP 文件头
+    fwrite("BM", 1, 2, file);
+    fwrite(&file_size, 4, 1, file);
+    fwrite("\0\0\0\0", 1, 4, file);
+    fwrite(&data_offset, 4, 1, file);
+    fwrite(&header_size, 4, 1, file);
+    //fwrite(&img->header.w, 4, 1, file);
+    //fwrite(&img->header.h, 4, 1, file);
+    fwrite(&temp_w, 4, 1, file);
+    fwrite(&temp_h, 4, 1, file);
+    fwrite(&planes, 2, 1, file);
+    fwrite(&bpp, 2, 1, file);
+    fwrite(&compression, 4, 1, file);
+    fwrite(&data_size, 4, 1, file);
+    fwrite("\0\0\0\0", 1, 4, file); // 保留字段
+    fwrite("\0\0\0\0", 1, 4, file); // 保留字段
+    fwrite("\0\0\0\0", 1, 4, file); // 保留字段
+    fwrite("\0\0\0\0", 1, 4, file); // 保留字段
+
+    // 写入像素数据
+    for (int y = img->header.h - 1; y >= 0; y-=2) {
+        for (int x = 0; x < img->header.w; x+=2) {
+            uint32_t pixel = ((uint32_t *)img->data)[y * img->header.w + x];
+            uint8_t b = pixel & 0xFF;
+            uint8_t g = (pixel >> 8) & 0xFF;
+            uint8_t r = (pixel >> 16) & 0xFF;
+            fwrite(&b, 1, 1, file);
+            fwrite(&g, 1, 1, file);
+            fwrite(&r, 1, 1, file);
+        }
+    }
+
+    fclose(file);
+}
+
+
+
+//#define STB_IMAGE_WRITE_IMPLEMENTATION
+//#include "stb_image_write.h"
+
+void save_as_png_stb(const char *filename, const lv_img_dsc_t *img) {
+    uint8_t *pixels = (uint8_t *)img->data;
+    int width = img->header.w;
+    int height = img->header.h;
+
+    // 如果是 ARGB8888，转换为 RGBA
+    uint8_t *rgba_data = NULL;
+    if (img->header.cf == LV_IMG_CF_TRUE_COLOR_ALPHA) {
+        rgba_data = (uint8_t *)lv_mem_alloc(width * height * 4);
+        for (int i = 0; i < width * height; i++) {
+            uint32_t pixel = ((uint32_t *)pixels)[i];
+            rgba_data[i * 4 + 0] = (pixel >> 16) & 0xFF; // R
+            rgba_data[i * 4 + 1] = (pixel >> 8) & 0xFF;  // G
+            rgba_data[i * 4 + 2] = pixel & 0xFF;         // B
+            rgba_data[i * 4 + 3] = (pixel >> 24) & 0xFF; // A
+        }
+        pixels = rgba_data;
+    }
+
+    // 使用 stb_image_write 保存 PNG
+    stbi_write_png(filename, width, height, 4, pixels, width * 4);
+
+    if (rgba_data) {
+        lv_mem_free(rgba_data);
+    }
+}
+
+
+
+
+void save_as_bmp_half_size(const char *filename, const lv_img_dsc_t *img) {
+    FILE *file = fopen(filename, "wb");
+    if (!file) {
+        perror("Failed to open file");
+        return;
+    }
+
+    // 缩小后的尺寸（原尺寸的 50%）
+    uint32_t new_width = img->header.w / 2;
+    uint32_t new_height = img->header.h / 2;
+
+    // BMP 行对齐计算（每行必须是 4 的倍数）
+    uint32_t row_size = (new_width * 3 + 3) & ~3; // 3 bytes per pixel (RGB)
+    uint32_t data_size = row_size * new_height;
+    uint32_t file_size = 54 + data_size; // 54字节头 + 数据大小
+
+    // BMP 文件头
+    uint8_t header[54] = {
+        'B', 'M',                             // 签名
+        file_size & 0xFF, (file_size >> 8) & 0xFF, (file_size >> 16) & 0xFF, (file_size >> 24) & 0xFF, // 文件大小
+        0, 0, 0, 0,                           // 保留
+        54, 0, 0, 0,                           // 像素数据偏移量
+        40, 0, 0, 0,                           // 信息头大小
+        new_width & 0xFF, (new_width >> 8) & 0xFF, (new_width >> 16) & 0xFF, (new_width >> 24) & 0xFF, // 宽度
+        new_height & 0xFF, (new_height >> 8) & 0xFF, (new_height >> 16) & 0xFF, (new_height >> 24) & 0xFF, // 高度
+        1, 0,                                  // 颜色平面数
+        24, 0,                                 // 每像素位数（24 = RGB）
+        0, 0, 0, 0,                            // 压缩方式
+        data_size & 0xFF, (data_size >> 8) & 0xFF, (data_size >> 16) & 0xFF, (data_size >> 24) & 0xFF, // 像素数据大小
+        0, 0, 0, 0,                            // 水平分辨率
+        0, 0, 0, 0,                            // 垂直分辨率
+        0, 0, 0, 0,                            // 调色板
+        0, 0, 0, 0                             // 重要颜色
+    };
+
+    // 写入文件头
+    fwrite(header, 1, 54, file);
+
+    // 写入像素数据（缩小 50% 并处理对齐）
+    uint8_t padding[3] = {0};
+    for (int y = img->header.h - 1; y >= 0; y -= 2) {      // 每隔一行采样
+        for (int x = 0; x < img->header.w; x += 2) {       // 每隔一列采样
+            uint32_t pixel = ((uint32_t *)img->data)[y * img->header.w + x];
+            uint8_t b = pixel & 0xFF;
+            uint8_t g = (pixel >> 8) & 0xFF;
+            uint8_t r = (pixel >> 16) & 0xFF;
+            fwrite(&b, 1, 1, file);
+            fwrite(&g, 1, 1, file);
+            fwrite(&r, 1, 1, file);
+        }
+        // 填充对齐字节（如果行字节数不是 4 的倍数）
+        if (row_size > new_width * 3) {
+            fwrite(padding, 1, row_size - new_width * 3, file);
+        }
+    }
+
+    fclose(file);
+    printf("BMP saved: %s (Size: %dx%d)\n", filename, new_width, new_height);
+}
+
+
+
+
+void save_as_bmp_half_size_fixed(const char* filename, const lv_img_dsc_t* img) {
+    // 检查输入
+    if (!img || img->header.cf != LV_IMG_CF_TRUE_COLOR_ALPHA) {
+        printf("Invalid image format\n");
+        return;
+    }
+
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        perror("Failed to open file");
+        return;
+    }
+
+    // 计算新尺寸
+    uint32_t new_width = img->header.w / 2;
+    uint32_t new_height = img->header.h / 2;
+
+    // BMP 行对齐计算（每行必须是4的倍数）
+    uint32_t row_stride = (new_width * 3 + 3) & ~3;
+    uint32_t image_size = row_stride * new_height;
+    uint32_t file_size = 54 + image_size;
+
+    // 准备BMP文件头
+    uint8_t header[54] = {0};
+    header[0] = 'B';
+    header[1] = 'M';
+    memcpy(header + 2, &file_size, 4);
+    header[10] = 54;  // 像素数据偏移
+    header[14] = 40;  // 信息头大小
+    memcpy(header + 18, &new_width, 4);
+    memcpy(header + 22, &new_height, 4);
+    header[26] = 1;   // 颜色平面数
+    header[28] = 24;  // 每像素位数
+    memcpy(header + 34, &image_size, 4);
+
+    // 写入文件头
+    fwrite(header, 1, 54, file);
+
+    // 准备行缓冲区
+    uint8_t* row_buffer = (uint8_t*)lv_mem_alloc(row_stride);
+    if (!row_buffer) {
+        fclose(file);
+        printf("Memory allocation failed\n");
+        return;
+    }
+
+    // 处理像素数据
+    const uint32_t* src = (const uint32_t*)img->data;
+    for (uint32_t y = 0; y < new_height; y++) {
+        uint8_t* dst = row_buffer;
+        for (uint32_t x = 0; x < new_width; x++) {
+            // 采样源图像(注意Y方向从下往上)
+            uint32_t src_y = img->header.h - 1 - y * 2;
+            uint32_t src_x = x * 2;
+            uint32_t pixel = src[src_y * img->header.w + src_x];
+            
+            // ARGB转BGR(忽略Alpha)
+            *dst++ = pixel & 0xFF;        // B
+            *dst++ = (pixel >> 8) & 0xFF; // G
+            *dst++ = (pixel >> 16) & 0xFF;// R
+        }
+        // 写入行数据
+        fwrite(row_buffer, 1, row_stride, file);
+    }
+
+    // 清理
+    lv_mem_free(row_buffer);
+    fclose(file);
+    printf("BMP saved: %s (%dx%d)\n", filename, new_width, new_height);
+}
+
+
+
+void save_as_bmp_half_size_noalloc(const char* filename, const lv_img_dsc_t* img) {
+    // 输入验证
+    if (!img || img->header.cf != LV_IMG_CF_TRUE_COLOR_ALPHA) {
+        printf("Invalid image format\n");
+        return;
+    }
+
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        perror("Failed to open file");
+        return;
+    }
+
+    // 计算新尺寸
+    uint32_t new_width = img->header.w / 2;
+    uint32_t new_height = img->header.h / 2;
+
+    // BMP行对齐计算（每行必须是4的倍数）
+    uint32_t row_stride = (new_width * 3 + 3) & ~3;
+    uint32_t image_size = row_stride * new_height;
+    uint32_t file_size = 54 + image_size;
+
+    // BMP文件头
+    uint8_t header[54] = {0};
+    header[0] = 'B';
+    header[1] = 'M';
+    memcpy(header + 2, &file_size, 4);
+    header[10] = 54;  // 像素数据偏移
+    header[14] = 40;  // 信息头大小
+    memcpy(header + 18, &new_width, 4);
+    memcpy(header + 22, &new_height, 4);
+    header[26] = 1;   // 颜色平面数
+    header[28] = 24;  // 每像素位数
+    memcpy(header + 34, &image_size, 4);
+
+    // 写入文件头
+    fwrite(header, 1, 54, file);
+
+    // 直接写入像素数据
+    const uint32_t* src = (const uint32_t*)img->data;
+    uint8_t pixel_buffer[3];  // 单个像素的BGR缓冲区
+    uint8_t padding[3] = {0}; // 对齐填充
+    
+    for (uint32_t y = 0; y < new_height; y++) {
+        // 从底部开始采样(Y方向翻转)
+        uint32_t src_y = img->header.h - 1 - y * 2;
+        
+        for (uint32_t x = 0; x < new_width; x++) {
+            uint32_t src_x = x * 2;
+            uint32_t pixel = src[src_y * img->header.w + src_x];
+            
+            // ARGB转BGR(忽略Alpha)
+            pixel_buffer[0] = pixel & 0xFF;        // B
+            pixel_buffer[1] = (pixel >> 8) & 0xFF; // G
+            pixel_buffer[2] = (pixel >> 16) & 0xFF;// R
+            
+            fwrite(pixel_buffer, 1, 3, file);
+        }
+        
+        // 写入对齐填充（如果需要）
+        uint32_t padding_size = row_stride - new_width * 3;
+        if (padding_size > 0) {
+            fwrite(padding, 1, padding_size, file);
+        }
+    }
+
+    fclose(file);
+    printf("BMP saved: %s (%dx%d)\n", filename, new_width, new_height);
+}
+
+
+
+static void button_save_keyboard_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    int len = 0;
+    char file_name[128] = { 0 };
+    char img_name[128] = { 0 };
+    static lv_img_dsc_t* snapshot_1 = NULL;
+    if (code == LV_EVENT_CLICKED)
+    {
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        printf("button_save_keyboard_confirm_event_cb\n");
+        //获取文件名称
+        sprintf(file_name, "/media/file/%s.dat", lv_textarea_get_text(textarea_text_keyboard));
+        // 打开文件以写入二进制数据
+        FILE* file = fopen(file_name, "wb");
+        if (file == NULL) {
+            perror("Failed to open file");
+            return EXIT_FAILURE;
+        }
+
+        // 将结构体写入文件
+        size_t written = fwrite(&data_structure, sizeof(data_structure), 1, file);
+        if (written != 1) {
+            perror("Failed to write data to file");
+            fclose(file);
+            return EXIT_FAILURE;
+        }
+        // 关闭文件
+        fclose(file);
+
+        //写图片
+        sprintf(img_name, "/media/img/%s.bmp", lv_textarea_get_text(textarea_text_keyboard));
+
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+
+        snapshot_1 = lv_snapshot_take(win_content, LV_IMG_CF_TRUE_COLOR_ALPHA);
+
+        //使用示例
+        //save_as_bmp(img_name, snapshot_1);
+        //save_as_bmp_half_size(img_name, snapshot_1);
+        save_as_bmp_half_size_noalloc(img_name, snapshot_1);
+        //save_as_png_stb(img_name,snapshot_1);
+        lv_mem_free(snapshot_1);
+    }
+}
+
 
 static void button_save_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+    int win_content_child_num = 0;
+    int len = 0;
     code = lv_event_get_code(e);
-    if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
+    if ((code == LV_EVENT_CLICKED)&& (print_status == 0))
     {
         printf("save\n");
+        //如果子控件数量大于0,才能保存
+        win_content_child_num = lv_obj_get_child_cnt(win_content);
+        if (win_content_child_num > 0)
+        {
+            //命名界面
+            textarea_bg_keyboard = lv_obj_create(lv_scr_act());
+
+            lv_obj_set_size(textarea_bg_keyboard, 480, 272);
+            lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+            lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+            lv_obj_set_style_border_color(textarea_bg_keyboard, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+            //lv_obj_set_style_border_opa(file_management_win, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+            lv_obj_set_style_radius(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+            lv_obj_set_style_bg_color(textarea_bg_keyboard, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+
+            //输入框+键盘
+            LV_FONT_DECLARE(heiFont16_1);
+            pinyin_ime = lv_ime_pinyin_create(lv_scr_act());
+            lv_obj_set_style_text_font(pinyin_ime, &heiFont16_1, 0);
+            //lv_obj_set_style_text_font(pinyin_ime, &lv_font_simsun_16_cjk, 0);
+            //lv_ime_pinyin_set_dict(pinyin_ime, your_dict); // Use a custom dictionary. If it is not set, the built-in dictionary will be used.
+
+            textarea_text_keyboard = lv_textarea_create(lv_scr_act());
+            //lv_textarea_set_one_line(textarea_text_keyboard, true);
+            lv_obj_set_size(textarea_text_keyboard, 480, 95);
+            lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont16_1, 0);
+            lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+            lv_textarea_set_max_length(textarea_text_keyboard, 100);
+            //lv_textarea_set_placeholder_text(textarea_text_keyboard, "Smart printer");
+            //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
+            lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+            lv_obj_set_style_border_color(textarea_text_keyboard, lv_color_hex(0xAAAAAA), LV_STATE_DEFAULT); /* 设置边框颜色 */
+            lv_obj_set_style_border_opa(textarea_text_keyboard, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+            lv_obj_set_style_radius(textarea_text_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+            lv_textarea_set_text(textarea_text_keyboard, "");
+
+            /*Create a keyboard and add it to ime_pinyin*/
+            text_edit_keyboard = lv_keyboard_create(lv_scr_act());
+            lv_ime_pinyin_set_keyboard(pinyin_ime, text_edit_keyboard);
+            lv_keyboard_set_textarea(text_edit_keyboard, textarea_text_keyboard);
+            //lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0xff4040), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0x1fadd3), LV_PART_MAIN);
+            lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, text_edit_keyboard);
+            lv_obj_align(text_edit_keyboard, LV_ALIGN_TOP_LEFT, 0, 115);
+            lv_obj_set_size(text_edit_keyboard, 480, 133);
+
+            /*Get the cand_panel, and adjust its size and position*/
+            keyboard_cand_panel = lv_ime_pinyin_get_cand_panel(pinyin_ime);
+            lv_obj_set_size(keyboard_cand_panel, LV_PCT(100), LV_PCT(10));
+            lv_obj_align_to(keyboard_cand_panel, text_edit_keyboard, LV_ALIGN_OUT_TOP_MID, 0, 5);
+            lv_obj_set_style_bg_color(keyboard_cand_panel, lv_color_hex(0x8B1A1A), LV_PART_MAIN);
+            lv_obj_set_style_text_font(keyboard_cand_panel, &heiFont16_1, 0);
+
+            keyboard_bg = lv_obj_create(lv_scr_act());
+            lv_obj_set_size(keyboard_bg, 480, 24);
+            lv_obj_align(keyboard_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+            lv_obj_set_style_border_width(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+            lv_obj_set_style_radius(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+            lv_obj_set_style_bg_color(keyboard_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+            lv_obj_remove_style(keyboard_bg, 0, LV_PART_SCROLLBAR);
+
+
+            LV_FONT_DECLARE(heiFont16_1);
+            label_keyboard_return = lv_label_create(lv_scr_act());
+            lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+            lv_label_set_text(label_keyboard_return, "返回");
+            lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+            LV_IMG_DECLARE(get_back);
+            btn_keyboard_return = lv_imgbtn_create(lv_scr_act());
+            lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+            lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
+            lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
+            lv_obj_add_event_cb(btn_keyboard_return, button_save_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+            LV_IMG_DECLARE(confirm);
+            btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
+            lv_imgbtn_set_src(btn_keyboard_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+            lv_obj_set_size(btn_keyboard_confirm, get_back.header.w, get_back.header.h);
+            lv_obj_align(btn_keyboard_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+            lv_obj_add_event_cb(btn_keyboard_confirm, button_save_keyboard_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+            LV_FONT_DECLARE(heiFont16_1);
+            label_keyboard_confirm = lv_label_create(lv_scr_act());
+            lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+            lv_label_set_text(label_keyboard_confirm, "确定");
+            lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+        }
     }
 }
 
@@ -4012,10 +6869,11 @@ static void drag_event_handler(lv_event_t* e)
 {
     lv_obj_t* obj = lv_event_get_target(e);
     lv_event_code_t code = lv_event_get_code(e);
+    int index = 0;
 
-    if(print_status == 1)
+    if (print_status == 1)
     {
-       return;
+        return;
     }
 
     if (code == LV_EVENT_PRESSING)
@@ -4029,45 +6887,91 @@ static void drag_event_handler(lv_event_t* e)
         lv_point_t vect;
         lv_indev_get_vect(indev, &vect);
 
-        lv_coord_t x = lv_obj_get_x(obj) + vect.x;
-                
-        if (x <= 0)
+        index = lv_obj_get_index(obj);
+
+        if (data_structure[index].type == TYPE_BREAK)
         {
-           x = 0;
+
+            lv_coord_t x = lv_obj_get_x(obj) + vect.x;
+
+            if (x <= 0)
+            {
+                x = 0;
+            }
+
+            if (x >= 1024)
+            {
+                x = 1024;
+            }
+
+            lv_obj_set_pos(obj, x, 0);
+            //printf("x=%u y=%u\n", x, y);
+            data_structure[index].x = x;
+        }
+        else
+        {
+            lv_coord_t x = lv_obj_get_x(obj) + vect.x;
+
+            if (x <= 0)
+            {
+                x = 0;
+            }
+
+            if (x >= 1024)
+            {
+                x = 1024;
+            }
+
+            lv_coord_t y = lv_obj_get_y(obj) + vect.y;
+
+            if (y <= 0)
+            {
+                y = 0;
+            }
+
+            if (y >= 150)
+            {
+                y = 150;
+            }
+            lv_obj_set_pos(obj, x, y);
+            //printf("x=%u y=%u\n", x, y);
+
+            data_structure[index].x = x;
+            data_structure[index].y = y;
         }
 
-        if (x >= 1024)
-        {
-           x = 1024;
-        }
-
-        lv_coord_t y = lv_obj_get_y(obj) + vect.y;
-
-        if (y <= 0)
-        {
-            y = 0;
-        }
-
-        if (y >= 150)
-        {
-            y = 150;
-        }
-
-        lv_obj_set_pos(obj, x, y);
+    
+      
     }
     else if (code == LV_EVENT_FOCUSED)
     {
-        lv_obj_t* label = lv_obj_get_child(obj, 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xff0000), LV_PART_MAIN);
-        temp_focused_obj = obj;
+        index = lv_obj_get_index(obj);
+        if (data_structure[index].type != TYPE_BREAK)
+        {
+            lv_obj_t* label = lv_obj_get_child(obj, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(0xff0000), LV_PART_MAIN);
+            temp_focused_obj = obj;
+
+            lv_coord_t x = lv_obj_get_x(obj);
+            lv_coord_t y = lv_obj_get_y(obj);
+            //printf("x=%u y=%u\n", x, y);
+        }
+
     }
     else if (code == LV_EVENT_DEFOCUSED)
     {
-        lv_obj_t* label = lv_obj_get_child(obj, 0);
-        lv_obj_set_style_text_color(label, lv_color_black(), LV_PART_MAIN);
+        index = lv_obj_get_index(obj);
+        if (data_structure[index].type != TYPE_BREAK)
+        {
+            lv_obj_t* label = lv_obj_get_child(obj, 0);
+            lv_obj_set_style_text_color(label, lv_color_black(), LV_PART_MAIN);
+
+            lv_coord_t x = lv_obj_get_x(obj);
+            lv_coord_t y = lv_obj_get_y(obj);
+            //printf("x=%u y=%u\n", x, y);
+        }
     }
 }
-
 //文本界面，默认字体，思源1
 //新建的时候，先收集数据
 //再依次更新
@@ -4194,6 +7098,7 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
             data_structure[win_content_child_num].data.word.size = word_size;
             data_structure[win_content_child_num].data.word.space = word_space;
             data_structure[win_content_child_num].data.word.italic_bold = data_structure[win_content_child_num].data.word.info.style;
+            data_structure[win_content_child_num].type = TYPE_WORD;
             printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
   
         }
@@ -4252,14 +7157,28 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
         lv_obj_del(btn_addition_text_spin);
 
         //删除添加界面
-        lv_obj_del(addition_head_bg);
-        lv_obj_del(label_addition_head);
-        lv_obj_del(addition_bottom_bg);
-        lv_obj_del(label_addition_middle_bg);
-        lv_obj_del(label_addition_return);
-        lv_obj_del(imgbtn_addition_return);
-        lv_obj_del(imgbtn_addition_confirm);
-        lv_obj_del(label_addition_confirm);
+        lv_obj_del(img_addition_bg);
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
     }
 }
 
@@ -6460,9 +9379,9 @@ static void button_count_current_value_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 999999999)
             {
-                i = 150;
+                i = 999999999;
             }
         }
 
@@ -6536,7 +9455,7 @@ static void btn_addition_count_current_value_event_cb(lv_event_t* e)
         lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
         lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
         //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
-        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
+        lv_textarea_set_max_length(pwd_text_area, 9); // 设置可输入的文本的最大长度
         lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
         lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
         lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
@@ -6630,9 +9549,9 @@ static void button_addition_count_minimum_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 999999999)
             {
-                i = 150;
+                i = 999999999;
             }
         }
 
@@ -6703,7 +9622,7 @@ static void btn_addition_count_minimum_event_cb(lv_event_t* e)
         lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
         lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
         //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
-        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
+        lv_textarea_set_max_length(pwd_text_area, 9); // 设置可输入的文本的最大长度
         lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
         lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
         lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
@@ -6797,9 +9716,9 @@ static void btn_addition_count_maximum_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 999999999)
             {
-                i = 150;
+                i = 999999999;
             }
         }
 
@@ -6872,7 +9791,7 @@ static void btn_addition_count_maximum_event_cb(lv_event_t* e)
         lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
         lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
         //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
-        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
+        lv_textarea_set_max_length(pwd_text_area, 9); // 设置可输入的文本的最大长度
         lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
         lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
         lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
@@ -7117,6 +10036,272 @@ static void btn_addition_count_step_event_cb(lv_event_t* e)
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
         lv_label_set_text(label_typeface_confirm, "确定");
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
+
+
+void formatNumberWithLeadingZeros(unsigned int a, unsigned int b, char *strA)
+{
+    // 计算两个数的位数（0的位数为1）
+    int digitsA = a == 0 ? 1 : (int)log10(a) + 1;
+    int digitsB = b == 0 ? 1 : (int)log10(b) + 1;
+
+    // 计算需要补零的个数
+    int zerosNeeded = digitsB > digitsA ? digitsB - digitsA : 0;
+    printf("a=%d\n\r", a);
+    printf("b=%d\n\r", b);
+    printf("digitsA=%d\n\r", digitsA);
+    printf("digitsB=%d\n\r", digitsB);
+    printf("zerosNeeded=%d\n\r", zerosNeeded);
+
+    // 格式化输出
+    if (zerosNeeded > 0)
+    {
+        sprintf(strA, "%0*d", digitsA + zerosNeeded, a);
+
+        printf("strA=%s\n\r", strA);
+    }
+    else
+    {
+        sprintf(strA, "%u", a);
+    }
+}
+
+
+static void btn_addition_count_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    char temp_typeface[128] = { 0 };
+    int i = 0;
+    int word_space = 0;
+    int word_size = 0;
+    int x_size = 0;
+    int y_size = 0;
+    int win_content_child_num = 0;
+    char tempString[32] = { 0 };
+
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_addition_count_confirm_event_cb\n");
+        win_content_child_num = lv_obj_get_child_cnt(win_content);
+        printf("win_content_child_num=%u\n\r", win_content_child_num);
+
+        if (win_content_child_num < NEW_TEXT_MAX_NUMBER)
+        {
+            //保存所有数据
+            data_structure[win_content_child_num].data.count.law = lv_dropdown_get_selected(dropdown_addition_count_law);
+            data_structure[win_content_child_num].data.count.repetition = atoi(lv_label_get_text(label_btn_addition_count_times_repetition));
+
+            lv_obj_t* temp_obj = lv_obj_create(win_content);
+
+            for (i = 0; i < TYPEFACE_NUMBER; i++)
+            {
+                if (strncmp(lv_label_get_text(label_btn_addition_count_typeface), typeface_name[i], strlen(lv_label_get_text(label_btn_addition_count_typeface))) == 0)
+                {
+                    break;
+                }
+            }
+
+            printf("i=%d\n", i);
+
+            sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
+            data_structure[win_content_child_num].data.count.typeface = i;
+            printf("%s\n", temp_typeface);
+            data_structure[win_content_child_num].data.count.info.name = temp_typeface;
+            word_size = atoi(lv_label_get_text(label_btn_addition_count_size));
+
+            if (word_size < 12)
+            {
+                word_size = 12;
+            }
+
+            if (word_size > 200)
+            {
+                word_size = 200;
+            }
+
+            data_structure[win_content_child_num].data.count.info.weight = word_size;
+
+            data_structure[win_content_child_num].data.count.info.style = FT_FONT_STYLE_NORMAL;
+
+            lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+
+            //当前值
+            data_structure[win_content_child_num].data.count.current_value = atoi(lv_label_get_text(label_btn_addition_count_current_value));
+            //最小值
+            data_structure[win_content_child_num].data.count.minimum = atoi(lv_label_get_text(label_btn_addition_count_minimum));
+            //最大值
+            data_structure[win_content_child_num].data.count.maximum = atoi(lv_label_get_text(label_btn_addition_count_maximum));
+            //前置0
+            data_structure[win_content_child_num].data.count.lead_zero = lv_dropdown_get_selected(dropdown_addition_count_lead_zero);
+            //步进值
+            data_structure[win_content_child_num].data.count.step = atoi(lv_label_get_text(label_btn_addition_count_step));
+
+            printf("lead_zero=%d\n\r", data_structure[win_content_child_num].data.count.lead_zero);
+            printf("law=%d\n\r", data_structure[win_content_child_num].data.count.law);
+
+            //确定显示值的位数
+            //递增
+            if (data_structure[win_content_child_num].data.count.law == 0)
+            {
+                if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                {
+                    data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                }
+                else if(data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                {
+                    data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                }
+
+                if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                {
+                    formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                }
+                else
+                {
+                    sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                }
+            }
+            else
+            {
+                if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                {
+                    data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                }
+                else if (data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                {
+                    data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                }
+
+                if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                {
+                    formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                }
+                else
+                {
+                    sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                }       
+            }
+
+            printf("tempString=%s\n\r", tempString);
+
+            lv_point_t text_size;
+            lv_txt_get_size(&text_size, tempString, data_structure[win_content_child_num].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_style_init(&data_structure[win_content_child_num].data.count.style);
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, data_structure[win_content_child_num].data.count.info.font);
+
+            word_space = atoi(lv_label_get_text(label_btn_addition_count_space));
+
+            if (word_space < 0)
+            {
+                word_space = 0;
+            }
+
+            if (word_space > 100)
+            {
+                word_space = 100;
+            }
+            printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+
+            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+
+            printf("x_size=%d\n\r", x_size);
+
+            lv_obj_set_size(temp_obj, x_size, text_size.y);
+
+            lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
+            lv_obj_t* label1 = lv_label_create(temp_obj);
+            lv_obj_add_style(label1, &data_structure[win_content_child_num].data.count.style, 0);
+            lv_label_set_text(label1, tempString);
+            lv_obj_center(label1);
+            data_structure[win_content_child_num].data.count.size = word_size;
+            data_structure[win_content_child_num].data.count.space = word_space;
+            data_structure[win_content_child_num].type = TYPE_COUNT;
+        }
+
+        lv_obj_del(addition_count_head_bg);
+        lv_obj_del(label_addition_count_head);
+        lv_obj_del(img_addition_count_law);
+        lv_obj_del(label_addition_count_law);
+        lv_obj_del(dropdown_addition_count_law);
+        lv_obj_del(img_addition_count_repetition);
+        lv_obj_del(label_addition_count_times_repetition);
+        lv_obj_del(label_btn_addition_count_times_repetition);
+        lv_obj_del(btn_addition_count_times_repetition);
+        lv_obj_del(img_addition_count_typeface);
+        lv_obj_del(label_addition_count_typeface);
+        lv_obj_del(label_btn_addition_count_typeface);
+        lv_obj_del(btn_addition_count_typeface);
+        lv_obj_del(img_addition_count_size);
+        lv_obj_del(label_addition_count_size);
+        lv_obj_del(label_btn_addition_count_size);
+        lv_obj_del(btn_addition_count_size);
+        lv_obj_del(img_addition_count_space);
+        lv_obj_del(label_addition_count_space);
+        lv_obj_del(label_btn_addition_count_space);
+        lv_obj_del(btn_addition_count_space);
+        lv_obj_del(img_addition_count_lead_zero);
+        lv_obj_del(label_addition_count_lead_zero);
+        lv_obj_del(dropdown_addition_count_lead_zero);
+        lv_obj_del(img_addition_count_current_value);
+        lv_obj_del(label_addition_count_current_value);
+        lv_obj_del(label_btn_addition_count_current_value);
+        lv_obj_del(btn_addition_count_current_value);
+        lv_obj_del(img_addition_count_minimum);
+        lv_obj_del(label_addition_count_minimum);
+        lv_obj_del(label_btn_addition_count_minimum);
+        lv_obj_del(btn_addition_count_minimum);
+        lv_obj_del(img_addition_count_maximum);
+        lv_obj_del(label_addition_count_maximum);
+        lv_obj_del(label_btn_addition_count_maximum);
+        lv_obj_del(btn_addition_count_maximum);
+        lv_obj_del(img_addition_count_step);
+        lv_obj_del(label_addition_count_step);
+        lv_obj_del(label_btn_addition_count_step);
+        lv_obj_del(btn_addition_count_step);
+        lv_obj_del(obj_addition_count_middle_bg);
+        lv_obj_del(label_addition_count_preview);
+        lv_obj_del(obj_addition_count_middle_bg_1);
+
+        lv_obj_del(obj_addition_count_bottom_bg);
+        lv_obj_del(label_addition_count_return);
+        lv_obj_del(imgbtn_addition_count_return);
+        lv_obj_del(imgbtn_addition_count_confirm);
+        lv_obj_del(label_addition_count_confirm);
+
+        //删除添加界面
+        lv_obj_del(img_addition_bg);
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
     }
 }
 
@@ -7550,7 +10735,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(imgbtn_addition_count_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
         lv_obj_set_size(imgbtn_addition_count_confirm, get_back.header.w, get_back.header.h);
         lv_obj_align(imgbtn_addition_count_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(imgbtn_addition_count_confirm, button_file_management_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(imgbtn_addition_count_confirm, btn_addition_count_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
         label_addition_count_confirm = lv_label_create(lv_scr_act());
@@ -7570,7 +10755,219 @@ static void btn_addition_subsection_event_cb(lv_event_t* e)
 
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
-        printf("button_addition_picture_event_cb\n");
+        printf("btn_addition_subsection_event_cb\n");
+        lv_event_code_t code;
+
+        code = lv_event_get_code(e);
+
+        unsigned char win_content_child_num;
+
+        if ((code == LV_EVENT_CLICKED) && (print_status == 0))
+        {
+            printf("button_addition_picture_event_cb\n");
+
+            win_content_child_num = lv_obj_get_child_cnt(win_content);
+
+            printf("win_content_child_num=%u\n\r", win_content_child_num);
+
+            if (win_content_child_num < NEW_TEXT_MAX_NUMBER)
+            {
+                lv_obj_t* temp_obj = lv_obj_create(win_content);
+
+                data_structure[win_content_child_num].type = TYPE_BREAK;
+
+                lv_obj_set_style_bg_opa(temp_obj, LV_OPA_COVER, 0);
+                lv_obj_set_style_bg_color(temp_obj, lv_color_hex(0xFF6A6A), LV_STATE_DEFAULT);
+                lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                lv_obj_set_size(temp_obj, 5, 150);
+            }
+
+            //删除添加界面
+            lv_obj_del(img_addition_bg);
+            lv_obj_del(btn_addition_text);
+            lv_obj_del(label_btn_addition_text);
+            lv_obj_del(btn_addition_date);
+            lv_obj_del(label_btn_addition_date);
+            lv_obj_del(btn_addition_picture);
+            lv_obj_del(label_btn_addition_picture);
+            lv_obj_del(btn_addition_QR_code);
+            lv_obj_del(label_btn_addition_QR_code);
+            lv_obj_del(btn_addition_bar_code);
+            lv_obj_del(label_btn_addition_bar_code);
+            lv_obj_del(btn_addition_count);
+            lv_obj_del(label_btn_addition_count);
+            lv_obj_del(btn_addition_subsection);
+            lv_obj_del(label_btn_addition_subsection);
+            lv_obj_del(btn_addition_symbol);
+            lv_obj_del(label_btn_addition_symbol);
+            lv_obj_del(btn_addition_icon);
+            lv_obj_del(label_btn_addition_icon);
+            lv_obj_del(btn_addition_more_functions);
+            lv_obj_del(label_btn_addition_more_functions);
+            lv_obj_del(btn_addition_return);
+        }
+    }
+}
+
+
+
+
+static void btn_addition_symbol_one_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    lv_obj_t* obj = lv_event_get_target(e);
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_FOCUSED)
+    {
+        //printf("btn_addition_symbol_one_event_cb LV_EVENT_FOCUSED\n");
+        lv_obj_t* label = lv_obj_get_child(obj, 0);
+        for (i = 0; i < SYMBOL_NUMBER; i++)
+        {
+            if (strncmp(lv_label_get_text(label), g_addition_symbol[i], strlen(lv_label_get_text(label))) == 0)
+            {
+                break;
+            }
+        }
+        g_symbol_flag = i;
+
+        printf("g_symbol_flag=%d\n\r", g_symbol_flag);
+
+        lv_obj_set_style_border_color(obj, lv_color_hex(0x00FF7F), LV_PART_MAIN); /* 设置边框颜色 */
+    }
+    else if (code == LV_EVENT_DEFOCUSED)
+    {
+        printf("btn_addition_symbol_one_event_cb LV_EVENT_DEFOCUSED\n");
+        //lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
+
+        lv_obj_set_style_border_color(obj, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
+    }
+}
+
+
+static void btn_addition_symbol_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    int win_content_child_num;
+    char temp_typeface[128] = { 0 };
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_addition_symbol_confirm_event_cb\n");
+
+        win_content_child_num = lv_obj_get_child_cnt(win_content);
+
+        printf("win_content_child_num=%u\n\r", win_content_child_num);
+
+        if (win_content_child_num < NEW_TEXT_MAX_NUMBER)
+        {
+            lv_obj_t* temp_obj = lv_obj_create(win_content);
+
+            sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
+            data_structure[win_content_child_num].data.word.typeface = 0;
+            //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
+            //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
+            //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
+            printf("%s\n", temp_typeface);
+
+            data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+            data_structure[win_content_child_num].data.word.info.weight = 20;
+            data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
+            lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+
+            printf("111111111111111111111\n");        
+
+
+            lv_point_t text_size;
+            lv_txt_get_size(&text_size, g_addition_symbol[g_symbol_flag], data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            
+            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+
+            printf("222222222222222222222222\n");        
+
+            lv_style_init(&data_structure[win_content_child_num].data.word.style);
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+
+            lv_obj_set_size(temp_obj, text_size.x, text_size.y);
+
+
+             printf("33333333333333333333333333333\n");        
+
+            lv_obj_t* label1 = lv_label_create(temp_obj);
+            lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
+            lv_label_set_text(label1, g_addition_symbol[g_symbol_flag]);
+            lv_obj_center(label1);
+
+
+             printf("4444444444444444444444444444\n");        
+            strncpy(data_structure[win_content_child_num].data.word.text, g_addition_symbol[g_symbol_flag], strlen(g_addition_symbol[g_symbol_flag]));
+            data_structure[win_content_child_num].data.word.size = 20;
+            printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
+            data_structure[win_content_child_num].type = TYPE_SYMBOL;
+
+             printf("255555555555555555555555\n");        
+        }
+
+        for (i = 0; i < SYMBOL_NUMBER; i++)
+        {
+            lv_obj_del(typeface_obj[i].obj_typeface_label);
+            lv_obj_del(typeface_obj[i].obj_typeface_btn);
+        }
+
+
+         printf("666666666666666666666\n");        
+
+        lv_obj_del(win_content_typeface);
+        lv_obj_del(win_obj_typeface);
+        lv_obj_del(file_management_head_bg);
+        lv_obj_del(label_file_management);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(label_typeface_confirm);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+
+         printf("77777777777777777777777777\n");        
+
+        //删除添加界面
+        lv_obj_del(img_addition_bg);
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
+
+         printf("888888888888888888888888888\n");        
     }
 }
 
@@ -7578,12 +10975,116 @@ static void btn_addition_subsection_event_cb(lv_event_t* e)
 static void btn_addition_symbol_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+    int len = 0;
+    int i;
+    int offset_address = 6;
+    int line_num = 8;
+    int size_wide = 22;
+    int size_high = 24;
+    char temp[4]={0};
 
     code = lv_event_get_code(e);
 
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
-        printf("button_addition_picture_event_cb\n");
+        printf("btn_addition_symbol_event_cb\n");
+
+        file_management_head_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(file_management_head_bg, 480, 24);
+        lv_obj_align(file_management_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(file_management_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(file_management_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(file_management_head_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(file_management_head_bg, 0, LV_PART_SCROLLBAR);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_file_management = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_file_management, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_file_management, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+        lv_label_set_text(label_file_management, "符号");
+        lv_obj_align(label_file_management, LV_ALIGN_TOP_LEFT, 200, 4);
+
+
+        win_obj_typeface = lv_obj_create(lv_scr_act());
+        lv_obj_align(win_obj_typeface, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_obj_set_size(win_obj_typeface, 480, 224);
+        lv_obj_set_style_bg_color(win_obj_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(win_obj_typeface, LV_OPA_COVER, LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(win_obj_typeface, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(win_obj_typeface, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(win_obj_typeface, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(win_obj_typeface, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+
+
+        win_content_typeface = lv_obj_create(win_obj_typeface);
+        lv_obj_set_size(win_content_typeface, 480, 224);
+        lv_obj_align(win_content_typeface, LV_ALIGN_TOP_LEFT, -15, -15);
+        lv_obj_set_style_bg_color(win_content_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(win_content_typeface, 2, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(win_content_typeface, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(win_content_typeface, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(win_content_typeface, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_pad_all(win_content_typeface, 0, LV_STATE_DEFAULT);
+
+        for (i = 0; i < SYMBOL_NUMBER; i++)
+        {
+            typeface_obj[i].obj_typeface_btn = lv_btn_create(win_content_typeface);
+            lv_obj_set_size(typeface_obj[i].obj_typeface_btn, size_wide, size_high);
+            lv_obj_align(typeface_obj[i].obj_typeface_btn, LV_ALIGN_TOP_LEFT, (i % 17 + 1) * 5 + (i % 17) * size_wide + 5, (i / 17 + 1) * 6 + i / 17 * size_high);
+            lv_obj_set_style_border_width(typeface_obj[i].obj_typeface_btn, 1, LV_PART_MAIN); /* 设置边框宽度 */
+            lv_obj_set_style_border_color(typeface_obj[i].obj_typeface_btn, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
+            lv_obj_set_style_radius(typeface_obj[i].obj_typeface_btn, 0, LV_PART_MAIN); /* 设置圆角 */
+            lv_obj_set_style_bg_color(typeface_obj[i].obj_typeface_btn, lv_color_hex(0xffffff), LV_PART_MAIN);
+            lv_obj_set_style_shadow_width(typeface_obj[i].obj_typeface_btn, 0, LV_PART_MAIN);
+            lv_obj_add_event_cb(typeface_obj[i].obj_typeface_btn, btn_addition_symbol_one_event_cb, LV_EVENT_ALL, NULL);
+
+            LV_FONT_DECLARE(heiFont16_1);
+            typeface_obj[i].obj_typeface_label = lv_label_create(typeface_obj[i].obj_typeface_btn);
+            lv_obj_set_style_text_font(typeface_obj[i].obj_typeface_label, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(typeface_obj[i].obj_typeface_label, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+            //sprintf(temp,"%s",g_addition_symbol[i]);
+            lv_label_set_text(typeface_obj[i].obj_typeface_label, g_addition_symbol[i]);
+            lv_obj_align(typeface_obj[i].obj_typeface_label, LV_ALIGN_CENTER, 0, 0);
+        }
+
+
+        keyboard_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(keyboard_bg, 480, 24);
+        lv_obj_align(keyboard_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(keyboard_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(keyboard_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_typeface_return, "返回");
+        lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+        LV_IMG_DECLARE(get_back);
+        btn_typeface_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(btn_typeface_return, button_typeface_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+        LV_IMG_DECLARE(confirm);
+        btn_typeface_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(btn_typeface_confirm, btn_addition_symbol_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_typeface_confirm, "确定");
+        lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
 static void btn_addition_icon_event_cb(lv_event_t* e)
@@ -7594,7 +11095,7 @@ static void btn_addition_icon_event_cb(lv_event_t* e)
 
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
-        printf("button_addition_picture_event_cb\n");
+        printf("btn_addition_icon_event_cb\n");
     }
 }
 
@@ -7607,7 +11108,7 @@ static void btn_addition_more_functions_event_cb(lv_event_t* e)
 
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
-        printf("button_addition_picture_event_cb\n");
+        printf("btn_addition_more_functions_event_cb\n");
     }
 }
 
@@ -7617,53 +11118,32 @@ static void imgbtn_addition_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("get_back\n");
-        lv_obj_del(file_management_win);
-        lv_obj_del(file_management_head_bg);
-        lv_obj_del(label_file_management_total_output);
-        lv_obj_del(label_file_management);
-        lv_obj_del(label_file_management_date);
-        lv_obj_del(label_file_management_time);
-        lv_obj_del(img_file_management_battery_level);
-        lv_obj_del(label_file_management_label);
-        lv_obj_del(file_management_middle_bg);
-        lv_obj_del(img_file_management_text);
-        lv_obj_del(label_file_management_text);
-        lv_obj_del(label_file_management_text_label);
-        lv_obj_del(img_file_management_typeface);
-        lv_obj_del(label_file_management_typeface);
-        lv_obj_del(label_file_management_typeface_label);
-        lv_obj_del(img_file_management_word_space);
-        lv_obj_del(label_file_management_word_space);
-        lv_obj_del(label_file_management_word_space_label);
-        lv_obj_del(img_file_management_word_size);
-        lv_obj_del(label_file_management_word_size);
-        lv_obj_del(label_file_management_word_size_label);
-        lv_obj_del(img_file_management_spin);
-        lv_obj_del(label_file_management_spin);
-        lv_obj_del(label_file_management_spin_label);
-        lv_obj_del(img_file_management_width);
-        lv_obj_del(label_file_management_width);
-        lv_obj_del(label_file_management_width_label);
-        lv_obj_del(img_file_management_bold);
-        lv_obj_del(label_file_management_bold);
-        lv_obj_del(sw_file_management_bold);
-
-        lv_obj_del(img_management_line_italic);
-        lv_obj_del(label_management_line_italic);
-        lv_obj_del(sw_management_line_italic);
-        lv_obj_del(file_management_bottom_bg);
-        lv_obj_del(label_file_management_return);
-        lv_obj_del(imgbtn_file_management_get_back);
-        lv_obj_del(imgbtn_file_management_confirm);
-        lv_obj_del(label_file_management_confirm);
-        lv_obj_del(btn_file_management_text);
-        lv_obj_del(btn_file_management_typeface);
-        lv_obj_del(btn_file_management_word_space_label);
-        lv_obj_del(btn_file_management_word_size_label);
+        printf("imgbtn_addition_return_event_cb\n");
+        lv_obj_del(img_addition_bg);
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
     }
 }
-
+#if 0
 static void imgbtn_addition_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -7829,7 +11309,7 @@ static void imgbtn_addition_confirm_event_cb(lv_event_t* e)
         lv_obj_del(btn_file_management_word_size_label);
     }
 }
-
+#endif
 
 
 static void button_time_keyboard_confirm_event_cb(lv_event_t* e)
@@ -8023,9 +11503,9 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     //int len = 0;
     int i = 0;
-    int now_year = 2025;
-    int now_month = 1;
-    int now_day = 10;
+    int now_year = g_system_time[0] + 2000;
+    int now_month = g_system_time[1];
+    int now_day = g_system_time[2];
     int size_wide = 108;
     int size_high = 40;
     char temp_str[20] = { 0 };
@@ -8204,9 +11684,9 @@ static void btn_addition_time_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     //int len = 0;
     int i = 0;
-    int now_hour = 15;
-    int now_minute = 50;
-    int now_second = 10;
+    int now_hour = g_system_time[3];
+    int now_minute = g_system_time[4];
+    int now_second = g_system_time[5];
     int size_wide = 108;
     int size_high = 40;
     char temp_str[20] = { 0 };
@@ -9014,6 +12494,219 @@ static void btn_date_time_word_space_event_cb(lv_event_t* e)
     }
 }
 
+
+
+
+//文本界面，默认字体，思源1
+//新建的时候，先收集数据
+//再依次更新
+static void button_date_time_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    char temp_typeface[128] = { 0 };
+    int i = 0;
+    int word_space = 0;
+    int word_size = 0;
+    int x_size = 0;
+    int y_size = 0;
+    int win_content_child_num = 0;
+
+
+    char tempString[128] = { 0 };
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_date_time_confirm_event_cb\n");
+
+        int len = strlen(lv_label_get_text(label_addition_date_middle)) + 1;
+        printf("len=%u\n\r", len);
+
+        win_content_child_num = lv_obj_get_child_cnt(win_content);
+
+        printf("win_content_child_num=%u\n\r", win_content_child_num);
+
+        if ((len > 1) && (win_content_child_num < NEW_TEXT_MAX_NUMBER))
+        {
+            lv_obj_t* temp_obj = lv_obj_create(win_content);
+
+            for (i = 0; i < TYPEFACE_NUMBER; i++)
+            {
+                if (strncmp(lv_label_get_text(label_btn_addition_date_typeface), typeface_name[i], strlen(lv_label_get_text(label_btn_addition_date_typeface))) == 0)
+                {
+                    break;
+                }
+            }
+
+            printf("i=%d\n\r",i);
+
+            sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
+            data_structure[win_content_child_num].data.word.typeface = i;
+
+            //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
+            //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
+            //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
+            printf("%s\n", temp_typeface);
+
+            data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+
+            word_size = atoi(lv_label_get_text(label_btn_addition_date_word_size));
+
+            if (word_size < 12)
+            {
+                word_size = 12;
+            }
+
+            if (word_size > 200)
+            {
+                word_size = 200;
+            }
+
+            data_structure[win_content_child_num].data.word.info.weight = word_size;
+
+            data_structure[win_content_child_num].data.word.spin = atoi(lv_label_get_text(label_btn_addition_date_spin));
+
+            data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
+
+            if (lv_obj_has_state(sw_addition_date_italic, LV_STATE_CHECKED) == 1)
+            {
+                data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_ITALIC;
+            }
+
+            if (lv_obj_has_state(sw_addition_date_bold, LV_STATE_CHECKED) == 1)
+            {
+                data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_BOLD;
+            }
+
+            lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+
+            lv_point_t text_size;
+            lv_txt_get_size(&text_size, lv_label_get_text(label_addition_date_middle), data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+
+            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_style_init(&data_structure[win_content_child_num].data.word.style);
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+
+            word_space = atoi(lv_label_get_text(label_btn_addition_date_word_space));
+
+            if (word_space < 0)
+            {
+                word_space = 0;
+            }
+
+            if (word_space > 100)
+            {
+                word_space = 100;
+            }
+            printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+
+            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+
+            printf("x_size=%d\n\r", x_size);
+
+            lv_obj_set_size(temp_obj, x_size, text_size.y);
+            lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.word.spin * 10, 0);
+
+            if (data_structure[win_content_child_num].data.word.spin != 0)
+            {
+                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+            }
+
+            lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.word.style, word_space);
+            lv_obj_t* label1 = lv_label_create(temp_obj);
+            lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
+            lv_label_set_text(label1, lv_label_get_text(label_addition_date_middle));
+            lv_obj_center(label1);
+            strncpy(data_structure[win_content_child_num].data.word.text, lv_label_get_text(label_addition_date_middle), len);
+            data_structure[win_content_child_num].data.word.size = word_size;
+            data_structure[win_content_child_num].data.word.space = word_space;
+            data_structure[win_content_child_num].data.word.italic_bold = data_structure[win_content_child_num].data.word.info.style;
+            printf("italic_bold=%d\n\r", data_structure[win_content_child_num].data.word.italic_bold);
+            printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
+
+            data_structure[win_content_child_num].type = TYPE_DATE;
+        }
+        else
+        {
+
+        }
+        
+        lv_obj_del(label_addition_date_time_confirm);
+        lv_obj_del(imgbtn_addition_date_time_confirm);
+        lv_obj_del(imgbtn_addition_date_time_return);
+        lv_obj_del(label_addition_date_time_return);
+        lv_obj_del(addition_date_bottom_bg);
+        lv_obj_del(sw_addition_date_italic);
+        lv_obj_del(label_addition_date_italic);
+        lv_obj_del(img_addition_date_italic);
+        lv_obj_del(sw_addition_date_bold);
+        lv_obj_del(label_addition_date_bold);
+        lv_obj_del(img_btn_addition_date_bold);
+        lv_obj_del(label_btn_addition_date_spin);
+        lv_obj_del(btn_addition_date_spin);
+        lv_obj_del(label_addition_date_spin);
+        lv_obj_del(img_addition_date_spin);
+
+        lv_obj_del(label_btn_addition_date_word_space);
+        lv_obj_del(btn_addition_date_word_space);
+        lv_obj_del(label_addition_date_word_space);
+        lv_obj_del(img_addition_date_word_space);
+        lv_obj_del(label_btn_addition_date_word_size);
+        lv_obj_del(btn_addition_date_word_size);
+        lv_obj_del(label_addition_date_word_size);
+        lv_obj_del(img_addition_date_word_size);
+        lv_obj_del(label_btn_addition_date_typeface);
+        lv_obj_del(btn_addition_date_typeface);
+        lv_obj_del(label_addition_date_typeface);
+        lv_obj_del(img_addition_date_typeface);
+        lv_obj_del(label_btn_label_addition_time);
+        lv_obj_del(btn_label_addition_time);
+        lv_obj_del(label_addition_time);
+        lv_obj_del(img_addition_time);
+        lv_obj_del(label_btn_addition_date_text);
+        lv_obj_del(btn_addition_date_text);
+        lv_obj_del(label_addition_date_text);
+        lv_obj_del(img_addition_date_text);
+        lv_obj_del(addition_date_middle_bg);
+        lv_obj_del(label_addition_date_middle_bg);
+        lv_obj_del(label_addition_date_middle);
+        lv_obj_del(label_addition_date_head);
+        lv_obj_del(addition_date_head_bg);
+
+
+        //删除添加界面
+        lv_obj_del(img_addition_bg);
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
+    }
+}
+
 /*
 10,134,45,139,95,136    250,134,285,139,338,136
 10,162,45,167,95,164
@@ -9143,7 +12836,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         lv_obj_set_style_radius(label_btn_addition_date_typeface, 0, LV_STATE_DEFAULT); /* 设置圆角 */
         lv_obj_set_style_bg_opa(label_btn_addition_date_typeface, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(label_btn_addition_date_typeface, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_add_event_cb(label_btn_addition_date_typeface, btn_date_time_typeface_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_addition_date_typeface, btn_date_time_typeface_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(word_size);
@@ -9266,7 +12959,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         lv_obj_set_style_radius(label_btn_addition_date_word_space, 0, LV_STATE_DEFAULT); /* 设置圆角 */
         lv_obj_set_style_bg_opa(label_btn_addition_date_word_space, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(label_btn_addition_date_word_space, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_add_event_cb(label_btn_addition_date_word_space, btn_date_time_word_space_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_addition_date_word_space, btn_date_time_word_space_event_cb, LV_EVENT_CLICKED, NULL);
 
 
 
@@ -9353,7 +13046,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(imgbtn_addition_date_time_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
         lv_obj_set_size(imgbtn_addition_date_time_confirm, get_back.header.w, get_back.header.h);
         lv_obj_align(imgbtn_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(imgbtn_addition_date_time_confirm, button_file_management_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(imgbtn_addition_date_time_confirm, button_date_time_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
         label_addition_date_time_confirm = lv_label_create(lv_scr_act());
@@ -9370,29 +13063,40 @@ static void button_addition_date_event_cb(lv_event_t* e)
 static void btn_addition_picture_delete_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int i;
-    lv_obj_t* obj = lv_event_get_target(e);
-    code = lv_event_get_code(e);
-    if (code == LV_EVENT_FOCUSED)
-    {
-        printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
-        lv_obj_t* label = lv_obj_get_child(obj, 0);
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
 
-        for (i = 0; i < TYPEFACE_NUMBER; i++)
+    char picture_name[128] = { 0 };
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_addition_picture_delete_event_cb\n");
+
+        //删除选中的文件，重新新建表格
+        sprintf(picture_name, "/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+        if (unlink(picture_name) == -1)
         {
-            if (strncmp(lv_label_get_text(label), typeface_name[i], strlen(lv_label_get_text(label))) == 0)
+            perror("unlink");
+        }
+
+        // 获取表格的行数和列数
+        uint16_t row_cnt = lv_table_get_row_cnt(table_addition_picture_1);
+        uint16_t col_cnt = lv_table_get_col_cnt(table_addition_picture_1);
+
+        // 将选中行下方的所有行上移
+        for (uint16_t r = g_row; r < row_cnt - 1; r++)
+        {
+            for (uint16_t c = 0; c < col_cnt; c++)
             {
-                break;
+                const char* value = lv_table_get_cell_value(table_addition_picture_1, r + 1, c);
+                lv_table_set_cell_value(table_addition_picture_1, r, c, value);
             }
         }
-        g_typeface = i;
-        printf("g_typeface=%d\n", g_typeface);
-    }
-    else if (code == LV_EVENT_DEFOCUSED)
-    {
-        printf("button_typeface_event_cb LV_EVENT_DEFOCUSED\n");
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
+
+        // 删除最后一行
+        lv_table_set_row_cnt(table_addition_picture_1, row_cnt - 1);
+
+        // 刷新表格
+        lv_obj_invalidate(table_addition_picture_1);  // 刷新表格，触发重绘
     }
 }
 
@@ -9428,142 +13132,458 @@ static void btn_addition_picture_open_event_cb(lv_event_t* e)
 }
 
 
-static void btn_addition_picture_search_event_cb(lv_event_t* e)
+// 检查文件是否为图片文件
+static int is_image_file(const char *filename) 
+{
+    const char *ext = strrchr(filename, '.');
+    if (ext != NULL) 
+    {
+#if 0
+        if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
+            strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
+            strcmp(ext, ".bmp") == 0 || strcmp(ext, ".tiff") == 0) 
+#endif
+        if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
+            strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
+            strcmp(ext, ".bmp") == 0) 
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+static int get_image_file_type(const char *filename) 
+{
+    const char *ext = strrchr(filename, '.');
+    if (ext != NULL) 
+    {
+        if(strcmp(ext, ".jpg") == 0)
+        {
+            return 0;
+        }
+        else if(strcmp(ext, ".jpeg") == 0)
+        {
+            return 1;
+        }
+        else if(strcmp(ext, ".png") == 0)
+        {
+            return 2;
+        }
+        else if(strcmp(ext, ".gif") == 0)
+        {
+            return 3;
+        }
+        else if(strcmp(ext, ".bmp") == 0) 
+        {
+            return 4;
+        }
+    }
+    return 0;
+}
+
+// 打印文件信息
+static void print_file_info(const char *filename, const struct stat *file_stat) {
+    printf("File: %s\n", filename);
+    printf("Type: %s\n", is_image_file(filename) ? "Image" : "Other");
+    printf("Size: %lld bytes\n", file_stat->st_size);
+    printf("Created: %s", ctime(&file_stat->st_ctime));
+    printf("\n");
+}
+
+
+
+static void picture_draw_event_cb(lv_event_t* e)
+{
+    lv_obj_draw_part_dsc_t* dsc = lv_event_get_draw_part_dsc(e);
+    /*If the cells are drawn...*/
+    if (dsc->part == LV_PART_ITEMS)
+    {
+        //printf("dsc->id=%d\n\r", dsc->id);
+        if ((dsc->id / 4) == g_row)
+        {
+            dsc->rect_dsc->bg_color = lv_color_hex(0x00FF00);  // 绿色
+            dsc->rect_dsc->bg_opa = LV_OPA_COVER;  // 完全不透明
+        }
+        else {
+            dsc->rect_dsc->bg_color = lv_color_hex(0xFFFFFF);  // 白色
+            dsc->rect_dsc->bg_opa = LV_OPA_COVER;  // 完全不透明
+        }
+    }
+}
+
+static void picture_change_event_cb(lv_event_t* e)
+{
+    lv_obj_t* obj = lv_event_get_target(e);
+    uint16_t col;
+    uint16_t row;
+    char picture_name[128] = { 0 };
+
+    lv_table_get_selected_cell(obj, &row, &col);
+    printf("row=%d\n\r", row);
+
+    g_row = row;
+    lv_obj_invalidate(obj);  // 刷新表格，触发重绘
+
+
+    sprintf(picture_name,"A:/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+    
+    lv_img_set_src(picture_img, picture_name);
+}
+
+
+
+
+
+
+
+// 将文件大小转换为合适的单位（B/K/M/G），保留一位小数
+static void size_to_human_readable(long size, char *output, size_t output_size) {
+    const char *units[] = {"B", "K", "M", "G"};
+    double size_converted = size;
+    int unit_index = 0;
+
+    // 自动选择合适的单位
+    while (size_converted >= 1024 && unit_index < 3) {
+        size_converted /= 1024;
+        unit_index++;
+    }
+
+    // 格式化为字符串，保留一位小数
+    snprintf(output, output_size, "%.1f%s", size_converted, units[unit_index]);
+}
+
+
+// 获取图片名称（去掉类型和点号）
+static void get_image_name(const char *filename, char *output, size_t output_size) 
+{
+    // 查找最后一个点号的位置
+    const char *dot = strrchr(filename, '.');
+
+    if (dot != NULL) {
+        // 计算名称的长度
+        size_t name_length = dot - filename;
+
+        // 确保名称长度不超过输出缓冲区大小
+        if (name_length < output_size) {
+            // 复制名称部分到输出缓冲区
+            strncpy(output, filename, name_length);
+            output[name_length] = '\0'; // 添加字符串结束符
+        } else {
+            // 如果名称过长，截断并添加结束符
+            strncpy(output, filename, output_size - 1);
+            output[output_size - 1] = '\0';
+        }
+    } else {
+        // 如果没有点号，直接复制整个字符串
+        strncpy(output, filename, output_size - 1);
+        output[output_size - 1] = '\0';
+    }
+}
+
+
+
+
+
+
+static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+    char file_name[100]={0};
+    DIR *dir;
+    struct dirent *entry;
+    struct stat file_stat;
+    char path[128];
+    unsigned char picture_count = 0;
+    int picture_type = 0;
+    char created_time[20] ={0};
+    char size_str[20]; // 存储转换后的字符串
+    char image_name[50]; // 存储提取的图片名称
+    char file_name_short[100]={0};
 
     code = lv_event_get_code(e);
-    lv_obj_t* obj = lv_event_get_target(e);
+    int len = 0;
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_picture_search_keyboard_confirm_event_cb\n");
+        //获取输入框数据给到文本显示框
+        lv_label_set_text(label_btn_addition_picture_search, lv_textarea_get_text(textarea_text_keyboard));
+        len = strlen(lv_label_get_text(label_btn_addition_picture_search));
+        printf("len=%d\n\r", len);
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        lv_obj_del(table_addition_picture_1);
+
+        static lv_style_t table_cell_style1;
+        lv_style_init(&table_cell_style1);
+        lv_style_set_pad_all(&table_cell_style1, 2); // 设置所有方向的填充为5像素
+
+        table_addition_picture_1 = lv_table_create(win_content_typeface);
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_add_style(table_addition_picture_1, &table_cell_style1, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
+
+        lv_table_set_col_width(table_addition_picture_1, 0, 120);
+        lv_table_set_col_width(table_addition_picture_1, 1, 45);
+        lv_table_set_col_width(table_addition_picture_1, 2, 55);
+        lv_table_set_col_width(table_addition_picture_1, 3, 75);
+
+        //重新绘制表格
+        if (len == 0)
+        {
+            //显示所有内容
+            dir = opendir("/mnt");
+            if (dir == NULL) 
+            {
+                perror("opendir");
+                exit(EXIT_FAILURE);
+            }
+
+            while ((entry = readdir(dir)) != NULL) 
+            {
+                snprintf(path, sizeof(path), "%s/%s", "/mnt", entry->d_name);
+                if (stat(path, &file_stat) == -1) 
+                {
+                    perror("stat");
+                    continue;
+                }
+
+                if ((S_ISREG(file_stat.st_mode))&&(picture_count < USB_PICTURE_NUMBER))
+                {  
+                    // 只处理普通文件
+                    if (is_image_file(entry->d_name)) 
+                    {
+                        print_file_info(entry->d_name, &file_stat);
+                        get_image_name(entry->d_name, image_name, sizeof(image_name));
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 0, image_name);
+                        picture_type = get_image_file_type(entry->d_name);
+                        printf("picture_type=%d\n\r",picture_type);
+                        switch(picture_type)
+                        {
+                            case 0:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "jpg");
+                                break;
+                            case 1:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "jpeg");
+                                break;
+                            case 2:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "png");
+                                break;
+                            case 3:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "gif");
+                                break;
+                            case 4:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "bmp");
+                                break;
+                        }
+                        size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
+                        format_time(ctime(&file_stat.st_ctime), created_time);
+                        lv_table_set_cell_value(table_addition_picture, picture_count, 3, created_time);
+                        memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
+                        picture_count++;
+                    }
+                }
+            }
+
+            closedir(dir);
+
+            lv_obj_add_event_cb(table_addition_picture_1, picture_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
+            lv_obj_add_event_cb(table_addition_picture_1, picture_change_event_cb, LV_EVENT_PRESSED, NULL);
+
+            printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,0,0));
+            sprintf(file_name,"A:/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+
+            //显示图片
+            picture_img = lv_img_create(obj_addition_picture_preview_bg);
+            lv_img_set_src(picture_img, file_name);
+        }
+        else
+        {
+            //显示含有输入字符的内容
+            strcpy(file_name_short,lv_label_get_text(label_btn_addition_picture_search));
+
+            dir = opendir("/mnt");
+            if (dir == NULL) 
+            {
+                perror("opendir");
+                exit(EXIT_FAILURE);
+            }
+
+            while ((entry = readdir(dir)) != NULL) 
+            {
+                snprintf(path, sizeof(path), "%s/%s", "/mnt", entry->d_name);
+                if (stat(path, &file_stat) == -1) 
+                {
+                    perror("stat");
+                    continue;
+                }
+
+                if ((S_ISREG(file_stat.st_mode))&&(picture_count < USB_PICTURE_NUMBER)&&(isSubstring(entry->d_name,file_name_short)))
+                {  
+                    // 只处理普通文件
+                    if (is_image_file(entry->d_name)) 
+                    {
+                        print_file_info(entry->d_name, &file_stat);
+                        get_image_name(entry->d_name, image_name, sizeof(image_name));
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 0, image_name);
+                        picture_type = get_image_file_type(entry->d_name);
+                        printf("picture_type=%d\n\r",picture_type);
+                        switch(picture_type)
+                        {
+                            case 0:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "jpg");
+                                break;
+                            case 1:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "jpeg");
+                                break;
+                            case 2:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "png");
+                                break;
+                            case 3:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "gif");
+                                break;
+                            case 4:
+                                lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "bmp");
+                                break;
+                        }
+                        size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
+                        format_time(ctime(&file_stat.st_ctime), created_time);
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 3, created_time);
+                        memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
+                        picture_count++;
+                    }
+                }
+            }
+
+            closedir(dir);
+
+            lv_obj_add_event_cb(table_addition_picture_1, picture_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
+            lv_obj_add_event_cb(table_addition_picture_1, picture_change_event_cb, LV_EVENT_PRESSED, NULL);
+
+            printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,0,0));
+            sprintf(file_name,"A:/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+
+            //显示图片
+            picture_img = lv_img_create(obj_addition_picture_preview_bg);
+            lv_img_set_src(picture_img, file_name);
+        }
+    }
+}
+
+
+static void btn_addition_picture_search_event_cb(lv_event_t* e)
+{
+     lv_event_code_t code;
+    int len;
+    code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED)
     {
-        typeface_head_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(typeface_head_bg, 480, 24);
-        lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_set_style_border_width(typeface_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(typeface_head_bg, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
-        lv_obj_set_style_radius(typeface_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_color(typeface_head_bg, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+        printf("btn_addition_picture_search_event_cb\n\r");
+        textarea_bg_keyboard = lv_obj_create(lv_scr_act());
+        /* 设置大小 */
 
+        lv_obj_set_size(textarea_bg_keyboard, 480, 272);
+        lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(textarea_bg_keyboard, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        //lv_obj_set_style_border_opa(file_management_win, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(textarea_bg_keyboard, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+
+        //输入框+键盘
         LV_FONT_DECLARE(heiFont16_1);
-        label_typeface_head = lv_label_create(lv_scr_act());
-        lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
+        pinyin_ime = lv_ime_pinyin_create(lv_scr_act());
+        lv_obj_set_style_text_font(pinyin_ime, &heiFont16_1, 0);
+        //lv_obj_set_style_text_font(pinyin_ime, &lv_font_simsun_16_cjk, 0);
+        //lv_ime_pinyin_set_dict(pinyin_ime, your_dict); // Use a custom dictionary. If it is not set, the built-in dictionary will be used.
 
-        if (obj == btn_file_management_word_space_label)
-        {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
-        }
-        else if (obj == btn_file_management_word_size_label)
-        {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
-        }
+        textarea_text_keyboard = lv_textarea_create(lv_scr_act());
+        //lv_textarea_set_one_line(textarea_text_keyboard, true);
+        lv_obj_set_size(textarea_text_keyboard, 480, 95);
+        lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont16_1, 0);
+        lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_textarea_set_max_length(textarea_text_keyboard, 100);
+        //lv_textarea_set_placeholder_text(textarea_text_keyboard, "Smart printer");
+        //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
+        lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(textarea_text_keyboard, lv_color_hex(0xAAAAAA), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(textarea_text_keyboard, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(textarea_text_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
 
-        typeface_slider_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(typeface_slider_bg, 480, 224);
-        lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
-        lv_obj_set_style_border_width(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT); /* 设置边框颜色 */
-        lv_obj_set_style_radius(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT);
+        len = strlen(lv_label_get_text(label_btn_addition_picture_search));
 
-        //数字键盘
-        pwd_text_area = lv_textarea_create(lv_scr_act());
-        if (pwd_text_area == NULL)
+        printf("len=%u\n\r", len);
+
+        if (strlen(lv_label_get_text(label_btn_addition_picture_search)) != 0)
         {
-            printf("[%s:%d] create pwd_text_area obj failed\n", __FUNCTION__, __LINE__);
-            return;
+            lv_textarea_set_text(textarea_text_keyboard, lv_label_get_text(label_btn_addition_picture_search));
         }
 
-        // 密码框样式
-        static lv_style_t pwd_text_style;
-        lv_style_init(&pwd_text_style); // 初始化样式
-        lv_style_set_radius(&pwd_text_style, 0); // 设置样式的圆角弧度
-        lv_style_set_border_width(&pwd_text_style, 1); // 设置边框宽度
-        lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
-        lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
-        //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
-        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
-        lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
-        lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
-        lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
-        lv_obj_align(pwd_text_area, LV_ALIGN_TOP_LEFT, 0, 24);
+        /*Create a keyboard and add it to ime_pinyin*/
+        text_edit_keyboard = lv_keyboard_create(lv_scr_act());
+        lv_ime_pinyin_set_keyboard(pinyin_ime, text_edit_keyboard);
+        lv_keyboard_set_textarea(text_edit_keyboard, textarea_text_keyboard);
+        //lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0xff4040), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0x1fadd3), LV_PART_MAIN);
+        lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, text_edit_keyboard);
+        lv_obj_align(text_edit_keyboard, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(text_edit_keyboard, 480, 133);
 
-        // 基于键盘背景对象创建密码校验提示标签
-        hint_label = lv_label_create(lv_scr_act());
-        if (hint_label == NULL)
-        {
-            printf("[%s:%d] create hint_label obj failed\n", __FUNCTION__, __LINE__);
-            return;
-        }
+        /*Get the cand_panel, and adjust its size and position*/
+        keyboard_cand_panel = lv_ime_pinyin_get_cand_panel(pinyin_ime);
+        lv_obj_set_size(keyboard_cand_panel, LV_PCT(100), LV_PCT(10));
+        lv_obj_align_to(keyboard_cand_panel, text_edit_keyboard, LV_ALIGN_OUT_TOP_MID, 0, 5);
+        lv_obj_set_style_bg_color(keyboard_cand_panel, lv_color_hex(0x8B1A1A), LV_PART_MAIN);
+        lv_obj_set_style_text_font(keyboard_cand_panel, &heiFont16_1, 0);
 
-        // 密码提示文本样式
-        static lv_style_t hint_label_style;
-        lv_style_init(&hint_label_style); // 初始化样式
-        lv_style_set_radius(&hint_label_style, 0); // 设置样式的圆角弧度
-        lv_style_set_border_width(&hint_label_style, 0); //设置边框宽度
-        lv_style_set_text_color(&hint_label_style, lv_palette_main(LV_PALETTE_RED));  // 字体颜色设置为红色
-        lv_style_set_text_font(&hint_label_style, &lv_font_montserrat_12); //设置字体
-        lv_label_set_long_mode(hint_label, LV_LABEL_LONG_SCROLL_CIRCULAR); // 长文本循环滚动
-        lv_obj_add_style(hint_label, &hint_label_style, 0); // 给btn_label添加样式
-        lv_obj_align(hint_label, LV_ALIGN_TOP_MID, 0, 110); // 顶部居中显示
-        lv_label_set_text(hint_label, ""); // 设置文本内容
-
-        // 基于键盘背景对象创建键盘对象
-        pwd_keyboard = lv_keyboard_create(lv_scr_act());
-        if (pwd_keyboard == NULL)
-        {
-            printf("[%s:%d] create pwd_keyboard obj failed\n", __FUNCTION__, __LINE__);
-            return;
-        }
-
-        //键盘样式
-        static lv_style_t pwd_kb_style;
-        lv_style_init(&pwd_kb_style); // 初始化样式
-        lv_style_set_radius(&pwd_kb_style, 5); // 设置样式的圆角弧度
-        lv_style_set_border_width(&pwd_kb_style, 0); //设置边框宽度
-        lv_style_set_bg_color(&pwd_kb_style, lv_color_hex(0xF98E2D));
-        lv_style_set_text_opa(&pwd_kb_style, LV_OPA_COVER);
-        lv_style_set_text_font(&pwd_kb_style, &lv_font_montserrat_20); //设置字体
-        lv_obj_set_size(pwd_keyboard, 480, 174); //设置键盘大小
-        lv_keyboard_set_mode(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2); //设置键盘模式为数字键盘
-        lv_keyboard_set_map(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2, keyboard_map, keyboard_ctrl); // 设置键盘映射
-        lv_keyboard_set_textarea(pwd_keyboard, pwd_text_area); // 键盘对象和文本框绑定
-        lv_obj_add_style(pwd_keyboard, &pwd_kb_style, 0); // 添加样式
-        lv_obj_align(pwd_keyboard, LV_ALIGN_TOP_LEFT, 0, 74);
+        keyboard_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(keyboard_bg, 480, 24);
+        lv_obj_align(keyboard_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(keyboard_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(keyboard_bg, 0, LV_PART_SCROLLBAR);
 
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_typeface_return = lv_label_create(lv_scr_act());
-        lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
-        lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
+        label_keyboard_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_keyboard_return, "返回");
+        lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
-        btn_typeface_return = lv_imgbtn_create(lv_scr_act());
-        lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
-        lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
-        lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
-
+        btn_keyboard_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_IMG_DECLARE(confirm);
-        btn_typeface_confirm = lv_imgbtn_create(lv_scr_act());
-        lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
-        lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
-        lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(btn_typeface_confirm, button_word_space_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+        btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_keyboard_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(btn_keyboard_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_keyboard_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(btn_keyboard_confirm, button_picture_search_keyboard_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_typeface_confirm = lv_label_create(lv_scr_act());
-        lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
-        lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+        label_keyboard_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_keyboard_confirm, "确定");
+        lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
 
@@ -9627,82 +13647,21 @@ static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    char temp_typeface[128] = { 0 };
-    int i = 0;
-    int word_space = 0;
-    int word_size = 0;
-    int x_size = 0;
-    //int y_size = 0;
     int win_content_child_num = 0;
+    char tempString[128] = { 0 };
+    char picture_name[100] = { 0 };
 
-
-    //char tempString[128] = { 0 };
     if (code == LV_EVENT_CLICKED)
     {
-        printf("\nbutton_file_management_confirm_event_cb\n");
-
-        int len = strlen(lv_label_get_text(label_file_management_label)) + 1;
-        printf("len=%u\n\r", len);
+        printf("imgbtn_addition_picture_confirm_event_cb\n");
 
         win_content_child_num = lv_obj_get_child_cnt(win_content);
 
         printf("win_content_child_num=%u\n\r", win_content_child_num);
 
-        if ((len > 1) && (win_content_child_num < NEW_TEXT_MAX_NUMBER))
+        if(win_content_child_num < NEW_TEXT_MAX_NUMBER)
         {
             lv_obj_t* temp_obj = lv_obj_create(win_content);
-
-            for (i = 0; i < TYPEFACE_NUMBER; i++)
-            {
-                if (strncmp(lv_label_get_text(label_file_management_typeface_label), typeface_name[i], strlen(lv_label_get_text(label_file_management_typeface_label))) == 0)
-                {
-                    break;
-                }
-            }
-
-            sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[i]);
-            data_structure[win_content_child_num].data.word.typeface = i;
-
-            //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
-            //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
-            //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-            printf("%s\n", temp_typeface);
-
-            data_structure[win_content_child_num].data.word.info.name = temp_typeface;
-
-            word_size = atoi(lv_label_get_text(label_file_management_word_size_label));
-
-            if (word_size < 12)
-            {
-                word_size = 12;
-            }
-
-            if (word_size > 200)
-            {
-                word_size = 200;
-            }
-
-            data_structure[win_content_child_num].data.word.info.weight = word_size;
-
-            data_structure[win_content_child_num].data.word.spin = atoi(lv_label_get_text(label_btn_addition_text_spin));
-
-            data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
-
-            if (lv_obj_has_state(sw_management_line_italic, LV_STATE_CHECKED) == 1)
-            {
-                data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_ITALIC;
-            }
-
-            if (lv_obj_has_state(sw_file_management_bold, LV_STATE_CHECKED) == 1)
-            {
-                data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_BOLD;
-            }
-
-            lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
-
-            lv_point_t text_size;
-            lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
 
             lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -9712,274 +13671,167 @@ static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
             lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
-            lv_style_init(&data_structure[win_content_child_num].data.word.style);
-            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+            // 假设你有一个图片对象
+            lv_obj_t* img_obj = lv_img_create(temp_obj);
+            sprintf(picture_name, "A:/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+            lv_img_set_src(img_obj, picture_name);
 
-            word_space = atoi(lv_label_get_text(label_file_management_word_space_label));
+            lv_obj_align(img_obj, LV_ALIGN_TOP_LEFT, 0, 0);
 
-            if (word_space < 0)
-            {
-                word_space = 0;
-            }
+            // 获取图片对象
+            lv_img_t* img = (lv_img_t*)img_obj;
 
-            if (word_space > 100)
-            {
-                word_space = 100;
-            }
-            printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+            // 获取图片的源文件
+            lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img->src;
 
-            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+            // 获取图片的宽和高
+            lv_coord_t width = img_dsc->header.w;
+            lv_coord_t height = img_dsc->header.h;
 
-            printf("x_size=%d\n\r", x_size);
+            // 打印宽和高
+            printf("Image width: %d, height: %d\n", width, height);
 
-            lv_obj_set_size(temp_obj, x_size, text_size.y);
-            lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.word.spin * 10, 0);
+   
+            lv_obj_set_size(temp_obj, width, height);
 
-            if (data_structure[win_content_child_num].data.word.spin != 0)
-            {
-                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
-            }
+            sprintf(data_structure[win_content_child_num].data.picture.text,"%s", picture_name);
 
-            lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.word.style, word_space);
-            lv_obj_t* label1 = lv_label_create(temp_obj);
-            lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
-            lv_label_set_text(label1, lv_label_get_text(label_file_management_label));
-            lv_obj_center(label1);
-            strncpy(data_structure[win_content_child_num].data.word.text, lv_label_get_text(label_file_management_label), len);
-            data_structure[win_content_child_num].data.word.size = word_size;
-            data_structure[win_content_child_num].data.word.space = word_space;
-            data_structure[win_content_child_num].data.word.italic_bold = data_structure[win_content_child_num].data.word.info.style;
-            printf("italic_bold=%d\n\r", data_structure[win_content_child_num].data.word.italic_bold);
-            printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
+            printf("text=%s\n\r", data_structure[win_content_child_num].data.picture.text);
 
+            data_structure[win_content_child_num].type = TYPE_PITCTURE;
         }
 
+        lv_obj_del(obj_addition_picture_head_bg);
+        lv_obj_del(label_addition_picture_head);
+        lv_obj_del(obj_addition_picture_preview_bg);
+        lv_obj_del(obj_addition_picture_btn_bg);
+        lv_obj_del(table_addition_picture);
+        lv_obj_del(table_addition_picture_1);
+        lv_obj_del(win_content_typeface);
+        lv_obj_del(obj_addition_table_bg);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(left_stop_img_typeface);
+        lv_obj_del(right_stop_img_typeface);
+        lv_obj_del(btn_addition_picture_delete);
+        lv_obj_del(btn_addition_picture_open);
+        lv_obj_del(img_addition_picture_search);
+        lv_obj_del(label_addition_picture_search);
+        lv_obj_del(label_btn_addition_picture_search);
+        lv_obj_del(btn_addition_picture_search);
+        lv_obj_del(obj_addition_picture_bottom_bg);
+        lv_obj_del(label_addition_picture_return);
+        lv_obj_del(imgbtn_addition_picture_return);
+        lv_obj_del(imgbtn_addition_picture_confirm);
+        lv_obj_del(label_addition_picture_confirm);
 
-        lv_obj_del(file_management_win);
-        lv_obj_del(file_management_head_bg);
-        //lv_obj_del(label_file_management_total_output);
-        lv_obj_del(label_file_management);
-        //lv_obj_del(label_file_management_date);
-        //lv_obj_del(label_file_management_time);
-        //lv_obj_del(img_file_management_battery_level);
-        lv_obj_del(label_file_management_label);
-        lv_obj_del(file_management_middle_bg);
-        lv_obj_del(img_file_management_text);
-        lv_obj_del(label_file_management_text);
-        lv_obj_del(label_file_management_text_label);
+        lv_obj_del(slider_typeface);
 
-        lv_obj_del(img_file_management_typeface);
-        lv_obj_del(label_file_management_typeface);
-        lv_obj_del(label_file_management_typeface_label);
-
-        lv_obj_del(img_file_management_word_space);
-        lv_obj_del(label_file_management_word_space);
-        lv_obj_del(label_file_management_word_space_label);
-
-        lv_obj_del(img_file_management_word_size);
-        lv_obj_del(label_file_management_word_size);
-        lv_obj_del(label_file_management_word_size_label);
-
-        lv_obj_del(img_file_management_spin);
-        lv_obj_del(label_file_management_spin);
-        lv_obj_del(label_btn_addition_text_spin);
-
-        // lv_obj_del(img_file_management_width);
-        // lv_obj_del(label_file_management_width);
-       //  lv_obj_del(label_file_management_width_label);
-
-
-        lv_obj_del(img_file_management_bold);
-        lv_obj_del(label_file_management_bold);
-        lv_obj_del(sw_file_management_bold);
-
-        lv_obj_del(img_management_line_italic);
-        lv_obj_del(label_management_line_italic);
-        lv_obj_del(sw_management_line_italic);
-
-        lv_obj_del(file_management_bottom_bg);
-        lv_obj_del(label_file_management_return);
-        lv_obj_del(imgbtn_file_management_get_back);
-        lv_obj_del(imgbtn_file_management_confirm);
-        lv_obj_del(label_file_management_confirm);
-
-        lv_obj_del(btn_file_management_text);
-        lv_obj_del(btn_file_management_typeface);
-        lv_obj_del(btn_file_management_word_space_label);
-        lv_obj_del(btn_file_management_word_size_label);
-        lv_obj_del(btn_addition_text_spin);
 
         //删除添加界面
-        lv_obj_del(addition_head_bg);
-        lv_obj_del(label_addition_head);
-        lv_obj_del(addition_bottom_bg);
-        lv_obj_del(label_addition_middle_bg);
-        lv_obj_del(label_addition_return);
-        lv_obj_del(imgbtn_addition_return);
-        lv_obj_del(imgbtn_addition_confirm);
-        lv_obj_del(label_addition_confirm);
-#if 0
+        lv_obj_del(img_addition_bg);
         lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
         lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
         lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
         lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
         lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
         lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
         lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
         lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
         lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
         lv_obj_del(btn_addition_more_functions);
-#endif
-
-#if 0
-        lv_obj_t* addition_head_bg;
-        lv_obj_t* label_addition_head;
-        lv_obj_t* label_addition_middle_bg;
-        lv_obj_t* addition_bottom_bg;
-        lv_obj_t* label_addition_return;
-        lv_obj_t* imgbtn_addition_return;
-        lv_obj_t* imgbtn_addition_confirm;
-        lv_obj_t* label_addition_confirm;
-        lv_obj_t* btn_addition_text;
-        lv_obj_t* label_btn_addition_text;
-        lv_obj_t* btn_addition_date;
-        lv_obj_t* label_btn_addition_date;
-        lv_obj_t* btn_addition_picture;
-        lv_obj_t* label_btn_addition_picture;
-        lv_obj_t* btn_addition_QR_code;
-        lv_obj_t* label_btn_addition_QR_code;
-        lv_obj_t* btn_addition_bar_code;
-        lv_obj_t* label_btn_addition_bar_code;
-        lv_obj_t* btn_addition_count;
-        lv_obj_t* label_btn_addition_count;
-        lv_obj_t* btn_addition_subsection;
-        lv_obj_t* label_btn_addition_subsection;
-        lv_obj_t* btn_addition_symbol;
-        lv_obj_t* label_btn_addition_symbol;
-        lv_obj_t* btn_addition_icon;
-        lv_obj_t* label_btn_addition_icon;
-        lv_obj_t* btn_addition_more_functions;
-        lv_obj_t* label_btn_addition_more_functions;
-#endif
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
     }
 }
 
-void list_directory_contents(const char *path) 
+
+static void picture_slider_event_cb(lv_event_t* e)
 {
-    struct dirent *entry;
-    DIR *dir = opendir(path);
-    struct stat file_stat;
-    char time_str[30];
- 
-    if (dir == NULL) 
+    lv_obj_t* target = lv_event_get_target(e); /* 获取触发源 */
+    lv_event_code_t code = lv_event_get_code(e); /* 获取事件类型 */
+    int32_t temp;
+    static int32_t temp_last = 0;
+    int x_data = 0;
+    if ((code == LV_EVENT_VALUE_CHANGED) && (print_status == 0))
     {
-        perror("opendir");
-        return;
+        temp = lv_slider_get_value(target);
+        printf("temp=%d\n", temp);
+
+        x_data = (100 - temp)*6;
+
+        if (temp_last != temp)
+        {
+            lv_obj_set_pos(win_content_typeface, -15,  -15 - x_data);//Limit drag boundaries 
+        }
+        temp_last = temp;
     }
- 
-    while ((entry = readdir(dir)) != NULL) 
-    {
-        // 跳过 . 和 .. 目录
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) 
-        {
-            continue;
-        }
- 
-        // 构建完整的文件路径
-        char full_path[1024];
-        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
- 
-        // 获取文件状态信息
-        if (stat(full_path, &file_stat) == -1) 
-        {
-            perror("stat");
-            continue;
-        }
- 
-        // 格式化时间信息
-        struct tm *tm = localtime(&file_stat.st_mtime);
-        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
- 
-        // 打印文件信息
-        if (S_ISDIR(file_stat.st_mode)) 
-        {
-            printf("[DIR]  %s\n", entry->d_name);
-        } 
-        else 
-        {
-            printf("%-30s %10lld bytes %s\n", entry->d_name, file_stat.st_size, time_str);
-        }
-    }
- 
-    closedir(dir);
 }
 
 
 
-// 检查文件是否为图片文件
-int is_image_file(const char *filename) 
+static void slider_show_picture()
 {
-    const char *ext = strrchr(filename, '.');
-    if (ext != NULL) 
-    {
-#if 0
-        if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
-            strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
-            strcmp(ext, ".bmp") == 0 || strcmp(ext, ".tiff") == 0) 
-#endif
-        if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
-            strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
-            strcmp(ext, ".bmp") == 0) 
-        {
-            return 1;
-        }
-    }
-    return 0;
+    static const lv_style_prop_t props[] = { LV_STYLE_BG_COLOR,0 };  //设置位置参数
+    static lv_style_transition_dsc_t transition_dsc;               //设置转换变量
+    lv_style_transition_dsc_init(&transition_dsc, props, lv_anim_path_linear, 200, 0, NULL); //初始化转换
+
+    static lv_style_t style_main;                                  //创建样式
+    static lv_style_t style_indicator;                             //创建样式
+    static lv_style_t style_knob;                                  //创建样式
+    static lv_style_t style_pressed_color;                         //创建样式
+    lv_style_init(&style_main);                                    //初始化样式
+    lv_style_set_bg_opa(&style_main, LV_OPA_TRANSP);                 //设置背景透明度
+    lv_style_set_bg_color(&style_main, lv_color_hex3(0xffffff));        //设置背景颜色
+    lv_style_set_size_A(&style_main, 20, 142);
+    lv_style_set_pad_ver(&style_main, 0);                          //设置上下边距
+    lv_style_init(&style_indicator);                               //初始化样式
+    lv_style_set_bg_opa(&style_indicator, LV_OPA_TRANSP);            //设置背景透明度
+    lv_style_set_bg_color(&style_indicator, lv_color_hex3(0xffffff));//设置背景颜色
+    lv_style_set_transition(&style_indicator, &transition_dsc);     //设置转化
+
+    LV_IMG_DECLARE(img_slider_typeface);
+
+    lv_style_init(&style_knob);                                    //初始化样式
+    lv_style_set_bg_opa(&style_knob, LV_OPA_TRANSP);                 //设置背景透明度
+    lv_style_set_bg_img_src(&style_knob, &img_slider_typeface);
+    lv_style_set_border_color(&style_knob, lv_palette_darken(LV_PALETTE_GREY, 3));//设置边框背景颜色
+    lv_style_set_border_width(&style_knob, 0);                      //设置边框宽度
+    lv_style_set_pad_all(&style_knob, 20);                           //设置边距
+    lv_style_set_size_A(&style_knob, 20, 10);
+    lv_style_set_transition(&style_knob, &transition_dsc);          //设置转化
+
+    lv_style_init(&style_pressed_color);                           //初始化样式
+    lv_style_set_bg_color(&style_pressed_color, lv_color_hex3(0xAAAAAA));//设置背景颜色
+
+    slider_typeface = lv_slider_create(lv_scr_act());            //创建滑块
+    lv_obj_remove_style_all(slider_typeface);                               //移除所有样式
+
+    lv_obj_add_style(slider_typeface, &style_main, LV_PART_MAIN);             //添加样式
+    lv_obj_add_style(slider_typeface, &style_indicator, LV_PART_INDICATOR);   //添加样式 指示器
+    lv_obj_add_style(slider_typeface, &style_pressed_color, LV_PART_INDICATOR | LV_STATE_PRESSED); //添加样式 指示器 按压状态
+    lv_obj_add_style(slider_typeface, &style_knob, LV_PART_KNOB);             //添加样式 圆头
+    lv_obj_add_style(slider_typeface, &style_pressed_color, LV_PART_KNOB | LV_STATE_PRESSED);      //添加样式 圆头 按压状态
+    lv_obj_align(slider_typeface, LV_ALIGN_TOP_LEFT, 460, 65);
+    //lv_obj_center(slider);                                         //居中显示
+    lv_obj_add_event_cb(slider_typeface, picture_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_slider_set_value(slider_typeface, 100, LV_ANIM_ON);
 }
 
-
-int get_image_file_type(const char *filename) 
-{
-    const char *ext = strrchr(filename, '.');
-    if (ext != NULL) 
-    {
-        if(strcmp(ext, ".jpg") == 0)
-        {
-            return 0;
-        }
-        else if(strcmp(ext, ".jpeg") == 0)
-        {
-            return 1;
-        }
-        else if(strcmp(ext, ".png") == 0)
-        {
-            return 2;
-        }
-        else if(strcmp(ext, ".gif") == 0)
-        {
-            return 3;
-        }
-        else if(strcmp(ext, ".bmp") == 0) 
-        {
-            return 4;
-        }
-    }
-    return 0;
-}
-
-// 打印文件信息
-void print_file_info(const char *filename, const struct stat *file_stat) {
-    printf("File: %s\n", filename);
-    printf("Type: %s\n", is_image_file(filename) ? "Image" : "Other");
-    printf("Size: %ld bytes\n", file_stat->st_size);
-    printf("Created: %s", ctime(&file_stat->st_ctime));
-    printf("\n");
-}
 
 
 static void button_addition_picture_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+    char file_name[100]={0};
 
     code = lv_event_get_code(e);
 
@@ -10004,7 +13856,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
 
 
         obj_addition_picture_preview_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_picture_preview_bg, 240, 150);
+        lv_obj_set_size(obj_addition_picture_preview_bg, 160, 150);
         lv_obj_align(obj_addition_picture_preview_bg, LV_ALIGN_TOP_LEFT, 0, 24);
         lv_obj_set_style_border_width(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(obj_addition_picture_preview_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -10013,7 +13865,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
 
 
         obj_addition_picture_btn_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_picture_btn_bg, 240, 98);
+        lv_obj_set_size(obj_addition_picture_btn_bg, 160, 98);
         lv_obj_align(obj_addition_picture_btn_bg, LV_ALIGN_TOP_LEFT, 0, 174);
         lv_obj_set_style_border_width(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -10021,34 +13873,64 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_obj_remove_style(obj_addition_picture_btn_bg, 0, LV_PART_SCROLLBAR);
 
 
-        obj_addition_table_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_table_bg, 264, 224);
-        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 216, 24);
-        lv_obj_set_style_border_width(obj_addition_table_bg, 2, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_obj_remove_style(obj_addition_table_bg, 0, LV_PART_SCROLLBAR);
+        static lv_style_t table_cell_style;
+        lv_style_init(&table_cell_style);
+        lv_style_set_pad_all(&table_cell_style, 2); // 设置所有方向的填充为5像素
 
 
         table_addition_picture = lv_table_create(lv_scr_act());
         LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_add_style(table_addition_picture, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 160, 24);
         lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
         lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
         lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
         lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
         lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
-        lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 216, 24);
-        lv_table_set_col_width(table_addition_picture, 0, 65);
-        lv_table_set_col_width(table_addition_picture, 1, 65);
-        lv_table_set_col_width(table_addition_picture, 2, 65);
-        lv_table_set_col_width(table_addition_picture, 3, 65);
+        lv_table_set_col_width(table_addition_picture, 0, 115);
+        lv_table_set_col_width(table_addition_picture, 1, 50);
+        lv_table_set_col_width(table_addition_picture, 2, 56);
+        lv_table_set_col_width(table_addition_picture, 3, 76);
 
+
+        obj_addition_table_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_table_bg, 300, 198);
+        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 160, 48);
+        lv_obj_set_style_border_width(obj_addition_table_bg, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_table_bg, 0, LV_PART_SCROLLBAR);
+
+        win_content_typeface = lv_obj_create(obj_addition_table_bg);
+        lv_obj_set_size(win_content_typeface, 300, 500);
+        lv_obj_align(win_content_typeface, LV_ALIGN_TOP_LEFT, -16, -16);
+        lv_obj_set_style_bg_color(win_content_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(win_content_typeface, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(win_content_typeface, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(win_content_typeface, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(win_content_typeface, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_pad_all(win_content_typeface, 0, LV_STATE_DEFAULT);
+
+
+        table_addition_picture_1 = lv_table_create(win_content_typeface);
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_add_style(table_addition_picture_1, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
+
+        lv_table_set_col_width(table_addition_picture_1, 0, 120);
+        lv_table_set_col_width(table_addition_picture_1, 1, 45);
+        lv_table_set_col_width(table_addition_picture_1, 2, 55);
+        lv_table_set_col_width(table_addition_picture_1, 3, 75);
+
+
+#if 0
         //PICTURE_DATA
         lv_fs_dir_t mysd_3;
         if (lv_fs_dir_open(&mysd_3, "/mnt") == LV_FS_RES_OK)
         {
             printf("lv_fs_dir_open ok\n");
-            char file_name[100]={0};
+         
             while (lv_fs_dir_read(&mysd_3, file_name) == LV_FS_RES_OK)
             {
                 printf("%s\n", file_name);
@@ -10059,6 +13941,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         {
             printf("lv_fs_dir_open error\n");
         }
+#endif
 
 
         //list_directory_contents(D:/test_sd);
@@ -10068,8 +13951,11 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         char path[128];
         unsigned char picture_count = 0;
         int picture_type = 0;
-        char str_picture_size[10] = {0};
         char created_time[20] ={0};
+        char size_str[20]; // 存储转换后的字符串
+        char image_name[50]; // 存储提取的图片名称
+
+
 
         dir = opendir("/mnt");
         if (dir == NULL) 
@@ -10093,32 +13979,35 @@ static void button_addition_picture_event_cb(lv_event_t* e)
                 if (is_image_file(entry->d_name)) 
                 {
                     print_file_info(entry->d_name, &file_stat);
-
-                    lv_table_set_cell_value(table_addition_picture, picture_count + 1, 0, entry->d_name);
+                    get_image_name(entry->d_name, image_name, sizeof(image_name));
+                    lv_table_set_cell_value(table_addition_picture_1, picture_count, 0, image_name);
                     picture_type = get_image_file_type(entry->d_name);
+                    printf("picture_type=%d\n\r",picture_type);
                     switch(picture_type)
                     {
                         case 0:
-                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "jpg");
+                            lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "jpg");
                             break;
                         case 1:
-                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "jpeg");
+                            lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "jpeg");
                             break;
                         case 2:
-                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "png");
+                            lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "png");
                             break;
                         case 3:
-                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "gif");
+                            lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "gif");
                             break;
                         case 4:
-                            lv_table_set_cell_value(table_addition_picture, picture_count + 1, 1, "bmp");
+                            lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "bmp");
                             break;
                     }
-                    sprintf(str_picture_size,"%s",file_stat.st_size);
-                    lv_table_set_cell_value(table_addition_picture, picture_count + 1, 2, str_picture_size);
-                    sprintf(created_time,"%s",file_stat.st_ctime);
-                    lv_table_set_cell_value(table_addition_picture, picture_count + 1, 3, created_time);
-                    memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
+                    size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
+                    printf("size_str=%s\n\r",size_str);
+                    lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
+                    format_time(ctime(&file_stat.st_ctime), created_time);
+                    printf("created_time=%s\n\r",created_time);
+                    lv_table_set_cell_value(table_addition_picture_1, picture_count, 3, created_time);
+                    //memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
                     picture_count++;
                 }
             }
@@ -10126,49 +14015,61 @@ static void button_addition_picture_event_cb(lv_event_t* e)
 
         closedir(dir);
 
-        
+        printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,0,0));
+        sprintf(file_name,"A:/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
 
-        btn_addition_picture_delete = lv_btn_create(lv_scr_act());
-        lv_obj_set_size(btn_addition_picture_delete, 80, 30);
+        //显示图片
+        picture_img = lv_img_create(obj_addition_picture_preview_bg);
+        lv_img_set_src(picture_img, file_name);
+
+        lv_obj_add_event_cb(table_addition_picture_1, picture_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
+        lv_obj_add_event_cb(table_addition_picture_1, picture_change_event_cb, LV_EVENT_PRESSED, NULL);
+
+
+        typeface_slider_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(typeface_slider_bg, 20, 224);
+        lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 460, 24);
+        lv_obj_set_style_border_width(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_radius(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT);
+
+        //左滑块停止
+        LV_IMG_DECLARE(left_stop_typeface);
+        left_stop_img_typeface = lv_img_create(lv_scr_act());
+        lv_img_set_src(left_stop_img_typeface, &left_stop_typeface);
+        lv_obj_align(left_stop_img_typeface, LV_ALIGN_TOP_LEFT, 460, 228);
+
+        slider_show_picture();
+
+        //右滑块停止
+        LV_IMG_DECLARE(right_stop_typeface);
+        right_stop_img_typeface = lv_img_create(lv_scr_act());
+        lv_img_set_src(right_stop_img_typeface, &right_stop_typeface);
+        lv_obj_align(right_stop_img_typeface, LV_ALIGN_TOP_LEFT, 460, 24);
+
+
+     
+
+        LV_IMG_DECLARE(picture_delete);
+        btn_addition_picture_delete = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_picture_delete, LV_IMGBTN_STATE_RELEASED, NULL, &picture_delete, NULL);
+        lv_obj_set_size(btn_addition_picture_delete, picture_delete.header.w, picture_delete.header.h);
         lv_obj_align(btn_addition_picture_delete, LV_ALIGN_TOP_LEFT, 10, 180);
-        lv_obj_set_style_border_width(btn_addition_picture_delete, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_picture_delete, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_picture_delete, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_picture_delete, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_picture_delete, btn_addition_picture_delete_event_cb, LV_EVENT_ALL, NULL);
+        lv_obj_add_event_cb(btn_addition_picture_delete, btn_addition_picture_delete_event_cb, LV_EVENT_CLICKED, NULL);
 
 
-        LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_picture_delete = lv_label_create(btn_addition_picture_delete);
-        lv_obj_set_style_text_font(label_btn_addition_picture_delete, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_picture_delete, "删除");
-        lv_obj_center(label_btn_addition_picture_delete);
-        lv_obj_set_style_text_color(label_btn_addition_picture_delete, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        LV_IMG_DECLARE(open_25_1);
+        btn_addition_picture_open = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_picture_open, LV_IMGBTN_STATE_RELEASED, NULL, &open_25_1, NULL);
+        lv_obj_set_size(btn_addition_picture_open, open_25_1.header.w, open_25_1.header.h);
+        lv_obj_align(btn_addition_picture_open, LV_ALIGN_TOP_LEFT, 90, 180);
+        lv_obj_add_event_cb(btn_addition_picture_open, btn_addition_picture_open_event_cb, LV_EVENT_CLICKED, NULL);
 
 
-        btn_addition_picture_open = lv_btn_create(lv_scr_act());
-        lv_obj_set_size(btn_addition_picture_open, 80, 30);
-        lv_obj_align(btn_addition_picture_open, LV_ALIGN_TOP_LEFT, 125, 180);
-        lv_obj_set_style_border_width(btn_addition_picture_open, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_picture_open, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_picture_open, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_picture_open, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_picture_open, btn_addition_picture_open_event_cb, LV_EVENT_ALL, NULL);
-
-
-        LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_picture_open = lv_label_create(btn_addition_picture_open);
-        lv_obj_set_style_text_font(label_btn_addition_picture_open, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_picture_open, "打开");
-        lv_obj_center(label_btn_addition_picture_open);
-        lv_obj_set_style_text_color(label_btn_addition_picture_open, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-
-
-        LV_IMG_DECLARE(spin);
+        LV_IMG_DECLARE(search);
         img_addition_picture_search = lv_img_create(lv_scr_act());
-        lv_img_set_src(img_addition_picture_search, &spin);
+        lv_img_set_src(img_addition_picture_search, &search);
         lv_obj_align(img_addition_picture_search, LV_ALIGN_TOP_LEFT, 10, 218);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -10176,13 +14077,13 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
         lv_label_set_text(label_addition_picture_search, "搜索");
-        lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 40, 222);
+        lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 42, 222);
 
 
         LV_FONT_DECLARE(heiFont16_1);
         btn_addition_picture_search = lv_btn_create(lv_scr_act());
-        lv_obj_set_size(btn_addition_picture_search, 125, 24);
-        lv_obj_align(btn_addition_picture_search, LV_ALIGN_TOP_LEFT, 80, 218);
+        lv_obj_set_size(btn_addition_picture_search, 70, 24);
+        lv_obj_align(btn_addition_picture_search, LV_ALIGN_TOP_LEFT, 82, 218);
         lv_obj_set_style_border_width(btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(btn_addition_picture_search, 10, LV_STATE_DEFAULT); /* 设置圆角 */
         lv_obj_set_style_bg_color(btn_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
@@ -10198,8 +14099,6 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_opa(label_btn_addition_picture_search, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(label_btn_addition_picture_search, lv_color_hex(0xffffff), LV_PART_MAIN);
         lv_obj_add_event_cb(btn_addition_picture_search, btn_addition_picture_search_event_cb, LV_EVENT_CLICKED, NULL);
-
-
 
         obj_addition_picture_bottom_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(obj_addition_picture_bottom_bg, 480, 24);
@@ -10245,12 +14144,14 @@ static void button_addition_picture_event_cb(lv_event_t* e)
 static void update_preview_QR_bar_code(void)
 {
     int str_len = 0;
-    int width_len = 0;
+    //int width_len = 0;
     int height_len = 0;
     int width, height, channels;
     unsigned char* pdata = NULL;
     unsigned char* pnew_data = NULL;
      lv_obj_t* img = NULL;
+     char bmp_name[64]={0};
+    char bmp_name_1[64]={0};
 
     str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
     if (str_len == 0)
@@ -10338,7 +14239,7 @@ static void update_preview_QR_bar_code(void)
                 printf("channels=%d\n\r", channels);
     
                 my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
-                printf("scale=%f\n\r", my_symbol->scale);
+                printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -10388,6 +14289,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -10396,6 +14298,19 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);
+#endif
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
                 lv_obj_center(img);
 
                 break;
@@ -10427,7 +14342,7 @@ static void update_preview_QR_bar_code(void)
                 printf("channels=%d\n\r", channels);
     
                 my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
-                printf("scale=%f\n\r", my_symbol->scale);
+                printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -10477,6 +14392,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -10485,6 +14401,18 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);
+#endif
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
                 lv_obj_center(img);
      
                 break;
@@ -10517,7 +14445,7 @@ static void update_preview_QR_bar_code(void)
                 printf("channels=%d\n\r", channels);
     
                 my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
-                printf("scale=%f\n\r", my_symbol->scale);
+                printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -10567,6 +14495,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -10575,6 +14504,19 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                lv_obj_center(img);
+#endif
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
                 lv_obj_center(img);
 
                 break;
@@ -10607,7 +14549,7 @@ static void update_preview_QR_bar_code(void)
                 printf("channels=%d\n\r", channels);
     
                 my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
-                printf("scale=%f\n\r", my_symbol->scale);
+                printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -10657,6 +14599,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -10665,18 +14608,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);   
+#endif            
 
-#if 0
-                width_len = strlen(lv_label_get_text(label_btn_addition_QR_code_width));
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
 
-                if (width_len == 0)
-                {
-                    return;
-                }
-
-                printf("width_len=%u\n\r",width_len);
-#endif
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);
                 break;
         }
     }
@@ -10767,6 +14712,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -10775,7 +14721,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);  
+#endif     
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);        
 
                 break;
             case 1:
@@ -10857,6 +14816,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -10865,7 +14825,19 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);   
+#endif
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);            
 
                 break;
             case 2:
@@ -10948,6 +14920,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -10956,7 +14929,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);    
+#endif
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);           
 
                 break;
             case 4:
@@ -11041,6 +15027,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -11049,7 +15036,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);    
+#endif 
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);          
 
                 break;
             case 5:
@@ -11131,6 +15131,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -11139,7 +15140,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);    
+#endif    
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);       
 
                 break;
             case 6:
@@ -11221,6 +15235,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -11229,7 +15244,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);    
+#endif
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);           
 
                 break;
             case 7:
@@ -11311,6 +15339,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -11319,7 +15348,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img); 
+#endif  
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);            
 
                 break;
             case 8:
@@ -11401,6 +15443,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -11409,7 +15452,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img);  
+#endif   
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);          
 
                 break;
             case 9:
@@ -11491,6 +15547,7 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
+#if 0
                 stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
@@ -11499,7 +15556,20 @@ static void update_preview_QR_bar_code(void)
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);               
+                lv_obj_center(img); 
+#endif  
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                // 使用data进行图像处理...
+                lv_mem_free(pnew_data);
+                stbi_image_free(pdata); // 释放内存
+
+                //显示图像
+                img = lv_img_create(addition_QR_code_middle_bg);
+                sprintf(bmp_name_1,"A:%s",bmp_name);
+                lv_img_set_src(img, bmp_name_1);
+                lv_obj_center(img);            
 
                 break;
         }
@@ -12342,13 +16412,15 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
     unsigned char* pdata = NULL; 
     unsigned char* pnew_data = NULL;
     lv_obj_t* img = NULL;
+    char bmp_name[128] = {0};
+    char bmp_name_1[128] = {0};
 
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_QR_code_confirm_event_cb\n");
         //在主界面显示二维码
-        str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text)) + 1;
+        str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
         printf("str_len=%u\n\r", str_len);
 
         win_content_child_num = lv_obj_get_child_cnt(win_content);
@@ -12512,14 +16584,16 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
                         //显示图像
                         img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
                         break;
@@ -12648,6 +16722,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -12656,6 +16731,20 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         lv_obj_t* img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+#endif
+
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
                         break;
@@ -12766,6 +16855,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -12774,6 +16865,20 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+#endif
+
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
                         break;
@@ -12884,6 +16989,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+                        
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -12892,6 +16999,19 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
                         break;
@@ -13014,6 +17134,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13023,6 +17144,20 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
                         lv_obj_center(img);
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
+                        lv_obj_center(img);
+
                         break;
                     case 1:
                         my_symbol->symbology = BARCODE_CODE128;
@@ -13130,6 +17265,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13139,6 +17276,22 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
                         lv_obj_center(img);
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
+                        lv_obj_center(img);
+
+
+
                         break;
                     case 2:
                     case 3:
@@ -13248,6 +17401,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13257,6 +17411,20 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
                         lv_obj_center(img);
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
+                        lv_obj_center(img);
+
                         break;
                     case 4:
                         my_symbol->symbology = BARCODE_EAN128;
@@ -13368,6 +17536,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13376,6 +17545,19 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
                         break;
@@ -13486,6 +17668,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13495,6 +17679,21 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
                         lv_obj_center(img);
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
+                        lv_obj_center(img);
+
+
                         break;
                     case 6:
                         my_symbol->symbology = BARCODE_UPCE;
@@ -13603,6 +17802,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13611,7 +17812,20 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);         
+                        lv_obj_center(img);        
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
+                        lv_obj_center(img);
                         break;
                     case 7:
                         my_symbol->symbology = BARCODE_ITF14;
@@ -13720,6 +17934,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13728,6 +17944,18 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+#endif
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
                         break;
@@ -13838,6 +18066,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13846,6 +18075,18 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+#endif
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
                         break;
                     case 9:
@@ -13955,6 +18196,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
+
+#if 0
                         stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
@@ -13963,6 +18206,19 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         //显示图像
                         img = lv_img_create(temp_obj);
                         lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
+                        lv_obj_center(img);
+#endif
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
+                        // 使用data进行图像处理...
+                        lv_mem_free(pnew_data);
+                        stbi_image_free(pdata); // 释放内存
+
+                        //显示图像
+                        img = lv_img_create(temp_obj);
+                        sprintf(bmp_name_1,"A:%s",bmp_name);
+                        lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
                         break;
@@ -14007,14 +18263,28 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
         lv_obj_del(addition_QR_code_head_bg);
 
         //删除添加界面
-        lv_obj_del(addition_head_bg);
-        lv_obj_del(label_addition_head);
-        lv_obj_del(addition_bottom_bg);
-        lv_obj_del(label_addition_middle_bg);
-        lv_obj_del(label_addition_return);
-        lv_obj_del(imgbtn_addition_return);
-        lv_obj_del(imgbtn_addition_confirm);
-        lv_obj_del(label_addition_confirm);
+        lv_obj_del(img_addition_bg);
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
     }
 }
 
@@ -14094,9 +18364,9 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_color(label_btn_addition_QR_code_text, lv_color_hex(0xffffff), LV_PART_MAIN);
         lv_obj_add_event_cb(btn_addition_QR_code_text, btn_addition_QR_code_text_event_cb, LV_EVENT_CLICKED, NULL);
 
-        LV_IMG_DECLARE(text);
+        LV_IMG_DECLARE(qr_code);
         img_addition_QR_code = lv_img_create(lv_scr_act());
-        lv_img_set_src(img_addition_QR_code, &text);
+        lv_img_set_src(img_addition_QR_code, &qr_code);
         lv_obj_align(img_addition_QR_code, LV_ALIGN_TOP_LEFT, 10, 160);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -14128,9 +18398,9 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_add_event_cb(btn_addition_QR_code_QR, btn_addition_QR_code_QR_event_cb, LV_EVENT_CLICKED, NULL);
 
 
-        LV_IMG_DECLARE(text);
+        LV_IMG_DECLARE(word_size);
         img_addition_QR_code_height = lv_img_create(lv_scr_act());
-        lv_img_set_src(img_addition_QR_code_height, &text);
+        lv_img_set_src(img_addition_QR_code_height, &word_size);
         lv_obj_align(img_addition_QR_code_height, LV_ALIGN_TOP_LEFT, 10, 190);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -14162,9 +18432,9 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_add_event_cb(btn_addition_QR_code_height, btn_addition_QR_code_height_event_cb, LV_EVENT_CLICKED, NULL);
 
 
-        LV_IMG_DECLARE(text);
+        LV_IMG_DECLARE(figure);
         img_addition_QR_code_figure = lv_img_create(lv_scr_act());
-        lv_img_set_src(img_addition_QR_code_figure, &text);
+        lv_img_set_src(img_addition_QR_code_figure, &figure);
         lv_obj_align(img_addition_QR_code_figure, LV_ALIGN_TOP_LEFT, 10, 220);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -14186,9 +18456,9 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
 
 
 
-        LV_IMG_DECLARE(text);
+        LV_IMG_DECLARE(bar_code);
         img_addition_QR_code_bar_code = lv_img_create(lv_scr_act());
-        lv_img_set_src(img_addition_QR_code_bar_code, &text);
+        lv_img_set_src(img_addition_QR_code_bar_code, &bar_code);
         lv_obj_align(img_addition_QR_code_bar_code, LV_ALIGN_TOP_LEFT, 240, 160);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -14220,9 +18490,9 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_add_event_cb(btn_addition_QR_code_bar_code, btn_addition_QR_code_bar_code_event_cb, LV_EVENT_CLICKED, NULL);
 
 
-        LV_IMG_DECLARE(text);
+        LV_IMG_DECLARE(width);
         img_addition_QR_code_width = lv_img_create(lv_scr_act());
-        lv_img_set_src(img_addition_QR_code_width, &text);
+        lv_img_set_src(img_addition_QR_code_width, &width);
         lv_obj_align(img_addition_QR_code_width, LV_ALIGN_TOP_LEFT, 240, 190);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -14254,9 +18524,9 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_add_event_cb(btn_addition_QR_code_width, btn_addition_QR_code_width_event_cb, LV_EVENT_CLICKED, NULL);
 
 
-        LV_IMG_DECLARE(text);
+        LV_IMG_DECLARE(border);
         img_addition_QR_code_border = lv_img_create(lv_scr_act());
-        lv_img_set_src(img_addition_QR_code_border, &text);
+        lv_img_set_src(img_addition_QR_code_border, &border);
         lv_obj_align(img_addition_QR_code_border, LV_ALIGN_TOP_LEFT, 240, 220);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -14323,7 +18593,7 @@ static void btn_addition_bar_code_event_cb(lv_event_t* e)
 
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
-        printf("button_addition_picture_event_cb\n");
+        printf("btn_addition_bar_code_event_cb\n");
     }
 }
 
@@ -14339,255 +18609,176 @@ static void button_addition_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("addition\n");
-        addition_head_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(addition_head_bg, 480, 24);
-        lv_obj_align(addition_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_set_style_border_width(addition_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_radius(addition_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_color(addition_head_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
-        lv_obj_remove_style(addition_head_bg, 0, LV_PART_SCROLLBAR);
+        LV_IMG_DECLARE(img_addition_bg_2);
+        img_addition_bg = lv_img_create(lv_scr_act());
+        lv_img_set_src(img_addition_bg, &img_addition_bg_2);
+        lv_obj_align(img_addition_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+
+
+        LV_IMG_DECLARE(img_text_40);
+        btn_addition_text = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_text, LV_IMGBTN_STATE_RELEASED, NULL, &img_text_40, NULL);
+        lv_obj_set_size(btn_addition_text, img_text_40.header.w, img_text_40.header.h);
+        lv_obj_align(btn_addition_text, LV_ALIGN_TOP_LEFT, 60, 40);
+        lv_obj_add_event_cb(btn_addition_text, button_addition_text_event_cb, LV_EVENT_CLICKED, NULL);
+
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_addition_head = lv_label_create(lv_scr_act());
-        lv_obj_set_style_text_font(label_addition_head, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_obj_set_style_text_color(label_addition_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_head, "添加");
-        lv_obj_align(label_addition_head, LV_ALIGN_TOP_LEFT, 200, 4);
-
-        label_addition_middle_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(label_addition_middle_bg, 480, 224);
-        lv_obj_align(label_addition_middle_bg, LV_ALIGN_TOP_LEFT, 0, 24);
-        lv_obj_set_style_border_width(label_addition_middle_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_radius(label_addition_middle_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_color(label_addition_middle_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-
-        btn_addition_text = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_text, 80, 50);
-        lv_obj_align(btn_addition_text, LV_ALIGN_TOP_LEFT, 0, 10);
-        lv_obj_set_style_border_width(btn_addition_text, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_text, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_text, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_text, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_text, button_addition_text_event_cb, LV_EVENT_ALL, NULL);
-
-        LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_text = lv_label_create(btn_addition_text);
+        label_btn_addition_text = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_text, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_text, "文本");
-        lv_obj_center(label_btn_addition_text);
-        lv_obj_set_style_text_color(label_btn_addition_text, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_text, LV_ALIGN_TOP_LEFT, 65, 85);
+        lv_obj_set_style_text_color(label_btn_addition_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
-        btn_addition_date = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_date, 80, 50);
-        lv_obj_align(btn_addition_date, LV_ALIGN_TOP_LEFT, 90, 10);
-        lv_obj_set_style_border_width(btn_addition_date, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_date, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_date, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_date, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_date, button_addition_date_event_cb, LV_EVENT_ALL, NULL);
+
+        LV_IMG_DECLARE(img_date_40);
+        btn_addition_date = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_date, LV_IMGBTN_STATE_RELEASED, NULL, &img_date_40, NULL);
+        lv_obj_set_size(btn_addition_date, img_date_40.header.w, img_date_40.header.h);
+        lv_obj_align(btn_addition_date, LV_ALIGN_TOP_LEFT, 140, 40);
+        lv_obj_add_event_cb(btn_addition_date, button_addition_date_event_cb, LV_EVENT_CLICKED, NULL);
+
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_date = lv_label_create(btn_addition_date);
+        label_btn_addition_date = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_date, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_date, "日期");
-        lv_obj_center(label_btn_addition_date);
-        lv_obj_set_style_text_color(label_btn_addition_date, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_date, LV_ALIGN_TOP_LEFT, 145, 85);
+        lv_obj_set_style_text_color(label_btn_addition_date, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
-        btn_addition_picture = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_picture, 80, 50);
-        lv_obj_align(btn_addition_picture, LV_ALIGN_TOP_LEFT, 180, 10);
-        lv_obj_set_style_border_width(btn_addition_picture, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_picture, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_picture, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_picture, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_picture, button_addition_picture_event_cb, LV_EVENT_ALL, NULL);
+        LV_IMG_DECLARE(img_picture_40);
+        btn_addition_picture = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_picture, LV_IMGBTN_STATE_RELEASED, NULL, &img_picture_40, NULL);
+        lv_obj_set_size(btn_addition_picture, img_picture_40.header.w, img_picture_40.header.h);
+        lv_obj_align(btn_addition_picture, LV_ALIGN_TOP_LEFT, 220, 40);
+        lv_obj_add_event_cb(btn_addition_picture, button_addition_picture_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_picture = lv_label_create(btn_addition_picture);
+        label_btn_addition_picture = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_picture, "图片");
-        lv_obj_center(label_btn_addition_picture);
-        lv_obj_set_style_text_color(label_btn_addition_picture, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_picture, LV_ALIGN_TOP_LEFT, 220, 85);
+        lv_obj_set_style_text_color(label_btn_addition_picture, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
 
-        LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_date = lv_label_create(btn_addition_date);
-        lv_obj_set_style_text_font(label_btn_addition_date, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_date, "日期");
-        lv_obj_center(label_btn_addition_date);
-        lv_obj_set_style_text_color(label_btn_addition_date, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-
-
-        btn_addition_QR_code = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_QR_code, 80, 50);
-        lv_obj_align(btn_addition_QR_code, LV_ALIGN_TOP_LEFT, 270, 10);
-        lv_obj_set_style_border_width(btn_addition_QR_code, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_QR_code, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_QR_code, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_QR_code, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_QR_code, btn_addition_QR_code_event_cb, LV_EVENT_ALL, NULL);
+        LV_IMG_DECLARE(img_QR_40);
+        btn_addition_QR_code = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_QR_code, LV_IMGBTN_STATE_RELEASED, NULL, &img_QR_40, NULL);
+        lv_obj_set_size(btn_addition_QR_code, img_QR_40.header.w, img_QR_40.header.h);
+        lv_obj_align(btn_addition_QR_code, LV_ALIGN_TOP_LEFT, 300, 40);
+        lv_obj_add_event_cb(btn_addition_QR_code, btn_addition_QR_code_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_QR_code = lv_label_create(btn_addition_QR_code);
+        label_btn_addition_QR_code = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_QR_code, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_QR_code, "二维码");
-        lv_obj_center(label_btn_addition_QR_code);
-        lv_obj_set_style_text_color(label_btn_addition_QR_code, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_QR_code, LV_ALIGN_TOP_LEFT, 300, 85);
+        lv_obj_set_style_text_color(label_btn_addition_QR_code, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
-
-
-        btn_addition_bar_code = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_bar_code, 80, 50);
-        lv_obj_align(btn_addition_bar_code, LV_ALIGN_TOP_LEFT, 360, 10);
-        lv_obj_set_style_border_width(btn_addition_bar_code, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_bar_code, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_bar_code, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_bar_code, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_bar_code, btn_addition_bar_code_event_cb, LV_EVENT_ALL, NULL);
+        LV_IMG_DECLARE(img_bar_40);
+        btn_addition_bar_code = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_bar_code, LV_IMGBTN_STATE_RELEASED, NULL, &img_bar_40, NULL);
+        lv_obj_set_size(btn_addition_bar_code, img_bar_40.header.w, img_bar_40.header.h);
+        lv_obj_align(btn_addition_bar_code, LV_ALIGN_TOP_LEFT, 380, 40);
+        lv_obj_add_event_cb(btn_addition_bar_code, btn_addition_QR_code_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_bar_code = lv_label_create(btn_addition_bar_code);
+        label_btn_addition_bar_code = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_bar_code, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_bar_code, "条码");
-        lv_obj_center(label_btn_addition_bar_code);
-        lv_obj_set_style_text_color(label_btn_addition_bar_code, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_bar_code, LV_ALIGN_TOP_LEFT, 385, 85);
+        lv_obj_set_style_text_color(label_btn_addition_bar_code, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
-        btn_addition_count = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_count, 80, 50);
-        lv_obj_align(btn_addition_count, LV_ALIGN_TOP_LEFT, 0, 70);
-        lv_obj_set_style_border_width(btn_addition_count, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_count, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_count, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_count, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_count, btn_addition_count_event_cb, LV_EVENT_ALL, NULL);
+        LV_IMG_DECLARE(img_count_40);
+        btn_addition_count = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_count, LV_IMGBTN_STATE_RELEASED, NULL, &img_count_40, NULL);
+        lv_obj_set_size(btn_addition_count, img_count_40.header.w, img_count_40.header.h);
+        lv_obj_align(btn_addition_count, LV_ALIGN_TOP_LEFT, 60, 130);
+        lv_obj_add_event_cb(btn_addition_count, btn_addition_count_event_cb, LV_EVENT_CLICKED, NULL);
+
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_count = lv_label_create(btn_addition_count);
+        label_btn_addition_count = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_count, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_count, "计数");
-        lv_obj_center(label_btn_addition_count);
-        lv_obj_set_style_text_color(label_btn_addition_count, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_count, LV_ALIGN_TOP_LEFT, 65, 175);
+        lv_obj_set_style_text_color(label_btn_addition_count, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
-        btn_addition_subsection = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_subsection, 80, 50);
-        lv_obj_align(btn_addition_subsection, LV_ALIGN_TOP_LEFT, 90, 70);
-        lv_obj_set_style_border_width(btn_addition_subsection, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_subsection, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_subsection, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_subsection, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_subsection, btn_addition_subsection_event_cb, LV_EVENT_ALL, NULL);
+
+        LV_IMG_DECLARE(img_subsection_40);
+        btn_addition_subsection = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_subsection, LV_IMGBTN_STATE_RELEASED, NULL, &img_subsection_40, NULL);
+        lv_obj_set_size(btn_addition_subsection, img_subsection_40.header.w, img_subsection_40.header.h);
+        lv_obj_align(btn_addition_subsection, LV_ALIGN_TOP_LEFT, 140, 130);
+        lv_obj_add_event_cb(btn_addition_subsection, btn_addition_subsection_event_cb, LV_EVENT_CLICKED, NULL);
+
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_subsection = lv_label_create(btn_addition_subsection);
+        label_btn_addition_subsection = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_subsection, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_subsection, "分段");
-        lv_obj_center(label_btn_addition_subsection);
-        lv_obj_set_style_text_color(label_btn_addition_subsection, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_subsection, LV_ALIGN_TOP_LEFT, 145, 175);
+        lv_obj_set_style_text_color(label_btn_addition_subsection, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
+        LV_IMG_DECLARE(img_symbol_40);
+        btn_addition_symbol = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_symbol, LV_IMGBTN_STATE_RELEASED, NULL, &img_symbol_40, NULL);
+        lv_obj_set_size(btn_addition_symbol, img_symbol_40.header.w, img_symbol_40.header.h);
+        lv_obj_align(btn_addition_symbol, LV_ALIGN_TOP_LEFT, 220, 130);
+        lv_obj_add_event_cb(btn_addition_symbol, btn_addition_symbol_event_cb, LV_EVENT_CLICKED, NULL);
 
-        btn_addition_symbol = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_symbol, 80, 50);
-        lv_obj_align(btn_addition_symbol, LV_ALIGN_TOP_LEFT, 180, 70);
-        lv_obj_set_style_border_width(btn_addition_symbol, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_symbol, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_symbol, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_symbol, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_symbol, btn_addition_symbol_event_cb, LV_EVENT_ALL, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_symbol = lv_label_create(btn_addition_symbol);
+        label_btn_addition_symbol = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_symbol, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_symbol, "符号");
-        lv_obj_center(label_btn_addition_symbol);
-        lv_obj_set_style_text_color(label_btn_addition_symbol, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_symbol, LV_ALIGN_TOP_LEFT, 225, 175);
+        lv_obj_set_style_text_color(label_btn_addition_symbol, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
-        btn_addition_icon = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_icon, 80, 50);
-        lv_obj_align(btn_addition_icon, LV_ALIGN_TOP_LEFT, 270, 70);
-        lv_obj_set_style_border_width(btn_addition_icon, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_icon, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_icon, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_icon, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_icon, btn_addition_icon_event_cb, LV_EVENT_ALL, NULL);
+        LV_IMG_DECLARE(img_icon_40);
+        btn_addition_icon = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_icon, LV_IMGBTN_STATE_RELEASED, NULL, &img_icon_40, NULL);
+        lv_obj_set_size(btn_addition_icon, img_icon_40.header.w, img_icon_40.header.h);
+        lv_obj_align(btn_addition_icon, LV_ALIGN_TOP_LEFT, 300, 130);
+        lv_obj_add_event_cb(btn_addition_icon, btn_addition_icon_event_cb, LV_EVENT_CLICKED, NULL);
+
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_icon = lv_label_create(btn_addition_icon);
+        label_btn_addition_icon = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_icon, &heiFont16_1, LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_icon, "图标");
-        lv_obj_center(label_btn_addition_icon);
-        lv_obj_set_style_text_color(label_btn_addition_icon, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_icon, LV_ALIGN_TOP_LEFT, 305, 175);
+        lv_obj_set_style_text_color(label_btn_addition_icon, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
-        btn_addition_more_functions = lv_btn_create(label_addition_middle_bg);
-        lv_obj_set_size(btn_addition_more_functions, 80, 50);
-        lv_obj_align(btn_addition_more_functions, LV_ALIGN_TOP_LEFT, 360, 70);
-        lv_obj_set_style_border_width(btn_addition_more_functions, 1, LV_PART_MAIN); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_more_functions, lv_color_hex(0x000000), LV_PART_MAIN); /* 设置边框颜色 */
-        lv_obj_set_style_radius(btn_addition_more_functions, 10, LV_PART_MAIN); /* 设置圆角 */
-        //lv_obj_set_style_bg_color(btn_calibration, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(btn_addition_more_functions, 0, LV_PART_MAIN);
-        lv_obj_add_event_cb(btn_addition_more_functions, btn_addition_more_functions_event_cb, LV_EVENT_ALL, NULL);
+        LV_IMG_DECLARE(img_more_functions_40);
+        btn_addition_more_functions = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_more_functions, LV_IMGBTN_STATE_RELEASED, NULL, &img_more_functions_40, NULL);
+        lv_obj_set_size(btn_addition_more_functions, img_more_functions_40.header.w, img_more_functions_40.header.h);
+        lv_obj_align(btn_addition_more_functions, LV_ALIGN_TOP_LEFT, 380, 130);
+        lv_obj_add_event_cb(btn_addition_more_functions, btn_addition_more_functions_event_cb, LV_EVENT_CLICKED, NULL);
+
 
         LV_FONT_DECLARE(heiFont16_1);
-        label_btn_addition_more_functions = lv_label_create(btn_addition_more_functions);
+        label_btn_addition_more_functions = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_more_functions, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_more_functions, "更多功能");
-        lv_obj_center(label_btn_addition_more_functions);
-        lv_obj_set_style_text_color(label_btn_addition_more_functions, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_label_set_text(label_btn_addition_more_functions, "更多");
+        lv_obj_align(label_btn_addition_more_functions, LV_ALIGN_TOP_LEFT, 385, 175);
+        lv_obj_set_style_text_color(label_btn_addition_more_functions, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
-
-        addition_bottom_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(addition_bottom_bg, 480, 24);
-        lv_obj_align(addition_bottom_bg, LV_ALIGN_TOP_LEFT, 0, 248);
-        lv_obj_set_style_border_width(addition_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_radius(addition_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_color(addition_bottom_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
-        lv_obj_remove_style(addition_bottom_bg, 0, LV_PART_SCROLLBAR);
-
-        LV_FONT_DECLARE(heiFont16_1);
-        label_addition_return = lv_label_create(lv_scr_act());
-        lv_obj_set_style_text_font(label_addition_return, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_obj_set_style_text_color(label_addition_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_return, "返回");
-        lv_obj_align(label_addition_return, LV_ALIGN_TOP_LEFT, 140, 252);
-
-
-        LV_IMG_DECLARE(get_back);
-        imgbtn_addition_return = lv_imgbtn_create(lv_scr_act());
-        lv_imgbtn_set_src(imgbtn_addition_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
-        lv_obj_set_size(imgbtn_addition_return, get_back.header.w, get_back.header.h);
-        lv_obj_align(imgbtn_addition_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(imgbtn_addition_return, imgbtn_addition_return_event_cb, LV_EVENT_CLICKED, NULL);
-
-        LV_IMG_DECLARE(confirm);
-        imgbtn_addition_confirm = lv_imgbtn_create(lv_scr_act());
-        lv_imgbtn_set_src(imgbtn_addition_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
-        lv_obj_set_size(imgbtn_addition_confirm, get_back.header.w, get_back.header.h);
-        lv_obj_align(imgbtn_addition_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(imgbtn_addition_confirm, imgbtn_addition_confirm_event_cb, LV_EVENT_CLICKED, NULL);
-
-        LV_FONT_DECLARE(heiFont16_1);
-        label_addition_confirm = lv_label_create(lv_scr_act());
-        lv_obj_set_style_text_font(label_addition_confirm, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_obj_set_style_text_color(label_addition_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_confirm, "确定");
-        lv_obj_align(label_addition_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+        LV_IMG_DECLARE(img_return_1);
+        btn_addition_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_return, LV_IMGBTN_STATE_RELEASED, NULL, &img_return_1, NULL);
+        lv_obj_set_size(btn_addition_return, img_return_1.header.w, img_return_1.header.h);
+        lv_obj_align(btn_addition_return, LV_ALIGN_TOP_LEFT, 370, 220);
+        lv_obj_add_event_cb(btn_addition_return, imgbtn_addition_return_event_cb, LV_EVENT_CLICKED, NULL);
     }
 }
 
@@ -14634,13 +18825,46 @@ static void button_delete_event_cb(lv_event_t* e)
             }
 
 
-
+            
             //删除所有数据
-            for (i = 0; i < win_content_child_num; i++)
+            for(i=0;i<win_content_child_num;i++)
             {
-                lv_style_reset(&data_structure[i].data.word.style);
-                lv_ft_font_destroy(data_structure[i].data.word.info.font);
-            }
+                if((data_structure[i].type == TYPE_WORD)||(data_structure[i].type == TYPE_DATE))
+                {
+                    //删除所有数据
+                    lv_style_reset(&data_structure[i].data.word.style);
+                    lv_ft_font_destroy(data_structure[i].data.word.info.font);   
+                }
+                else if(data_structure[i].type == TYPE_PITCTURE)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_QR)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_BAR)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_COUNT)
+                {
+                    lv_style_reset(&data_structure[i].data.count.style);
+                    lv_ft_font_destroy(data_structure[i].data.count.info.font);  
+                }
+                else if(data_structure[i].type == TYPE_BREAK)
+                {
+
+                }
+                else if(data_structure[i].type == TYPE_SYMBOL)
+                {
+                    //删除所有数据
+                    lv_style_reset(&data_structure[i].data.word.style);
+                    lv_ft_font_destroy(data_structure[i].data.word.info.font);  
+                }
+            }   
+
+
             for (i = 0; i < win_content_child_num; i++)
             {
                 lv_obj_del(lv_obj_get_child(win_content, 0));
@@ -15487,6 +19711,7 @@ static void imgbtn_set_tv_bottom_confirm_event_cb(lv_event_t* e)
         system_data.print.width = width;
         print_data.word_width = width;
 #endif
+        set_system_time_flag = 0;
 
         system_data.print.concentration = lv_dropdown_get_selected(concentration_mode);
         system_data.print.width = lv_dropdown_get_selected(width_mode);
@@ -15539,17 +19764,27 @@ static void btn_system_date_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_work_space_return_event_cb\n");
-        lv_obj_del(typeface_head_bg);
-        lv_obj_del(label_typeface_head);
-        lv_obj_del(typeface_slider_bg);
-        lv_obj_del(pwd_text_area);
-        lv_obj_del(pwd_keyboard);
-
-        lv_obj_del(label_typeface_return);
-        lv_obj_del(btn_typeface_return);
-        lv_obj_del(btn_typeface_confirm);
-        lv_obj_del(label_typeface_confirm);
+        printf("btn_system_date_return_event_cb\n");
+        lv_obj_del(system_date_head_bg);
+        lv_obj_del(label_system_date_head);
+        lv_obj_del(label_system_date_year_middle);
+        lv_obj_del(label_system_date_month_middle);
+        lv_obj_del(label_system_date_day_middle);
+        lv_obj_del(label_system_date_hour_middle);      
+        lv_obj_del(label_system_date_minute_middle);   
+        lv_obj_del(label_system_date_second_middle);  
+        lv_obj_del(system_date_roller_year);     
+        lv_obj_del(system_date_roller_month);         
+        lv_obj_del(system_date_roller_day);    
+        lv_obj_del(system_date_roller_hour);   
+        lv_obj_del(system_date_roller_minute);   
+        lv_obj_del(system_date_roller_second);   
+        lv_obj_del(system_date_middle_bg);
+        lv_obj_del(system_date_bottom_bg);
+        lv_obj_del(label_system_date_return);    
+        lv_obj_del(btn_system_date_return);    
+        lv_obj_del(btn_system_date_confirm);    
+        lv_obj_del(label_system_date_confirm);    
     }
 }
 
@@ -15560,33 +19795,73 @@ static void btn_system_date_confirm_event_cb(lv_event_t* e)
     lv_event_code_t code;
     int i=0;
     char temp_str[12] = { 0 };
+    char cmd[128]={0};
+    unsigned char databuf[16];
+    int retvalue;
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
-        if ((pwd_txt != NULL))
+        read_writer_rtc_enable = 0;
+
+        databuf[0] = 0x01;	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_year,temp_str,sizeof(temp_str));
+        databuf[1] = atoi(temp_str)%100;	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_month,temp_str,sizeof(temp_str));
+        databuf[2] = atoi(temp_str);	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_day,temp_str,sizeof(temp_str));
+        databuf[3] = atoi(temp_str);	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_hour,temp_str,sizeof(temp_str));
+        databuf[4] = atoi(temp_str);	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_minute,temp_str,sizeof(temp_str));     
+        printf("temp_str=%s\n\r",temp_str);
+        printf("id=%d\n\r",lv_roller_get_selected(system_date_roller_minute));
+        databuf[5] = atoi(temp_str);	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_second,temp_str,sizeof(temp_str));         
+        databuf[6] = atoi(temp_str);	
+        
+        printf("%u %u %u %u %u %u %u\n\r",databuf[0],databuf[1],databuf[2],databuf[3],databuf[4],databuf[5],databuf[6]);
+
+
+        /* 向/dev/beep文件写入数据 */
+        retvalue = write(fd_bm8563, databuf,sizeof(databuf));
+        if(retvalue < 0)
         {
-            i = atoi(pwd_txt);
-            if (i > 150)
-            {
-                i = 150;
-            }
+            printf("write Control Failed!\r\n");
+            close(fd_bm8563);
+            return -1;
         }
 
-        sprintf(temp_str, "%d", i);
-        lv_label_set_text(label_file_management_word_space_label, temp_str);
+        lv_obj_del(system_date_head_bg);
+        lv_obj_del(label_system_date_head);
+        lv_obj_del(label_system_date_year_middle);
+        lv_obj_del(label_system_date_month_middle);
+        lv_obj_del(label_system_date_day_middle);
+        lv_obj_del(label_system_date_hour_middle);      
+        lv_obj_del(label_system_date_minute_middle);   
+        lv_obj_del(label_system_date_second_middle);  
+        lv_obj_del(system_date_roller_year);     
+        lv_obj_del(system_date_roller_month);         
+        lv_obj_del(system_date_roller_day);    
+        lv_obj_del(system_date_roller_hour);   
+        lv_obj_del(system_date_roller_minute);   
+        lv_obj_del(system_date_roller_second);   
+        lv_obj_del(system_date_middle_bg);
+        lv_obj_del(system_date_bottom_bg);
+        lv_obj_del(label_system_date_return);    
+        lv_obj_del(btn_system_date_return);    
+        lv_obj_del(btn_system_date_confirm);    
+        lv_obj_del(label_system_date_confirm);    
 
-        printf("button_word_space_confirm_event_cb\n");
-        lv_obj_del(typeface_head_bg);
-        lv_obj_del(label_typeface_head);
-        lv_obj_del(typeface_slider_bg);
-        lv_obj_del(pwd_text_area);
-        lv_obj_del(pwd_keyboard);
+        snprintf(cmd, sizeof(cmd), "date -s '%04d-%02d-%02d %02d:%02d:%02d'", 2000+databuf[0],databuf[1],databuf[2], databuf[3],databuf[4],databuf[5]);
+        system(cmd);
 
-        lv_obj_del(label_typeface_return);
-        lv_obj_del(btn_typeface_return);
-        lv_obj_del(btn_typeface_confirm);
-        lv_obj_del(label_typeface_confirm);
+        read_writer_rtc_enable = 1;
     }
 }
 
@@ -16476,7 +20751,7 @@ static void btn_system_date_event_cb(lv_event_t* e)
     lv_event_code_t code;
 
     code = lv_event_get_code(e);
-  //  int len = 0;
+   // int len = 0;
    // int i;
    // int offset_x;
    // int offset_y;
@@ -16579,7 +20854,17 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_obj_align(system_date_roller_year, LV_ALIGN_TOP_LEFT, 5, 25);
         lv_obj_set_style_width(system_date_roller_year, 60, LV_STATE_DEFAULT);
         lv_obj_add_style(system_date_roller_year, &style_sel, LV_PART_SELECTED);
-  
+
+        printf("g_system_time[0]=%d\n\r",g_system_time[0]);
+
+        if((g_system_time[0]>23)&&(g_system_time[0] < 36))
+        {
+             lv_roller_set_selected(system_date_roller_year, g_system_time[0] - 24, LV_ANIM_ON);
+        }
+        else
+        {
+            lv_roller_set_selected(system_date_roller_year, 0, LV_ANIM_ON);
+        }
 
         system_date_roller_month = lv_roller_create(system_date_middle_bg);
         lv_roller_set_options(system_date_roller_month,
@@ -16601,6 +20886,16 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_obj_align(system_date_roller_month, LV_ALIGN_TOP_LEFT, 80, 25);
         lv_obj_add_style(system_date_roller_month, &style_sel, LV_PART_SELECTED);
 
+        printf("g_system_time[1]=%d\n\r",g_system_time[1]);
+
+        if((g_system_time[1]>0)&&(g_system_time[1] < 13))
+        {
+             lv_roller_set_selected(system_date_roller_month, g_system_time[1] - 1, LV_ANIM_ON);
+        }
+        else
+        {
+            lv_roller_set_selected(system_date_roller_month, 0, LV_ANIM_ON);
+        }
 
         system_date_roller_day = lv_roller_create(system_date_middle_bg);
         lv_roller_set_options(system_date_roller_day,
@@ -16641,6 +20936,17 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_obj_align(system_date_roller_day, LV_ALIGN_TOP_LEFT, 155, 25);
         lv_obj_add_style(system_date_roller_day, &style_sel, LV_PART_SELECTED);
 
+        printf("g_system_time[2]=%d\n\r",g_system_time[2]);
+
+        if((g_system_time[2]>0)&&(g_system_time[2] < 32))
+        {
+             lv_roller_set_selected(system_date_roller_day, g_system_time[2] - 1, LV_ANIM_ON);
+        }
+        else
+        {
+            lv_roller_set_selected(system_date_roller_day, 0, LV_ANIM_ON);
+        }
+
         system_date_roller_hour = lv_roller_create(system_date_middle_bg);
         lv_roller_set_options(system_date_roller_hour,
             "00\n"
@@ -16672,6 +20978,18 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_roller_set_visible_row_count(system_date_roller_hour, 5);
         lv_obj_align(system_date_roller_hour, LV_ALIGN_TOP_LEFT, 230, 25);
         lv_obj_add_style(system_date_roller_hour, &style_sel, LV_PART_SELECTED);
+
+
+        printf("g_system_time[3]=%d\n\r",g_system_time[3]);
+
+        if((g_system_time[3]>=0)&&(g_system_time[3] < 24))
+        {
+             lv_roller_set_selected(system_date_roller_hour, g_system_time[3], LV_ANIM_ON);
+        }
+        else
+        {
+            lv_roller_set_selected(system_date_roller_hour, 0, LV_ANIM_ON);
+        }
 
 
         system_date_roller_minute = lv_roller_create(system_date_middle_bg);
@@ -16742,6 +21060,18 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_obj_align(system_date_roller_minute, LV_ALIGN_TOP_LEFT, 305, 25);
         lv_obj_add_style(system_date_roller_minute, &style_sel, LV_PART_SELECTED);
 
+        printf("g_system_time[4]=%d\n\r",g_system_time[4]);
+
+        if((g_system_time[4]>=0)&&(g_system_time[4] < 60))
+        {
+             lv_roller_set_selected(system_date_roller_minute, g_system_time[4], LV_ANIM_ON);
+        }
+        else
+        {
+            lv_roller_set_selected(system_date_roller_minute, 0, LV_ANIM_ON);
+        }
+
+
         system_date_roller_second = lv_roller_create(system_date_middle_bg);
         lv_roller_set_options(system_date_roller_second,
             "00\n"
@@ -16810,6 +21140,17 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_obj_align(system_date_roller_second, LV_ALIGN_TOP_LEFT, 380, 25);
         lv_obj_add_style(system_date_roller_second, &style_sel, LV_PART_SELECTED);
 
+        printf("g_system_time[5]=%d\n\r",g_system_time[5]);
+
+        if((g_system_time[5]>=0)&&(g_system_time[5] < 60))
+        {
+             lv_roller_set_selected(system_date_roller_second, g_system_time[5], LV_ANIM_ON);
+        }
+        else
+        {
+            lv_roller_set_selected(system_date_roller_second, 0, LV_ANIM_ON);
+        }
+
 
         system_date_bottom_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(system_date_bottom_bg, 480, 24);
@@ -16857,13 +21198,7 @@ static void btn_breath_plate_event_cb(lv_event_t* e)
     lv_event_code_t code;
 
     code = lv_event_get_code(e);
-   // int len = 0;
-   // int i;
-    //int offset_x;
-  //  int offset_y;
-    //int line_num = 5;
-   // int size_wide = 85;
-   // int size_high = 24;
+
     lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
@@ -17174,6 +21509,152 @@ static void btn_calibration_event_cb(lv_event_t* e)
     }
 }
 
+static void button_unencrypt_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_set_developer_confirm_event_cb\r\n");
+        //解密
+
+        //比对序列号
+
+        //如果相同设置全局变量
+
+        //如果不同提示错误信息
+
+
+        //删除取消加密界面
+        lv_obj_del(set_developer_bg);
+        lv_obj_del(label_set_developer_head);
+        lv_obj_del(set_developer_middle_bg);
+        lv_obj_del(label_Rf_frequency_text);
+        lv_obj_del(label_Rf_frequency_label);
+        lv_obj_del(label_yield_reset);
+        lv_obj_del(label_btn_yield_reset);
+        lv_obj_del(btn_yield_reset);
+        lv_obj_del(addition_date_bottom_bg);
+        lv_obj_del(label_addition_date_time_return);
+        lv_obj_del(imgbtn_addition_date_time_return);
+        lv_obj_del(imgbtn_addition_date_time_confirm);
+        lv_obj_del(label_addition_date_time_confirm);
+    }
+}
+
+static void button_unencrypt_keyboard_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_date_keyboard_confirm_event_cb\n");
+        //获取输入框数据给到文本显示框
+        lv_label_set_text(label_btn_yield_reset, lv_textarea_get_text(textarea_text_keyboard));
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+    }
+}
+
+
+
+static void btn_unencrypt_event_cb(lv_event_t* e)
+{
+    textarea_bg_keyboard = lv_obj_create(lv_scr_act());
+    /* 设置大小 */
+
+    lv_obj_set_size(textarea_bg_keyboard, 480, 272);
+    lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+    lv_obj_set_style_border_color(textarea_bg_keyboard, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+    //lv_obj_set_style_border_opa(file_management_win, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+    lv_obj_set_style_radius(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+    lv_obj_set_style_bg_color(textarea_bg_keyboard, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+
+    //输入框+键盘
+    LV_FONT_DECLARE(heiFont16_1);
+    pinyin_ime = lv_ime_pinyin_create(lv_scr_act());
+    lv_obj_set_style_text_font(pinyin_ime, &heiFont16_1, 0);
+    //lv_obj_set_style_text_font(pinyin_ime, &lv_font_simsun_16_cjk, 0);
+    //lv_ime_pinyin_set_dict(pinyin_ime, your_dict); // Use a custom dictionary. If it is not set, the built-in dictionary will be used.
+
+    textarea_text_keyboard = lv_textarea_create(lv_scr_act());
+    //lv_textarea_set_one_line(textarea_text_keyboard, true);
+    lv_obj_set_size(textarea_text_keyboard, 480, 95);
+    lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont16_1, 0);
+    lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_textarea_set_max_length(textarea_text_keyboard, 100);
+    lv_textarea_set_placeholder_text(textarea_text_keyboard, "");
+    //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
+    lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+    lv_obj_set_style_border_color(textarea_text_keyboard, lv_color_hex(0xAAAAAA), LV_STATE_DEFAULT); /* 设置边框颜色 */
+    lv_obj_set_style_border_opa(textarea_text_keyboard, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+    lv_obj_set_style_radius(textarea_text_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+
+
+    /*Create a keyboard and add it to ime_pinyin*/
+    text_edit_keyboard = lv_keyboard_create(lv_scr_act());
+    lv_ime_pinyin_set_keyboard(pinyin_ime, text_edit_keyboard);
+    lv_keyboard_set_textarea(text_edit_keyboard, textarea_text_keyboard);
+    //lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0xff4040), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0x1fadd3), LV_PART_MAIN);
+    lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, text_edit_keyboard);
+    lv_obj_align(text_edit_keyboard, LV_ALIGN_TOP_LEFT, 0, 115);
+    lv_obj_set_size(text_edit_keyboard, 480, 133);
+
+    /*Get the cand_panel, and adjust its size and position*/
+    keyboard_cand_panel = lv_ime_pinyin_get_cand_panel(pinyin_ime);
+    lv_obj_set_size(keyboard_cand_panel, LV_PCT(100), LV_PCT(10));
+    lv_obj_align_to(keyboard_cand_panel, text_edit_keyboard, LV_ALIGN_OUT_TOP_MID, 0, 5);
+    lv_obj_set_style_bg_color(keyboard_cand_panel, lv_color_hex(0x8B1A1A), LV_PART_MAIN);
+    lv_obj_set_style_text_font(keyboard_cand_panel, &heiFont16_1, 0);
+
+    keyboard_bg = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(keyboard_bg, 480, 24);
+    lv_obj_align(keyboard_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+    lv_obj_set_style_border_width(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+    lv_obj_set_style_radius(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+    lv_obj_set_style_bg_color(keyboard_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+    lv_obj_remove_style(keyboard_bg, 0, LV_PART_SCROLLBAR);
+
+
+    LV_FONT_DECLARE(heiFont16_1);
+    label_keyboard_return = lv_label_create(lv_scr_act());
+    lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+    lv_label_set_text(label_keyboard_return, "返回");
+    lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+    LV_IMG_DECLARE(get_back);
+    btn_keyboard_return = lv_imgbtn_create(lv_scr_act());
+    lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+    lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
+    lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
+    lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+    LV_IMG_DECLARE(confirm);
+    btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
+    lv_imgbtn_set_src(btn_keyboard_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+    lv_obj_set_size(btn_keyboard_confirm, get_back.header.w, get_back.header.h);
+    lv_obj_align(btn_keyboard_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+    lv_obj_add_event_cb(btn_keyboard_confirm, button_unencrypt_keyboard_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+    LV_FONT_DECLARE(heiFont16_1);
+    label_keyboard_confirm = lv_label_create(lv_scr_act());
+    lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+    lv_label_set_text(label_keyboard_confirm, "确定");
+    lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+}
+
+
 
 static void btn_check_updates_event_cb(lv_event_t* e)
 {
@@ -17181,26 +21662,118 @@ static void btn_check_updates_event_cb(lv_event_t* e)
     int i;
     lv_obj_t* obj = lv_event_get_target(e);
     code = lv_event_get_code(e);
-    if (code == LV_EVENT_FOCUSED)
+    if (code == LV_EVENT_LONG_PRESSED)
     {
-        printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
-        lv_obj_t* label = lv_obj_get_child(obj, 0);
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
+        printf("btn_check_updates_event_cb LV_EVENT_LONG_PRESSED\n");
+        set_developer_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(set_developer_bg, 480, 24);
+        lv_obj_align(set_developer_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(set_developer_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(set_developer_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(set_developer_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(set_developer_bg, 0, LV_PART_SCROLLBAR);
 
-        for (i = 0; i < TYPEFACE_NUMBER; i++)
-        {
-            if (strncmp(lv_label_get_text(label), typeface_name[i], strlen(lv_label_get_text(label))) == 0)
-            {
-                break;
-            }
-        }
-        g_typeface = i;
-        printf("g_typeface=%d\n", g_typeface);
-    }
-    else if (code == LV_EVENT_DEFOCUSED)
-    {
-        printf("button_typeface_event_cb LV_EVENT_DEFOCUSED\n");
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_set_developer_head = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_set_developer_head, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_set_developer_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+        lv_label_set_text(label_set_developer_head, "取消加密");
+        lv_obj_align(label_set_developer_head, LV_ALIGN_TOP_LEFT, 200, 4);
+
+
+        set_developer_middle_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(set_developer_middle_bg, 480, 224);
+        lv_obj_align(set_developer_middle_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_obj_set_style_border_width(set_developer_middle_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(set_developer_middle_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(set_developer_middle_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_Rf_frequency_text = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_Rf_frequency_text, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_Rf_frequency_text, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_label_set_text(label_Rf_frequency_text, "机器码:");
+        lv_obj_align(label_Rf_frequency_text, LV_ALIGN_TOP_LEFT, 45, 60);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_Rf_frequency_label = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_Rf_frequency_label, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_Rf_frequency_label, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_align(label_Rf_frequency_label, LV_ALIGN_TOP_LEFT, 130, 60);
+
+        //根据芯片序列号和时间生成
+        //sprintf(tempbuf,"%d", system_data.develop);
+        lv_label_set_text(label_Rf_frequency_label, "12345678901234567890123456789012");
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_yield_reset = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_yield_reset, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_label_set_text(label_yield_reset, "授权码:");
+        lv_obj_align(label_yield_reset, LV_ALIGN_TOP_LEFT, 45, 120);
+
+        LV_FONT_DECLARE(heiFont14);
+        btn_yield_reset = lv_btn_create(lv_scr_act());
+        lv_obj_set_size(btn_yield_reset, 250, 35);
+        lv_obj_align(btn_yield_reset, LV_ALIGN_TOP_LEFT, 130, 110);
+        lv_obj_set_style_border_width(btn_yield_reset, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(btn_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_obj_set_style_radius(btn_yield_reset, 10, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(btn_yield_reset, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        label_btn_yield_reset = lv_label_create(btn_yield_reset);
+        lv_obj_set_style_text_font(label_btn_yield_reset, &heiFont14, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_btn_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_label_set_text(label_btn_yield_reset, "");
+        lv_obj_align(label_btn_yield_reset, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_border_width(label_btn_yield_reset, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(label_btn_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(label_btn_yield_reset, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(label_btn_yield_reset, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_opa(label_btn_yield_reset, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(label_btn_yield_reset, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_add_event_cb(btn_yield_reset, btn_unencrypt_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+        addition_date_bottom_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(addition_date_bottom_bg, 480, 24);
+        lv_obj_align(addition_date_bottom_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(addition_date_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(addition_date_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(addition_date_bottom_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(addition_date_bottom_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_date_time_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_date_time_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_date_time_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_date_time_return, "返回");
+        lv_obj_align(label_addition_date_time_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+
+        LV_IMG_DECLARE(get_back);
+        imgbtn_addition_date_time_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_date_time_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(imgbtn_addition_date_time_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_date_time_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(imgbtn_addition_date_time_return, button_unencrypt_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_IMG_DECLARE(confirm);
+        imgbtn_addition_date_time_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_date_time_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(imgbtn_addition_date_time_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(imgbtn_addition_date_time_confirm, button_unencrypt_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_date_time_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_date_time_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_date_time_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_addition_date_time_confirm, "确定");
+        lv_obj_align(label_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
 
@@ -17235,32 +21808,720 @@ static void btn_factory_reset_event_cb(lv_event_t* e)
     }
 }
 
+
+
+
+static void dropdown_print_pulse_width_event_handler(lv_event_t* e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t* obj = lv_event_get_target(e);
+    if (code == LV_EVENT_VALUE_CHANGED)
+    {
+        char buf[32];
+        lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
+        printf("Option: %s", buf);
+    }
+}
+
+
+static void button_yield_reset_keyboard_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i=0;
+    char temp_str[12] = { 0 };
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_yield_reset_keyboard_confirm_event_cb\n");
+        const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
+        if ((pwd_txt != NULL))
+        {
+            i = atoi(pwd_txt);
+            if (i > 999999999)
+            {
+                i = 999999999;
+            }
+        }
+
+        sprintf(temp_str, "%d", i);
+        lv_label_set_text(label_btn_yield_reset, temp_str);
+
+        system_data.total_output = i;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+
+static void btn_yield_reset_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    int len = 0;
+    int line_num = 5;
+    int size_wide = 85;
+    int size_high = 24;
+    lv_obj_t* obj = lv_event_get_target(e);
+
+    if (code == LV_EVENT_CLICKED)
+    {
+        typeface_head_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(typeface_head_bg, 480, 24);
+        lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(typeface_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(typeface_head_bg, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_radius(typeface_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(typeface_head_bg, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_head = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+        lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
+        lv_label_set_text(label_typeface_head, "产量重置");
+        typeface_slider_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(typeface_slider_bg, 480, 224);
+        lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_obj_set_style_border_width(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_radius(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT);
+
+        //数字键盘
+        pwd_text_area = lv_textarea_create(lv_scr_act());
+        if (pwd_text_area == NULL)
+        {
+            printf("[%s:%d] create pwd_text_area obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 密码框样式
+        static lv_style_t pwd_text_style;
+        lv_style_init(&pwd_text_style); // 初始化样式
+        lv_style_set_radius(&pwd_text_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&pwd_text_style, 1); // 设置边框宽度
+        lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
+        lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
+        //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
+        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
+        lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
+        lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
+        lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
+        lv_obj_align(pwd_text_area, LV_ALIGN_TOP_LEFT, 0, 24);
+
+        // 基于键盘背景对象创建密码校验提示标签
+        hint_label = lv_label_create(lv_scr_act());
+        if (hint_label == NULL)
+        {
+            printf("[%s:%d] create hint_label obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 密码提示文本样式
+        static lv_style_t hint_label_style;
+        lv_style_init(&hint_label_style); // 初始化样式
+        lv_style_set_radius(&hint_label_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&hint_label_style, 0); //设置边框宽度
+        lv_style_set_text_color(&hint_label_style, lv_palette_main(LV_PALETTE_RED));  // 字体颜色设置为红色
+        lv_style_set_text_font(&hint_label_style, &lv_font_montserrat_12); //设置字体
+        lv_label_set_long_mode(hint_label, LV_LABEL_LONG_SCROLL_CIRCULAR); // 长文本循环滚动
+        lv_obj_add_style(hint_label, &hint_label_style, 0); // 给btn_label添加样式
+        lv_obj_align(hint_label, LV_ALIGN_TOP_MID, 0, 110); // 顶部居中显示
+        lv_label_set_text(hint_label, ""); // 设置文本内容
+
+        // 基于键盘背景对象创建键盘对象
+        pwd_keyboard = lv_keyboard_create(lv_scr_act());
+        if (pwd_keyboard == NULL)
+        {
+            printf("[%s:%d] create pwd_keyboard obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        //键盘样式
+        static lv_style_t pwd_kb_style;
+        lv_style_init(&pwd_kb_style); // 初始化样式
+        lv_style_set_radius(&pwd_kb_style, 5); // 设置样式的圆角弧度
+        lv_style_set_border_width(&pwd_kb_style, 0); //设置边框宽度
+        lv_style_set_bg_color(&pwd_kb_style, lv_color_hex(0xF98E2D));
+        lv_style_set_text_opa(&pwd_kb_style, LV_OPA_COVER);
+        lv_style_set_text_font(&pwd_kb_style, &lv_font_montserrat_20); //设置字体
+        lv_obj_set_size(pwd_keyboard, 480, 174); //设置键盘大小
+        lv_keyboard_set_mode(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2); //设置键盘模式为数字键盘
+        lv_keyboard_set_map(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2, keyboard_map, keyboard_ctrl); // 设置键盘映射
+        lv_keyboard_set_textarea(pwd_keyboard, pwd_text_area); // 键盘对象和文本框绑定
+        lv_obj_add_style(pwd_keyboard, &pwd_kb_style, 0); // 添加样式
+        lv_obj_align(pwd_keyboard, LV_ALIGN_TOP_LEFT, 0, 74);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_typeface_return, "返回");
+        lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+        LV_IMG_DECLARE(get_back);
+        btn_typeface_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+        LV_IMG_DECLARE(confirm);
+        btn_typeface_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(btn_typeface_confirm, button_yield_reset_keyboard_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_typeface_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_typeface_confirm, "确定");
+        lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
+
+static void button_set_developer_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_set_developer_confirm_event_cb\r\n");
+        //保存总产量数据到文件
+        
+        
+        //删除开发者模式界面
+        lv_obj_del(set_developer_bg);
+        lv_obj_del(label_set_developer_head);
+        lv_obj_del(set_developer_middle_bg);
+        lv_obj_del(img_Rf_frequency);
+        lv_obj_del(label_Rf_frequency_text);
+        lv_obj_del(label_Rf_frequency_label);
+        lv_obj_del(img_surrogate_information);
+        lv_obj_del(label_surrogate_information_name);
+        lv_obj_del(label_surrogate_information_label);
+        lv_obj_del(img_print_pulse_width);
+        lv_obj_del(label_print_pulse_width);
+        lv_obj_del(dropdown_print_pulse_width);
+        lv_obj_del(img_yield_reset);
+        lv_obj_del(label_yield_reset);
+        lv_obj_del(label_btn_yield_reset);
+        lv_obj_del(btn_yield_reset);
+        lv_obj_del(addition_date_bottom_bg);
+        lv_obj_del(label_addition_date_time_return);
+        lv_obj_del(imgbtn_addition_date_time_return);
+        lv_obj_del(imgbtn_addition_date_time_confirm);
+        lv_obj_del(label_addition_date_time_confirm);
+
+        //删除密码界面
+        lv_obj_del(hint_label);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_main_cont);
+    }
+}
+
+
+
+static void button_set_developer_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_set_developer_confirm_event_cb\r\n");
+        //保存总产量数据到文件
+
+
+        //删除开发者模式界面
+
+
+
+        //删除
+    }
+}
+
+
+
+// 确认按键的事件回调
+static void developer_confirm_btn_event_callback(lv_event_t* event)
+{
+    char tempbuf[64] = { 0 };
+    if (event == NULL)
+    {
+        printf("[%s:%d] event is NULL\n", __FUNCTION__, __LINE__);
+        return;
+    }
+
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("[%s:%d] confirm button clicked\n", __FUNCTION__, __LINE__);
+        if (pwd_text_area != NULL)
+        {
+            const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
+            if ((pwd_txt != NULL))
+            {
+                if (strcmp(pwd_txt, "210513") == 0)
+                {
+                    if (hint_label != NULL)
+                    {
+                        //lv_label_set_text(hint_label, "Password correct!");
+                        printf("confirm_btn_event_callback\n\r");
+                        set_developer_bg = lv_obj_create(lv_scr_act());
+                        lv_obj_set_size(set_developer_bg, 480, 24);
+                        lv_obj_align(set_developer_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+                        lv_obj_set_style_border_width(set_developer_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+                        lv_obj_set_style_radius(set_developer_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+                        lv_obj_set_style_bg_color(set_developer_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+                        lv_obj_remove_style(set_developer_bg, 0, LV_PART_SCROLLBAR);
+
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_set_developer_head = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_set_developer_head, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_set_developer_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_set_developer_head, "开发者模式");
+                        lv_obj_align(label_set_developer_head, LV_ALIGN_TOP_LEFT, 200, 4);
+
+
+                        set_developer_middle_bg = lv_obj_create(lv_scr_act());
+                        lv_obj_set_size(set_developer_middle_bg, 480, 224);
+                        lv_obj_align(set_developer_middle_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+                        lv_obj_set_style_border_width(set_developer_middle_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+                        lv_obj_set_style_radius(set_developer_middle_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+                        lv_obj_set_style_bg_color(set_developer_middle_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+
+
+                        LV_IMG_DECLARE(frequency);
+                        img_Rf_frequency = lv_img_create(lv_scr_act());
+                        lv_img_set_src(img_Rf_frequency, &frequency);
+                        lv_obj_align(img_Rf_frequency, LV_ALIGN_TOP_LEFT, 10, 34);
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_Rf_frequency_text = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_Rf_frequency_text, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_Rf_frequency_text, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_Rf_frequency_text, "射频次数:");
+                        lv_obj_align(label_Rf_frequency_text, LV_ALIGN_TOP_LEFT, 45, 39);
+
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_Rf_frequency_label = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_Rf_frequency_label, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_Rf_frequency_label, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        //lv_label_set_text(label_Rf_frequency_label, "123");
+                        lv_obj_align(label_Rf_frequency_label, LV_ALIGN_TOP_LEFT, 130, 39);
+
+                        //射频卡信息
+                        //sprintf(tempbuf,"%d", system_data.develop);
+                        //lv_label_set_text(label_Rf_frequency_label, "123");
+
+
+                        LV_IMG_DECLARE(surrogate);
+                        img_surrogate_information = lv_img_create(lv_scr_act());
+                        lv_img_set_src(img_surrogate_information, &surrogate);
+                        lv_obj_align(img_surrogate_information, LV_ALIGN_TOP_LEFT, 260, 34);
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_surrogate_information_name = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_surrogate_information_name, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_surrogate_information_name, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_surrogate_information_name, "代理信息:");
+                        lv_obj_align(label_surrogate_information_name, LV_ALIGN_TOP_LEFT, 295, 39);
+
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_surrogate_information_label = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_surrogate_information_label, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_surrogate_information_label, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_surrogate_information_label, "123");
+                        lv_obj_align(label_surrogate_information_label, LV_ALIGN_TOP_LEFT, 390, 39);
+
+
+                        LV_IMG_DECLARE(print_pulse_width);
+                        img_print_pulse_width = lv_img_create(lv_scr_act());
+                        lv_img_set_src(img_print_pulse_width, &print_pulse_width);
+                        lv_obj_align(img_print_pulse_width, LV_ALIGN_TOP_LEFT, 10, 85);
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_print_pulse_width = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_print_pulse_width, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_print_pulse_width, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_print_pulse_width, "打印脉宽");
+                        lv_obj_align(label_print_pulse_width, LV_ALIGN_TOP_LEFT, 45, 90);
+
+
+                        //static const char* opts_print_pulse_width = "1.5us\n1.6us\n1.7us\n1.8us\n1.9us\n2.0us\n2.1us\n2.2us\n2.3us\n2.4us\n2.5us\n";
+                        static const char* opts_print_pulse_width = "1.8us\n";
+                        dropdown_print_pulse_width = lv_dropdown_create(lv_scr_act());
+                        lv_obj_set_style_border_width(dropdown_print_pulse_width, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+                        lv_obj_set_style_radius(dropdown_print_pulse_width, 10, LV_STATE_DEFAULT); /* 设置圆角 */
+                        lv_obj_set_style_border_color(dropdown_print_pulse_width, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
+                        lv_dropdown_set_options_static(dropdown_print_pulse_width, opts_print_pulse_width);
+                        lv_obj_align(dropdown_print_pulse_width, LV_ALIGN_TOP_LEFT, 130, 80);
+                        lv_obj_set_style_width(dropdown_print_pulse_width, 110, LV_STATE_DEFAULT);
+                        LV_FONT_DECLARE(heiFont14);
+                        lv_obj_set_style_text_font(dropdown_print_pulse_width, &heiFont14, LV_STATE_DEFAULT);
+                        lv_obj_set_style_height(dropdown_print_pulse_width, 35, LV_STATE_DEFAULT);
+                        lv_obj_t* opts_print_pulse_width_list = lv_dropdown_get_list(dropdown_print_pulse_width);
+                        lv_obj_set_style_text_font(opts_print_pulse_width_list, &heiFont14, 0);   // 设置新的字体
+                        LV_IMG_DECLARE(dropdown);
+                        lv_dropdown_set_symbol(dropdown_print_pulse_width, &dropdown);
+                        lv_obj_add_event_cb(dropdown_print_pulse_width, dropdown_print_pulse_width_event_handler, LV_EVENT_ALL, NULL);
+
+
+                        LV_IMG_DECLARE(yield_reset);
+                        img_yield_reset = lv_img_create(lv_scr_act());
+                        lv_img_set_src(img_yield_reset, &yield_reset);
+                        lv_obj_align(img_yield_reset, LV_ALIGN_TOP_LEFT, 260, 85);
+
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_yield_reset = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_yield_reset, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_yield_reset, "产量重置");
+                        lv_obj_align(label_yield_reset, LV_ALIGN_TOP_LEFT, 295, 90);
+
+                        LV_FONT_DECLARE(heiFont14);
+                        btn_yield_reset = lv_btn_create(lv_scr_act());
+                        lv_obj_set_size(btn_yield_reset, 80, 35);
+                        lv_obj_align(btn_yield_reset, LV_ALIGN_TOP_LEFT, 390, 80);
+                        lv_obj_set_style_border_width(btn_yield_reset, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+                        lv_obj_set_style_border_color(btn_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        lv_obj_set_style_radius(btn_yield_reset, 10, LV_STATE_DEFAULT); /* 设置圆角 */
+                        lv_obj_set_style_bg_color(btn_yield_reset, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+                        label_btn_yield_reset = lv_label_create(btn_yield_reset);
+                        lv_obj_set_style_text_font(label_btn_yield_reset, &heiFont14, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_btn_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+                        //lv_label_set_text(label_btn_yield_reset, "0");
+                        lv_obj_align(label_btn_yield_reset, LV_ALIGN_CENTER, 0, 0);
+                        lv_obj_set_style_border_width(label_btn_yield_reset, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+                        lv_obj_set_style_border_color(label_btn_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
+                        lv_obj_set_style_border_opa(label_btn_yield_reset, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+                        lv_obj_set_style_radius(label_btn_yield_reset, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+                        lv_obj_set_style_bg_opa(label_btn_yield_reset, LV_OPA_COVER, LV_PART_MAIN);
+                        lv_obj_set_style_bg_color(label_btn_yield_reset, lv_color_hex(0xffffff), LV_PART_MAIN);
+                        lv_obj_add_event_cb(btn_yield_reset, btn_yield_reset_event_cb, LV_EVENT_CLICKED, NULL);
+
+                        sprintf(tempbuf, "%d", system_data.total_output);
+                        lv_label_set_text(label_btn_yield_reset, tempbuf);
+
+
+                        addition_date_bottom_bg = lv_obj_create(lv_scr_act());
+                        lv_obj_set_size(addition_date_bottom_bg, 480, 24);
+                        lv_obj_align(addition_date_bottom_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+                        lv_obj_set_style_border_width(addition_date_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+                        lv_obj_set_style_radius(addition_date_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+                        lv_obj_set_style_bg_color(addition_date_bottom_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+                        lv_obj_remove_style(addition_date_bottom_bg, 0, LV_PART_SCROLLBAR);
+
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_addition_date_time_return = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_addition_date_time_return, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_addition_date_time_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_addition_date_time_return, "返回");
+                        lv_obj_align(label_addition_date_time_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+
+                        LV_IMG_DECLARE(get_back);
+                        imgbtn_addition_date_time_return = lv_imgbtn_create(lv_scr_act());
+                        lv_imgbtn_set_src(imgbtn_addition_date_time_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+                        lv_obj_set_size(imgbtn_addition_date_time_return, get_back.header.w, get_back.header.h);
+                        lv_obj_align(imgbtn_addition_date_time_return, LV_ALIGN_TOP_LEFT, 180, 250);
+                        lv_obj_add_event_cb(imgbtn_addition_date_time_return, button_set_developer_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+                        LV_IMG_DECLARE(confirm);
+                        imgbtn_addition_date_time_confirm = lv_imgbtn_create(lv_scr_act());
+                        lv_imgbtn_set_src(imgbtn_addition_date_time_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+                        lv_obj_set_size(imgbtn_addition_date_time_confirm, get_back.header.w, get_back.header.h);
+                        lv_obj_align(imgbtn_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+                        lv_obj_add_event_cb(imgbtn_addition_date_time_confirm, button_set_developer_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        label_addition_date_time_confirm = lv_label_create(lv_scr_act());
+                        lv_obj_set_style_text_font(label_addition_date_time_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_addition_date_time_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+                        lv_label_set_text(label_addition_date_time_confirm, "确定");
+                        lv_obj_align(label_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+                    }
+                }
+                else if (pwd_txt[0] == '\0')
+                {
+                    if (hint_label != NULL)
+                    {
+                        lv_label_set_text(hint_label, "Password can not be empty!");
+                    }
+                }
+                else
+                {
+                    if (hint_label != NULL)
+                    {
+                        lv_label_set_text(hint_label, "未链接调试设备或验证码错误！");
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+
+// 取消按键的事件回调
+static void cancel_btn_event_callback(lv_event_t* event)
+{
+    if (event == NULL)
+    {
+        printf("[%s:%d] event is NULL\n", __FUNCTION__, __LINE__);
+        return;
+    }
+
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_CLICKED)
+    {
+#if 0
+        printf("[%s:%d] cancel button clicked\n", __FUNCTION__, __LINE__);
+        if (pwd_text_area != NULL)
+        {
+            lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
+        }
+
+        if (hint_label != NULL)
+        {
+            lv_label_set_text(hint_label, "");
+        }
+#endif
+        printf("cancel_btn_event_callback\n");
+        lv_obj_del(pwd_main_cont);
+
+
+    }
+}
+
+
 static void btn_developer_model_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int i;
     lv_obj_t* obj = lv_event_get_target(e);
     code = lv_event_get_code(e);
-    if (code == LV_EVENT_FOCUSED)
+    if (code == LV_EVENT_CLICKED)
     {
-        printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
-        lv_obj_t* label = lv_obj_get_child(obj, 0);
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
-
-        for (i = 0; i < TYPEFACE_NUMBER; i++)
+        printf("btn_developer_model_event_cb\n");
+        // 当前页面的画布容器
+        pwd_main_cont = lv_obj_create(lv_scr_act()); // 基于屏幕创建了一个容器
+        if (pwd_main_cont == NULL)
         {
-            if (strncmp(lv_label_get_text(label), typeface_name[i], strlen(lv_label_get_text(label))) == 0)
-            {
-                break;
-            }
+            printf("[%s:%d] create pwd_main_cont failed\n", __FUNCTION__, __LINE__);
+            return;
         }
-        g_typeface = i;
-        printf("g_typeface=%d\n", g_typeface);
-    }
-    else if (code == LV_EVENT_DEFOCUSED)
-    {
-        printf("button_typeface_event_cb LV_EVENT_DEFOCUSED\n");
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
+
+        // 画布样式
+        static lv_style_t main_cont_style;
+        lv_style_init(&main_cont_style); // 初始化样式
+        lv_style_set_radius(&main_cont_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&main_cont_style, 0); // 设置边框宽度
+        lv_style_set_bg_opa(&main_cont_style, LV_OPA_COVER); // 设置样式背景的透明度，不透明
+        lv_style_set_bg_color(&main_cont_style, lv_color_make(0xea, 0xea, 0xea));
+        lv_style_set_pad_all(&main_cont_style, 0); // 设置样式内部填充
+        lv_obj_add_style(pwd_main_cont, &main_cont_style, 0);  // 给对象添加样式
+        //lv_obj_set_size(pwd_main_cont, LV_PCT(100), LV_PCT(100)); //设置大小800x480
+        lv_obj_set_size(pwd_main_cont, 480,272); //设置大小800x480
+        lv_obj_center(pwd_main_cont); // 对象居屏幕中间显示
+
+        // 键盘背景容器
+        lv_obj_t* pwd_bg_cont = lv_obj_create(pwd_main_cont);
+        if (pwd_bg_cont == NULL)
+        {
+            printf("[%s:%d] pwd_bg_cont create failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 键盘背景样式
+        static lv_style_t bg_style;
+        lv_style_init(&bg_style); // 初始化样式
+        lv_style_set_radius(&bg_style, 10); // 设置样式的圆角弧度
+        lv_style_set_border_width(&bg_style, 0); // 设置边框宽度
+        lv_style_set_bg_opa(&bg_style, LV_OPA_COVER); // 设置样式背景的透明度，不透明
+        lv_style_set_bg_color(&bg_style, lv_palette_main(LV_PALETTE_BLUE)); //背景色设置为蓝色
+        lv_style_set_pad_all(&bg_style, 0); // 设置样式内部填充
+        // 样式添加渐变
+        lv_style_set_bg_grad_color(&bg_style, lv_color_white()); // 渐变背景色为白色
+        lv_style_set_bg_grad_dir(&bg_style, LV_GRAD_DIR_VER); // 垂直方向渐变
+        lv_style_set_bg_main_stop(&bg_style, 30); // 主停止色40
+        lv_style_set_bg_grad_stop(&bg_style, 30); // 渐变停止色40
+        lv_obj_add_style(pwd_bg_cont, &bg_style, 0);  // 给对象添加样式
+        lv_obj_set_size(pwd_bg_cont, 400, 260); // 设置尺寸
+        lv_obj_align(pwd_bg_cont, LV_ALIGN_TOP_MID, 0, 5); // 顶部居中显示
+
+        // 键盘标题样式
+        static lv_style_t title_label_style;
+        lv_style_init(&title_label_style); // 初始化样式
+        lv_style_set_radius(&title_label_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&title_label_style, 0); //设置边框宽度
+        lv_style_set_text_color(&title_label_style, lv_color_white());  // 字体颜色设置为白色
+        lv_style_set_text_font(&title_label_style, &lv_font_montserrat_18); //设置字体
+
+
+        // 基于键盘背景对象创建键盘标题对象
+        lv_obj_t* title_label = lv_label_create(pwd_bg_cont);
+        if (title_label == NULL)
+        {
+            printf("[%s:%d] create title_label obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        //输入框+键盘
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_set_style_text_font(title_label, &heiFont16_1, 0);
+        lv_label_set_long_mode(title_label, LV_LABEL_LONG_SCROLL_CIRCULAR); // 设置长文本循环滚动模式
+        //lv_obj_set_height(title_label, 23); // 设置对象的高度
+        lv_obj_add_style(title_label, &title_label_style, 0); // 给btn_label添加样式
+        lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 5); // 顶部居中显示
+        lv_label_set_text(title_label, "请链接调试设备输入验证码"); // 设置文本内容
+
+        // 基于键盘背景对象创建密码框
+        pwd_text_area = lv_textarea_create(pwd_bg_cont);
+        if (pwd_text_area == NULL)
+        {
+            printf("[%s:%d] create pwd_text_area obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 密码框样式
+        static lv_style_t pwd_text_style;
+        lv_style_init(&pwd_text_style); // 初始化样式
+        lv_style_set_radius(&pwd_text_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&pwd_text_style, 1); // 设置边框宽度
+        lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
+        lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
+
+        lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
+        lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
+        lv_textarea_set_max_length(pwd_text_area, 8); // 设置可输入的文本的最大长度
+        lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
+
+        lv_obj_set_size(pwd_text_area, 295, 35); // 设置对象大小
+        lv_obj_align_to(pwd_text_area, title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // 顶部居中显示
+
+        // 基于键盘背景对象创建密码校验提示标签
+        hint_label = lv_label_create(pwd_bg_cont);
+        if (hint_label == NULL)
+        {
+            printf("[%s:%d] create hint_label obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 密码提示文本样式
+        static lv_style_t hint_label_style;
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_style_init(&hint_label_style); // 初始化样式
+        lv_style_set_radius(&hint_label_style, 0); // 设置样式的圆角弧度
+        lv_style_set_border_width(&hint_label_style, 0); //设置边框宽度
+        lv_style_set_text_color(&hint_label_style, lv_palette_main(LV_PALETTE_RED));  // 字体颜色设置为红色
+        lv_style_set_text_font(&hint_label_style, &heiFont16_1); //设置字体
+
+        lv_label_set_long_mode(hint_label, LV_LABEL_LONG_SCROLL_CIRCULAR); // 长文本循环滚动
+        lv_obj_add_style(hint_label, &hint_label_style, 0); // 给btn_label添加样式
+        lv_obj_align(hint_label, LV_ALIGN_TOP_MID, 0, 90); // 顶部居中显示
+        lv_label_set_text(hint_label, ""); // 设置文本内容
+
+        // 基于键盘背景对象创建键盘对象
+        lv_obj_t* pwd_keyboard = lv_keyboard_create(pwd_bg_cont);
+        if (pwd_keyboard == NULL)
+        {
+            printf("[%s:%d] create pwd_keyboard obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        // 键盘样式
+        static lv_style_t pwd_kb_style;
+        lv_style_init(&pwd_kb_style); // 初始化样式
+        lv_style_set_radius(&pwd_kb_style, 5); // 设置样式的圆角弧度
+        lv_style_set_border_width(&pwd_kb_style, 0); //设置边框宽度
+        lv_style_set_bg_color(&pwd_kb_style, lv_color_hex(0xF98E2D));
+        lv_style_set_text_opa(&pwd_kb_style, LV_OPA_COVER);
+        lv_style_set_text_font(&pwd_kb_style, &lv_font_montserrat_20); //设置字体
+
+
+        lv_obj_set_size(pwd_keyboard, 300,110); //设置键盘大小
+        lv_keyboard_set_mode(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2); //设置键盘模式为数字键盘
+        lv_keyboard_set_map(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2, keyboard_map, keyboard_ctrl); // 设置键盘映射
+        lv_keyboard_set_textarea(pwd_keyboard, pwd_text_area); // 键盘对象和文本框绑定
+        lv_obj_add_style(pwd_keyboard, &pwd_kb_style, 0); // 添加样式
+        lv_obj_align(pwd_keyboard, LV_ALIGN_TOP_MID, 0, 110);
+
+
+        static lv_style_t btn_style;
+        lv_style_init(&btn_style); // 初始化样式
+        lv_style_set_radius(&btn_style, 5); // 设置样式的圆角弧度
+        lv_style_set_border_width(&btn_style, 0); //设置边框宽度
+        lv_style_set_bg_color(&btn_style, lv_color_hex(0xF98E2D));
+        lv_style_set_text_color(&btn_style, lv_color_hex(0xFFFFFF));
+        lv_style_set_text_font(&btn_style, &lv_font_montserrat_18); //设置字体
+
+        // 基于键盘背景对象创建确认按键
+        lv_obj_t* confirm_btn = lv_btn_create(pwd_bg_cont);
+        if (pwd_bg_cont == NULL)
+        {
+            printf("[%s:%d] pwd_bg_cont create failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        lv_obj_add_event_cb(confirm_btn, developer_confirm_btn_event_callback, LV_EVENT_CLICKED, NULL); // 给对象添加CLICK事件和事件处理回调函数
+        lv_obj_add_style(confirm_btn, &btn_style, 0); // 添加按键样式
+        lv_obj_set_size(confirm_btn, 112, 25); // 设置按键对象大小
+        lv_obj_align(confirm_btn, LV_ALIGN_TOP_MID, 65, 225); // 设置按键对象位置
+
+        // 基于confirm_btn对象创建标签
+        lv_obj_t* confirm_btn_label = lv_label_create(confirm_btn);
+        if (confirm_btn_label == NULL)
+        {
+            printf("[%s:%d] create confirm_btn_label obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_label_set_text(confirm_btn_label, "确定"); // 设置文本内容
+        lv_obj_center(confirm_btn_label); // 居中显示
+        lv_obj_set_style_text_font(confirm_btn_label, &heiFont16_1, 0);
+        lv_obj_t* cancel_btn = lv_btn_create(pwd_bg_cont);
+        if (cancel_btn == NULL)
+        {
+            printf("[%s:%d] cancel_btn create failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        lv_obj_add_event_cb(cancel_btn, cancel_btn_event_callback, LV_EVENT_CLICKED, NULL); // 给对象添加CLICK事件和事件处理回调函数
+        lv_obj_add_style(cancel_btn, &btn_style, 0);
+        lv_obj_set_size(cancel_btn, 112, 25);
+        lv_obj_align(cancel_btn, LV_ALIGN_TOP_MID, -65,225);
+
+        lv_obj_t* cancel_btn_label = lv_label_create(cancel_btn);
+        if (cancel_btn_label == NULL)
+        {
+            printf("[%s:%d] create cancel_btn_label obj failed\n", __FUNCTION__, __LINE__);
+            return;
+        }
+
+        lv_label_set_text(cancel_btn_label, "返回"); // 设置文本内容
+        lv_obj_set_style_text_font(cancel_btn_label, &heiFont16_1, 0);
+        lv_obj_center(cancel_btn_label);
     }
 }
 
@@ -17314,7 +22575,9 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_btn_system_date = lv_label_create(btn_system_date);
     lv_obj_set_style_text_font(label_btn_system_date, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_btn_system_date, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-    lv_label_set_text(label_btn_system_date, "2025-01-07");
+
+    //sprintf(g_time_data_string,"%04u-%02u-%02u",2000+g_system_time[0],g_system_time[1],g_system_time[2]);
+    //lv_label_set_text(label_btn_system_date, g_time_data_string);
     lv_obj_align(label_btn_system_date, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_border_width(label_btn_system_date, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
     lv_obj_set_style_border_color(label_btn_system_date, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17324,7 +22587,7 @@ static void set_tv_system_create(lv_obj_t* parent)
     lv_obj_set_style_bg_color(label_btn_system_date, lv_color_hex(0xffffff), LV_PART_MAIN);
     lv_obj_add_event_cb(btn_system_date, btn_system_date_event_cb, LV_EVENT_CLICKED, NULL);
 
-
+   
     LV_FONT_DECLARE(heiFont16_1);
     label_system_time = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_system_time, &heiFont16_1, LV_STATE_DEFAULT);
@@ -17342,7 +22605,9 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_btn_system_time = lv_label_create(btn_system_time);
     lv_obj_set_style_text_font(label_btn_system_time, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_btn_system_time, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-    lv_label_set_text(label_btn_system_time, "09:54:30");
+    
+    //sprintf(g_time_time_string,"%02u:%02u:%02u",g_system_time[3],g_system_time[4],g_system_time[5]);
+    //lv_label_set_text(label_btn_system_time, g_time_time_string);
     lv_obj_align(label_btn_system_time, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_border_width(label_btn_system_time, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
     lv_obj_set_style_border_color(label_btn_system_time, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17350,9 +22615,10 @@ static void set_tv_system_create(lv_obj_t* parent)
     lv_obj_set_style_radius(label_btn_system_time, 0, LV_STATE_DEFAULT); /* 设置圆角 */
     lv_obj_set_style_bg_opa(label_btn_system_time, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(label_btn_system_time, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_add_event_cb(btn_system_time, btn_system_time_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(btn_system_time, btn_system_date_event_cb, LV_EVENT_CLICKED, NULL);
 
-  
+    set_system_time_flag = 1;
+
     LV_FONT_DECLARE(heiFont16_1);
     label_key_sound = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_key_sound, &heiFont16_1, LV_STATE_DEFAULT);
@@ -17799,11 +23065,84 @@ void set_system_data(void)
     }
 }
 
+
+
+
+#define MAX_PATH_LENGTH 64
+
+// 检查文件扩展名是否为.bmp（不区分大小写）
+int is_bmp_file(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    if (!dot || dot == filename) {
+        return 0;
+    }
+    return strcasecmp(dot, ".bmp") == 0;
+}
+
+// 递归删除目录中的所有BMP文件
+void delete_bmp_files(const char *dir_path) {
+    DIR *dir;
+    struct dirent *entry;
+    struct stat statbuf;
+    char path[MAX_PATH_LENGTH];
+
+    if ((dir = opendir(dir_path)) == NULL) {
+        perror("无法打开目录");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        // 跳过当前目录和上级目录
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        // 构建完整路径
+        snprintf(path, sizeof(path), "%s/%s", dir_path, entry->d_name);
+
+        // 获取文件信息
+        if (lstat(path, &statbuf) == -1) {
+            perror("无法获取文件信息");
+            continue;
+        }
+
+         if (S_ISREG(statbuf.st_mode)) 
+         {
+            // 如果是普通文件，检查是否为BMP文件
+            if (is_bmp_file(entry->d_name)) {
+                printf("正在删除: %s\n", path);
+                if (unlink(path) == -1) {
+                    perror("删除文件失败");
+                }
+            }
+         }
+#if 0
+        if (S_ISDIR(statbuf.st_mode)) {
+            // 如果是目录，递归处理
+            delete_bmp_files(path);
+        } else if (S_ISREG(statbuf.st_mode)) {
+            // 如果是普通文件，检查是否为BMP文件
+            if (is_bmp_file(entry->d_name)) {
+                printf("正在删除: %s\n", path);
+                if (unlink(path) == -1) {
+                    perror("删除文件失败");
+                }
+            }
+        }
+#endif
+    }
+
+    closedir(dir);
+}
+
+
+
 void lv_demo_widgets(void)
 {
-    //int retvalue;
-	//char *filename;
 	char databuf[32];
+    int retvalue;
+    char buf[2]={0};
+    char cmd[128];
 
     if(LV_HOR_RES <= 320) 
     {
@@ -17961,6 +23300,10 @@ void lv_demo_widgets(void)
     lv_font_free(my_font);
 
 #endif
+
+
+    delete_bmp_files("/media/qr_bar_bmp");
+
     get_system_data();
 
     LV_IMG_DECLARE(head_background_image);
@@ -17975,24 +23318,21 @@ void lv_demo_widgets(void)
     lv_obj_set_style_text_font(Total_output_label, (const lv_font_t *)&heiFont16_1, 0);
     //LoadConfigFile(config_file);
     //g_total_output = GetConfigFromString("system_data");
-    //sprintf(databuf,"总产量:%u",g_total_output);
+    sprintf(databuf,"总产量:%u",system_data.total_output);
     lv_label_set_text(Total_output_label, databuf);
     lv_obj_align(Total_output_label, LV_ALIGN_TOP_LEFT, 0, 5);
     lv_obj_set_style_text_color(Total_output_label, lv_color_hex(0xffffff),LV_STATE_DEFAULT);
 
-
-
     Date_label = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(Date_label, (const lv_font_t *)&heiFont16_1, 0);
-    //lv_label_set_text(Date_label, "2024/05/01");
+    lv_label_set_text(Date_label, g_time_data_string);
     lv_label_set_text(Date_label, "");
     lv_obj_align(Date_label, LV_ALIGN_TOP_LEFT, 160, 5);
     lv_obj_set_style_text_color(Date_label, lv_color_hex(0xffffff),LV_STATE_DEFAULT);
 
     Time_label = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(Time_label, (const lv_font_t *)&heiFont16_1, 0);
-    //lv_label_set_text(Time_label, "12:44:30");
-    lv_label_set_text(Time_label, "");
+    lv_label_set_text(Time_label, g_time_time_string);
     lv_obj_align(Time_label, LV_ALIGN_TOP_LEFT, 280, 5);
     lv_obj_set_style_text_color(Time_label, lv_color_hex(0xffffff),LV_STATE_DEFAULT);
 
@@ -18068,6 +23408,8 @@ void lv_demo_widgets(void)
 
 
 
+
+
     win_obj = lv_obj_create(lv_scr_act());
     lv_obj_align(win_obj, LV_ALIGN_TOP_LEFT, 0, 24);
     lv_obj_set_size(win_obj, 480, 160);
@@ -18078,7 +23420,8 @@ void lv_demo_widgets(void)
     lv_obj_set_style_radius(win_obj, 0, LV_STATE_DEFAULT); /* 设置圆角 */
 
     win_content = lv_obj_create(win_obj);
-    lv_obj_set_size(win_content, 1077, 158);
+    //lv_obj_set_size(win_content, 1077, 158);
+    lv_obj_set_size(win_content, 960, 158);
     lv_obj_align(win_content, LV_ALIGN_TOP_LEFT, -15, -15);
     lv_obj_set_style_bg_color(win_content, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(win_content, 2, LV_STATE_DEFAULT); /* 设置边框宽度 */
