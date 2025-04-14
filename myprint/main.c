@@ -195,7 +195,7 @@ int main(void)
     {
         lv_timer_handler();
         usleep(10);
-        function_20240522();
+        //function_20240522();
     }
     
     return 0;
