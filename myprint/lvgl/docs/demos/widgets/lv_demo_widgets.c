@@ -116,6 +116,7 @@ static lv_obj_t * Battery_label;
 static lv_obj_t * Battery_image;
 static lv_obj_t * win_content;
 static lv_obj_t* win_obj;
+static lv_obj_t* screen_off_obj;
 
 #define CANVAS_WIDTH      1077
 #define CANVAS_HEIGHT     158
@@ -1188,7 +1189,7 @@ char usb_picture[USB_PICTURE_NUMBER][128]={0};
 static uint16_t g_row;
 lv_obj_t* picture_img;
 
-static g_modification_id = 0;
+static int g_modification_id = 0;
 
 
 lv_obj_t* set_developer_bg;
@@ -1241,7 +1242,7 @@ lv_img_dsc_t icon_buf[ICON_NUMBER] = { 0 };
 
 int g_screen_off_count = 0;
 unsigned char g_screen_off_status = 0;
-unsigned int g_sd_serial;
+uint32_t g_sd_serial;
 
 
 #ifdef __GNUC__
@@ -1349,6 +1350,8 @@ static uint8_t msg[MSG_SIZE] ;
 static AES_CTX context ;
 
 unsigned char g_authorization_buf[16]={0};
+unsigned char g_screen_touch_flag = 0;
+unsigned int g_screen_touch_count = 0;
 
 static void textarea_text_event_cb(lv_event_t* e);
 static void drag_event_handler(lv_event_t* e);
@@ -1377,12 +1380,21 @@ void remove_dat_suffix(const char *filename, char *output);
 void bubbleSort(int arr[], int n);
 void print_memory_info(const MemoryInfo *mem);
 int get_memory_info(MemoryInfo *mem);
+int get_sd_id(void);
+void recovery_data(void);
+void get_config_data(void);
+void slider_show_icon(void);
+void screen_touched_event_handler(lv_event_t * e);
+void pwm_init(void);
+int pwm_brightness(int vaule);
+unsigned char stringToHex(char a);
+unsigned char CRC8(unsigned char buf[],unsigned char len);
+time_t datetime_to_seconds(int year, int month, int day, int hour, int minute, int second);
 
 
 
-
-time_t datetime_to_seconds(int year, int month, int day, 
-                          int hour, int minute, int second) {
+time_t datetime_to_seconds(int year, int month, int day, int hour, int minute, int second) 
+{
     struct tm time_struct = {0};
     
     // 填充tm结构体
@@ -1427,6 +1439,7 @@ unsigned char stringToHex(char a)
 	{
 		return a - 'a' + 10;
 	}
+    return 0;
 }
 
 //获取1列的打印数据
@@ -2585,7 +2598,73 @@ int pwm_voltage(void)
         printf("change period ok\n");
     }
 
-    dutycycle = (int)system_data.print.print_voltage;
+    switch(system_data.print.print_voltage)
+    {
+        case 0:
+        default:
+            dutycycle = 39;//8.0
+            break;
+        case 1:
+            dutycycle = 42;//8.2
+            break;
+        case 2:
+            dutycycle = 46;//8.4
+            break;
+        case 3:
+            dutycycle = 49;//8.6
+            break;
+        case 4:
+            dutycycle = 52;//8.8
+            break;
+        case 5:
+            dutycycle = 55;//9.0
+            break;
+        case 6:
+            dutycycle = 59;//9.2
+            break;
+        case 7:
+            dutycycle = 62;//9.4
+            break;
+        case 8:
+            dutycycle = 65;//9.6
+            break;
+        case 9:
+            dutycycle = 69;//9.8
+            break;
+        case 10:
+            dutycycle = 72;//10
+            break;
+        case 11:
+            dutycycle = 75;//10.2
+            break;
+        case 12:
+            dutycycle = 78;//10.4
+            break;
+        case 13:
+            dutycycle = 82;//10.6
+            break;
+        case 14:
+            dutycycle = 85;//10.8
+            break;
+        case 15:
+            dutycycle = 88;//11
+            break;
+        case 16:
+            dutycycle = 92;//11.2
+            break;
+        case 17:
+            dutycycle = 95;//11.4
+            break;
+        case 18:
+            dutycycle = 98;//11.6
+            break;
+        case 19:
+            dutycycle = 99;//11.7
+            break;
+        case 20:
+            dutycycle = 100;//11.8
+            break;
+    }
     
     period = atoi(PERIOD);
     dutycycle = period * dutycycle / 100;
@@ -2669,44 +2748,36 @@ int pwm_brightness(int vaule)
 void pwm_init(void)
 {
     int ret ;
-    int period;
-    char strDutycycle[10];
-    int pwm = 0;
-    int dutycycle;
 
     fd_pwm = open("/sys/class/pwm/pwmchip0/export", O_WRONLY);
     if(fd_pwm < 0)
     {
         printf("open export error\n");
-        return -1;
     }
 	  
     ret = write(fd_pwm, "0", strlen("0"));
     if(ret < 0)
     {
         printf("creat pwm0 error\n");
-        return -1;
     }
     else
     {
         printf("export pwm0 ok\n");
     }
 
-    fd_period_0 = open("/sys/class/pwm/pwmchip0/pwm1/period", O_RDWR);
-    fd_duty_0 = open("/sys/class/pwm/pwmchip0/pwm1/duty_cycle", O_RDWR);
-    fd_enable_0 = open("/sys/class/pwm/pwmchip0/pwm1/enable", O_RDWR);
+    fd_period_0 = open("/sys/class/pwm/pwmchip0/pwm0/period", O_RDWR);
+    fd_duty_0 = open("/sys/class/pwm/pwmchip0/pwm0/duty_cycle", O_RDWR);
+    fd_enable_0 = open("/sys/class/pwm/pwmchip0/pwm0/enable", O_RDWR);
 
     if((fd_period_0 < 0)||(fd_duty_0 < 0)||(fd_enable_0 < 0))
     {
         printf("open error\n");
-        return -1;
     }
 
     ret = write(fd_pwm, "1", strlen("1"));
     if(ret < 0)
     {
         printf("creat pwm1 error\n");
-        return -1;
     }
     else
     {
@@ -2720,9 +2791,7 @@ void pwm_init(void)
     if((fd_period_1 < 0)||(fd_duty_1 < 0)||(fd_enable_1 < 0))
     {
         printf("open error\n");
-        return -1;
     }
-    return 0;
 }
 
 void set_mp1484_en(unsigned char gpio_status)
@@ -2822,7 +2891,7 @@ void function_20240522(void)
 int get_memory_info(MemoryInfo *mem) {
     FILE *fp;
     char line[256];
-    char key[32];
+    char temp_key[32];
     unsigned long value;
     int found = 0;
 
@@ -2836,24 +2905,24 @@ int get_memory_info(MemoryInfo *mem) {
     memset(mem, 0, sizeof(MemoryInfo));
 
     while (fgets(line, sizeof(line), fp)) {
-        if (sscanf(line, "%s %lu kB", key, &value) != 2) {
+        if (sscanf(line, "%s %lu kB", temp_key, &value) != 2) {
             continue; // 跳过格式不匹配的行
         }
 
         // 匹配关键字段
-        if (strcmp(key, "MemTotal:") == 0) {
+        if (strcmp(temp_key, "MemTotal:") == 0) {
             mem->total = value;
             found++;
-        } else if (strcmp(key, "MemFree:") == 0) {
+        } else if (strcmp(temp_key, "MemFree:") == 0) {
             mem->free = value;
             found++;
-        } else if (strcmp(key, "MemAvailable:") == 0) {
+        } else if (strcmp(temp_key, "MemAvailable:") == 0) {
             mem->available = value;
             found++;
-        } else if (strcmp(key, "Buffers:") == 0) {
+        } else if (strcmp(temp_key, "Buffers:") == 0) {
             mem->buffers = value;
             found++;
-        } else if (strcmp(key, "Cached:") == 0) {
+        } else if (strcmp(temp_key, "Cached:") == 0) {
             mem->cached = value;
             found++;
         }
@@ -2899,6 +2968,32 @@ void bubbleSort(int arr[], int n) {
 }
 
 
+void screen_touched_event_handler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    //lv_obj_t * obj = lv_event_get_target(e);
+    
+    if(code == LV_EVENT_CLICKED) 
+    {
+        printf("lv_scr_act LV_EVENT_CLICKED\n");
+        if(g_screen_off_status == 1)
+        {
+            g_screen_off_status = 0;
+
+            lv_obj_del(screen_off_obj);
+
+            g_screen_off_count = 0;
+
+            pwm_brightness((int)(100-system_data.system.brightness)*4/5);
+        }
+        else
+        {
+            g_screen_off_count = 0;
+        }
+    }
+}
+
+
 static void timer_100ms_cb(lv_timer_t * t)
 {
     int retvalue;
@@ -2918,6 +3013,7 @@ static void timer_100ms_cb(lv_timer_t * t)
     unsigned char break_num = 0;
     unsigned char win_content_child_num;
     char date_time_str[64]={0};
+    pid_t status;
 
     time_count_1s++;
     if(time_count_1s >= 10)
@@ -2960,6 +3056,25 @@ static void timer_100ms_cb(lv_timer_t * t)
                 snprintf(cmd, sizeof(cmd), "date -s '%04d-%02d-%02d %02d:%02d:%02d'", 2000+g_system_time[0],g_system_time[1],g_system_time[2], g_system_time[3],g_system_time[4],g_system_time[5]);
                 system(cmd);               
             }
+        }
+    }
+
+    if(g_screen_touch_flag == 1)
+    {
+        g_screen_touch_count++;
+        if(g_screen_touch_count > 30)
+        {
+            printf("screen_off_obj\n");
+
+            status = system("ts_calibrate");
+            if (-1 == status)
+            {
+                printf("ts_calibrate error\n");
+            }
+
+            lv_obj_del(screen_off_obj);    
+            g_screen_touch_flag = 0;
+            g_screen_touch_count = 0;
         }
     }
 
@@ -3016,7 +3131,7 @@ static void timer_100ms_cb(lv_timer_t * t)
         adc_count_5s = 0;
     }
 
-    if((adc_count_5s %100) == 0)
+    if((adc_count_5s %300) == 0)
     {
         MemoryInfo mem;
         if (get_memory_info(&mem) == 0) 
@@ -3115,7 +3230,7 @@ static void timer_100ms_cb(lv_timer_t * t)
 
     if(buzzer_enable == 1)
     {
-        if(system_data.system.buzzer == 1)
+        if(system_data.system.buzzer == 0)
         {
             buzzer_count++;
             if(buzzer_count == 1)
@@ -3128,9 +3243,11 @@ static void timer_100ms_cb(lv_timer_t * t)
                     close(fd_buzzer);
                 }
             }
-            else if(buzzer_count > 3)
+            else if(buzzer_count > 2)
             {
                 buzzer_enable = 0;
+                g_screen_off_count = 0;
+                g_data_structure_count = 0;
                 buf[0] = 0;
                 retvalue = write(fd_buzzer, buf, 1);
                 if(retvalue < 0)
@@ -3143,6 +3260,8 @@ static void timer_100ms_cb(lv_timer_t * t)
         else
         {
             buzzer_enable = 0;
+            g_screen_off_count = 0;
+            g_data_structure_count = 0;
         }
 
     }
@@ -3150,38 +3269,55 @@ static void timer_100ms_cb(lv_timer_t * t)
     {
         buzzer_count = 0;
     }
-    
-    g_screen_off_count++;
-    switch(system_data.system.screen_off)
+
+    if(g_screen_off_status == 0)
     {
-        case 0:
+        g_screen_off_count++;
+        switch(system_data.system.screen_off)
         {
-            if(g_screen_off_count > 600)
+            case 0:
             {
-                pwm_brightness(0);
-                g_screen_off_status = 1;
+                if(g_screen_off_count > 600)
+                {
+                    pwm_brightness(100);
+                    g_screen_off_status = 1;
+                }
+                break;
             }
-            break;
-        }
-        case 1:
-        {
-            if(g_screen_off_count > 3000)
+            case 1:
             {
-                pwm_brightness(0);
-                g_screen_off_status = 1;
-            } 
-            break;
-        }
-        case 2:
-        {
-            if(g_screen_off_count > 18000)
+                if(g_screen_off_count > 3000)
+                {
+                    pwm_brightness(100);
+                    g_screen_off_status = 1;
+                } 
+                break;
+            }
+            case 2:
             {
-                pwm_brightness(0);
-                g_screen_off_status = 1;
-            } 
-            break;
+                if(g_screen_off_count > 18000)
+                {
+                    pwm_brightness(100);
+                    g_screen_off_status = 1;
+                } 
+                break;
+            }
+        }
+
+        if(g_screen_off_status == 1)
+        {
+            screen_off_obj = lv_obj_create(lv_scr_act());
+            lv_obj_align(screen_off_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+            lv_obj_set_size(screen_off_obj, 480, 272);
+            lv_obj_set_style_bg_color(screen_off_obj, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+            lv_obj_set_style_border_width(screen_off_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+            lv_obj_set_style_border_color(screen_off_obj, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+            lv_obj_clear_flag(screen_off_obj, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_style_radius(screen_off_obj, 0, LV_STATE_DEFAULT); /* 设置圆角 */    
+            lv_obj_add_event_cb(screen_off_obj, screen_touched_event_handler, LV_EVENT_CLICKED, NULL);       
         }
     }
+
 
     if(print_button_enable == 1)
     {
@@ -4282,6 +4418,7 @@ static void timer_100ms_cb(lv_timer_t * t)
                 printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
                 printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
                 printf("nozzle=%d\n", print_data.nozzle);
+                printf("print_direction=%d\n", system_data.print.print_direction);
             
 #if 0
             pdata2 = (unsigned char*)canvasBuf;
@@ -4407,6 +4544,7 @@ static void timer_100ms_cb(lv_timer_t * t)
                 flash_set_count = 0;
 
                 set_system_data();
+#if 0
 
                 AUTHORIZATION_INFORMATION  authorization;
 
@@ -4485,6 +4623,9 @@ static void timer_100ms_cb(lv_timer_t * t)
                         print_button_enable = 3;
                     }
                 }
+#endif
+                print_button_enable = 3;
+
             }
 
         } 
@@ -4753,6 +4894,7 @@ static void timer_100ms_cb(lv_timer_t * t)
         }        
     }
 
+
     flash_set_count++;
     if((flash_set_count / 600) >= system_data.print.flash_set)
     {
@@ -4939,6 +5081,8 @@ static void button_keyboard_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_keyboard_return_event_cb\n");
+
+        buzzer_enable = 1;
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
         lv_obj_del(textarea_text_keyboard);
@@ -4959,6 +5103,7 @@ static void button_keyboard_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_keyboard_confirm_event_cb\n");
+        buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_file_management_text_label, lv_textarea_get_text(textarea_text_keyboard));
         lv_label_set_text(label_file_management_label, lv_textarea_get_text(textarea_text_keyboard));
@@ -5271,7 +5416,7 @@ static void button_add_event_cb(lv_event_t* e)
                             data_structure[index].data.icon.size = 256;
                         }
 
-                        lv_img_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
+                        lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.icon.size);
 
                         // 获取图片对象
@@ -5305,7 +5450,7 @@ static void button_add_event_cb(lv_event_t* e)
                             data_structure[index].data.picture.size = 256;
                         }
 
-                        lv_img_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
+                        lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.picture.size);
 
                         // 获取图片对象
@@ -5340,7 +5485,7 @@ static void button_add_event_cb(lv_event_t* e)
                             data_structure[index].data.qr_bar.size = 256;
                         }
 
-                        lv_img_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
+                        lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.qr_bar.size);
 
                         // 获取图片对象
@@ -5621,7 +5766,7 @@ static void button_reduce_event_cb(lv_event_t* e)
                             data_structure[index].data.icon.size = 128;
                         }
 
-                        lv_img_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
+                        lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.icon.size);
 
 
@@ -5656,7 +5801,7 @@ static void button_reduce_event_cb(lv_event_t* e)
                             data_structure[index].data.picture.size = 128;
                         }
 
-                        lv_img_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
+                        lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.picture.size);
 
                         // 获取图片对象
@@ -5691,7 +5836,7 @@ static void button_reduce_event_cb(lv_event_t* e)
                             data_structure[index].data.qr_bar.size = 128;
                         }
 
-                        lv_img_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
+                        lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.qr_bar.size);
 
                         // 获取图片对象
@@ -5719,9 +5864,8 @@ static void button_reduce_event_cb(lv_event_t* e)
 static void button_print_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int retvalue;
-    int i;
-    unsigned char databuf[16]={0};
+    //int retvalue;
+    //unsigned char databuf[16]={0};
     code = lv_event_get_code(e);
 
     //unsigned char* pdata = NULL;
@@ -5743,6 +5887,8 @@ static void button_print_event_cb(lv_event_t* e)
             lv_imgbtn_set_src(imgbtn_print, LV_IMGBTN_STATE_RELEASED, NULL, &print_2, NULL);
             lv_obj_set_size(imgbtn_print, print_2.header.w, print_2.header.h);
             lv_obj_align(imgbtn_print, LV_ALIGN_TOP_LEFT, 425, 207);
+
+#if 0
 
             AUTHORIZATION_INFORMATION  authorization;
 
@@ -5788,7 +5934,14 @@ static void button_print_event_cb(lv_event_t* e)
                             LV_FONT_DECLARE(heiFont16_1);
                             lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
                             lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-                            lv_label_set_text(label_print, "打印中");
+                            if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                            {
+                                lv_label_set_text(label_print,  "打印中");
+                            }
+                            else if(system_data.system.language == LANGUAGE_ENGLISH)
+                            {
+                                lv_label_set_text(label_print, "Printing");
+                            }
                             lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
 
                             print_button_enable = 1;
@@ -5802,12 +5955,23 @@ static void button_print_event_cb(lv_event_t* e)
                     LV_FONT_DECLARE(heiFont16_1);
                     lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
                     lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-                    lv_label_set_text(label_print, "打印中");
+                    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                    {
+                        lv_label_set_text(label_print,  "打印中");
+                    }
+                    else if(system_data.system.language == LANGUAGE_ENGLISH)
+                    {
+                        lv_label_set_text(label_print, "Printing");
+                    }
                     lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
 
                     print_button_enable = 1;
                 }
+
             }
+#endif
+            print_button_enable = 1;
+
         }
         else
         {
@@ -5821,7 +5985,14 @@ static void button_print_event_cb(lv_event_t* e)
             LV_FONT_DECLARE(heiFont16_1);
             lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
             lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-            lv_label_set_text(label_print, "打印");
+            if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+            {
+                lv_label_set_text(label_print,  "打印");
+            }
+            else if(system_data.system.language == LANGUAGE_ENGLISH)
+            {
+                lv_label_set_text(label_print, "Print");
+            }
             lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 428, 251);
 
 
@@ -5871,15 +6042,15 @@ void remove_dat_suffix(const char *filename, char *output)
     size_t length = 0;
     if (filename != NULL) 
     {
-        length = strlen(filename);
         // 获取字符串长度
-        size_t length = strlen(filename);
+        length = strlen(filename);
 
         // 检查字符串是否以 .dat 结尾
-        if (length >= 4 && strcmp(filename + length - 4, ".dat") == 0) 
+        if (length > 4 && strcmp(filename + length - 4, ".dat") == 0) 
         {
             // 去掉 .dat 后缀，复制到输出参数
-            strncpy(output, filename, length - 4);
+            //strncpy(output, filename, length - 4);
+            snprintf(output, 128, "%.*s", (int)(length - 4), filename);
             output[length - 4] = '\0'; // 确保字符串以 \0 结尾
         } 
         else 
@@ -5899,12 +6070,14 @@ void remove_dat_suffix(const char *filename, char *output)
 static void btn_file_delete_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    char file_name[128]={0};
+    char file_name[100]={0};
     char image_name[128]={0};
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_file_delete_event_cb\n");
+
+        buzzer_enable = 1;
 
         if(g_file_num > 0)
         {
@@ -5970,6 +6143,7 @@ static void button_file_keyboard_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
         printf("button_keyboard_return_event_cb\n");
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
@@ -5988,6 +6162,7 @@ static void imgbtn_file_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
         printf("imgbtn_file_return_event_cb\n");
         lv_obj_del(obj_addition_picture_head_bg);
         lv_obj_del(label_addition_picture_head);
@@ -6069,7 +6244,7 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
     char bmp_name[64]={0};
     char bmp_name_1[80]={0};  
     char date_time_str[64]={ 0 };
-    lv_img_t* img_obj = NULL;
+    lv_obj_t* img_obj = NULL;
     lv_img_t* img_1 = NULL;
     lv_img_dsc_t* img_dsc = NULL;
 
@@ -6078,6 +6253,8 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_file_confirm_event_cb\n");
+
+        buzzer_enable = 1;
 
         win_content_child_num = lv_obj_get_child_cnt(win_content);
 
@@ -8391,6 +8568,8 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_file_search_keyboard_confirm_event_cb\n");
+
+        buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_addition_picture_search, lv_textarea_get_text(textarea_text_keyboard));
         len = strlen(lv_label_get_text(label_btn_addition_picture_search));
@@ -8425,7 +8604,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             DIR *dir;
             struct dirent *entry;
             struct stat file_stat;
-            char path[128];
+            char path[300];
             //unsigned char picture_count = 0;
             //int picture_type = 0;
             char created_time[20] ={0};
@@ -8443,7 +8622,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
 
             while ((entry = readdir(dir)) != NULL) 
             {
-                snprintf(path, sizeof(path), "%s/%s", "/media/file", entry->d_name);
+                snprintf(path, sizeof(path), "/media/file/%s", entry->d_name);
                 if (stat(path, &file_stat) == -1) 
                 {
                     perror("stat");
@@ -8487,7 +8666,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             DIR *dir;
             struct dirent *entry;
             struct stat file_stat;
-            char path[128];
+            char path[300];
             unsigned char picture_count = 0;
             //int picture_type = 0;
             char created_time[20] ={0};
@@ -8503,7 +8682,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
 
             while ((entry = readdir(dir)) != NULL) 
             {
-                snprintf(path, sizeof(path), "%s/%s", "/media/file", entry->d_name);
+                snprintf(path, sizeof(path), "/media/file/%s", entry->d_name);
                 if (stat(path, &file_stat) == -1) 
                 {
                     perror("stat");
@@ -8550,7 +8729,7 @@ static void file_change_event_cb(lv_event_t* e)
     lv_obj_t* obj = lv_event_get_target(e);
     uint16_t col;
     uint16_t row;
-    char picture_name[128] = { 0 };
+    char picture_name[100] = { 0 };
     char picture_name_1[128] = { 0 };
 
     lv_table_get_selected_cell(obj, &row, &col);
@@ -8576,9 +8755,12 @@ static void btn_file_search_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_file_search_event_cb\n\r");
-        textarea_bg_keyboard = lv_obj_create(lv_scr_act());
-        /* 设置大小 */
 
+        buzzer_enable = 1;
+
+        textarea_bg_keyboard = lv_obj_create(lv_scr_act());
+
+        /* 设置大小 */
         lv_obj_set_size(textarea_bg_keyboard, 480, 272);
         lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -8646,7 +8828,14 @@ static void btn_file_search_event_cb(lv_event_t* e)
         label_keyboard_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_return, "Return");
+        }
         lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -8667,7 +8856,14 @@ static void btn_file_search_event_cb(lv_event_t* e)
         label_keyboard_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_confirm, "Confirm");
+        }
         lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -8676,7 +8872,7 @@ static void btn_file_search_event_cb(lv_event_t* e)
 static void button_file_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    char file_name[128]={0};
+    char file_name[100]={0};
     code = lv_event_get_code(e);
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
@@ -8696,7 +8892,16 @@ static void button_file_event_cb(lv_event_t* e)
         label_addition_picture_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_head, "文件");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_head, "文件");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_head, "File");
+        }
+
         lv_obj_align(label_addition_picture_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -8717,8 +8922,18 @@ static void button_file_event_cb(lv_event_t* e)
         lv_obj_add_style(table_addition_picture, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
         LV_FONT_DECLARE(heiFont16_1);
         lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
-        lv_table_set_cell_value(table_addition_picture, 0, 1, "时间");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
+            lv_table_set_cell_value(table_addition_picture, 0, 1, "时间");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_table_set_cell_value(table_addition_picture, 0, 0, "Name");
+            lv_table_set_cell_value(table_addition_picture, 0, 1, "Time");
+        }
+
         lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 160, 24);
         lv_table_set_col_width(table_addition_picture, 0, 210);
         lv_table_set_col_width(table_addition_picture, 1, 90);
@@ -8756,7 +8971,7 @@ static void button_file_event_cb(lv_event_t* e)
         DIR *dir;
         struct dirent *entry;
         struct stat file_stat;
-        char path[128];
+        char path[300];
         //unsigned char picture_count = 0;
         //int picture_type = 0;
         char created_time[20] ={0};
@@ -8882,7 +9097,14 @@ static void button_file_event_cb(lv_event_t* e)
         label_addition_picture_search = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_search, "搜索");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_search, "搜索");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_search, "Search");
+        }
         lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 42, 222);
 
 
@@ -8911,7 +9133,15 @@ static void button_file_event_cb(lv_event_t* e)
         label_addition_picture_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_return, "返回");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_return, "Return");
+        }
         lv_obj_align(label_addition_picture_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -8933,7 +9163,14 @@ static void button_file_event_cb(lv_event_t* e)
         label_addition_picture_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_confirm, "Confirm");
+        }
         lv_obj_align(label_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -8948,6 +9185,8 @@ static void button_save_keyboard_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_save_keyboard_return_event_cb\n");
+
+        buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_addition_picture_search, lv_textarea_get_text(textarea_text_keyboard));
         len = strlen(lv_label_get_text(label_btn_addition_picture_search));
@@ -9282,6 +9521,7 @@ static void button_save_keyboard_confirm_event_cb(lv_event_t* e)
         lv_obj_del(btn_keyboard_return);
 
         printf("button_save_keyboard_confirm_event_cb\n");
+        buzzer_enable = 1;
         //获取文件名称
         sprintf(file_name, "/media/file/%s.dat", lv_textarea_get_text(textarea_text_keyboard));
         // 打开文件以写入二进制数据
@@ -9330,6 +9570,8 @@ static void button_save_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED)&& (print_status == 0))
     {
         printf("save\n");
+
+        buzzer_enable = 1;
         //如果子控件数量大于0,才能保存
         win_content_child_num = lv_obj_get_child_cnt(win_content);
         if (win_content_child_num > 0)
@@ -9396,7 +9638,15 @@ static void button_save_event_cb(lv_event_t* e)
             label_keyboard_return = lv_label_create(lv_scr_act());
             lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
             lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-            lv_label_set_text(label_keyboard_return, "返回");
+
+            if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+            {
+                lv_label_set_text(label_keyboard_return, "返回");
+            }
+            else if(system_data.system.language == LANGUAGE_ENGLISH)
+            {
+                lv_label_set_text(label_keyboard_return, "Return");
+            }
             lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
             LV_IMG_DECLARE(get_back);
@@ -9417,7 +9667,14 @@ static void button_save_event_cb(lv_event_t* e)
             label_keyboard_confirm = lv_label_create(lv_scr_act());
             lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
             lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-            lv_label_set_text(label_keyboard_confirm, "确定");
+            if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+            {
+                lv_label_set_text(label_keyboard_confirm, "确定");
+            }
+            else if(system_data.system.language == LANGUAGE_ENGLISH)
+            {
+                lv_label_set_text(label_keyboard_confirm, "Confirm");
+            }
             lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
         }
     }
@@ -9430,6 +9687,7 @@ static void button_file_management_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("get_back\n");
+        buzzer_enable = 1;
         lv_obj_del(file_management_win);
         lv_obj_del(file_management_head_bg);
         lv_obj_del(label_file_management_total_output);
@@ -9541,9 +9799,9 @@ static void drag_event_handler(lv_event_t* e)
 
             lv_coord_t y = lv_obj_get_y(obj) + vect.y;
 
-            if (y <= 0)
+            if (y <= -100)
             {
-                y = 0;
+                y = -100;
             }
 
             if (y >= 150)
@@ -9609,6 +9867,7 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("\nbutton_file_management_confirm_event_cb\n");
+        buzzer_enable = 1;
 
         int len = strlen(lv_label_get_text(label_file_management_label)) + 1;
         printf("len=%u\n\r", len);
@@ -9834,6 +10093,7 @@ static void btn_file_management_text_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_file_management_text_event_cb\n");
+        buzzer_enable = 1;
 
         textarea_bg_keyboard = lv_obj_create(lv_scr_act());
         /* 设置大小 */
@@ -9897,7 +10157,14 @@ static void btn_file_management_text_event_cb(lv_event_t* e)
         label_keyboard_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_return, "Return");
+        }
         lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -9918,7 +10185,14 @@ static void btn_file_management_text_event_cb(lv_event_t* e)
         label_keyboard_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_confirm, "Confirm");
+        }
         lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
 
         lv_timer_pause(timer_100ms);
@@ -9934,6 +10208,7 @@ static void button_typeface_event_cb(lv_event_t* e)
     if (code == LV_EVENT_FOCUSED)
     {
         printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
         lv_obj_t* label = lv_obj_get_child(obj, 0);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
 #if 0
@@ -9993,6 +10268,7 @@ static void button_typeface_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_typeface_return_event_cb\n");
+        buzzer_enable = 1;
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_return);
         lv_obj_del(btn_typeface_return);
@@ -10023,34 +10299,10 @@ static void button_typeface_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-#if 0
-        switch (g_typeface)
-        {
-            case CHANG_YONG_SONG_TI:
-                lv_label_set_text(label_file_management_typeface_label, "常用宋体");
-                break;
-            case CHANG_YONG_HEI_TI:
-                lv_label_set_text(label_file_management_typeface_label, "常用黑体");
-                break;
-            case CHANG_YONG_KAI_TI:
-                lv_label_set_text(label_file_management_typeface_label, "常用楷体");
-                break;
-            case CHANG_YONG_LI_SHU_GBK:
-                lv_label_set_text(label_file_management_typeface_label, "常用隶书");
-                break;
-            case FANG_ZHENG_HEI_TI_GBK:
-                lv_label_set_text(label_file_management_typeface_label, "方正黑体");
-                break;
-            case SOURCE_HAN_SANS_SC_REGULAR:
-                lv_label_set_text(label_file_management_typeface_label, "思源黑体");
-                break;
-            default:
-                lv_label_set_text(label_file_management_typeface_label, "常用宋体");
-        }
-#endif
-        lv_label_set_text(label_file_management_typeface_label, typeface_name[g_typeface]);
-        
         printf("button_typeface_confirm_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_label_set_text(label_file_management_typeface_label, typeface_name[g_typeface]);
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_return);
         lv_obj_del(btn_typeface_return);
@@ -10085,6 +10337,7 @@ static void btn_file_management_typeface_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_file_management_typeface_event_cb\n");
+        buzzer_enable = 1;
 
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
@@ -10098,7 +10351,14 @@ static void btn_file_management_typeface_event_cb(lv_event_t* e)
         label_typeface_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_head, "字体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "字体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Typeface");
+        }
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
         win_obj_typeface = lv_obj_create(lv_scr_act());
@@ -10173,7 +10433,14 @@ static void btn_file_management_typeface_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -10195,7 +10462,14 @@ static void btn_file_management_typeface_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -10209,6 +10483,7 @@ static void button_work_space_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_work_space_return_event_cb\n");
+        buzzer_enable = 1;
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -10230,6 +10505,7 @@ static void button_work_size_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_work_space_return_event_cb\n");
+        buzzer_enable = 1;
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -10251,6 +10527,8 @@ static void button_word_space_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_word_space_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -10264,7 +10542,6 @@ static void button_word_space_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_file_management_word_space_label, temp_str);
         
-        printf("button_word_space_confirm_event_cb\n");
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -10287,6 +10564,8 @@ static void button_word_size_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_word_size_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -10299,8 +10578,7 @@ static void button_word_size_confirm_event_cb(lv_event_t* e)
 
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_file_management_word_size_label, temp_str);
-
-        printf("button_word_space_confirm_event_cb\n");
+       
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -10319,10 +10597,13 @@ static void btn_file_management_word_space_event_cb(lv_event_t* e)
     lv_event_code_t code;
 
     code = lv_event_get_code(e);
-    lv_obj_t* obj = lv_event_get_target(e);
+    //lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_file_management_word_space_label\n");
+
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -10336,16 +10617,13 @@ static void btn_file_management_word_space_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-
-        if (obj == btn_file_management_word_space_label)
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
+            lv_label_set_text(label_typeface_head,  "间隔");
         }
-        else if(obj == btn_file_management_word_size_label)
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
+            lv_label_set_text(label_typeface_head, "Space");
         }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
@@ -10426,7 +10704,14 @@ static void btn_file_management_word_space_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -10448,7 +10733,14 @@ static void btn_file_management_word_space_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -10459,10 +10751,13 @@ static void btn_file_management_word_size_event_cb(lv_event_t* e)
     lv_event_code_t code;
 
     code = lv_event_get_code(e);
-    lv_obj_t* obj = lv_event_get_target(e);
+    //lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_file_management_word_size_label\n");
+
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -10477,15 +10772,13 @@ static void btn_file_management_word_size_event_cb(lv_event_t* e)
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
-        if (obj == btn_file_management_word_space_label)
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
+            lv_label_set_text(label_typeface_head,  "字号");
         }
-        else if (obj == btn_file_management_word_size_label)
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
+            lv_label_set_text(label_typeface_head, "Size");
         }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
@@ -10566,7 +10859,14 @@ static void btn_file_management_word_size_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -10588,7 +10888,14 @@ static void btn_file_management_word_size_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -10602,7 +10909,7 @@ static void btn_addition_text_spin_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_text_spin_confirm_event_cb\n");
-
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -10650,6 +10957,8 @@ static void btn_addition_text_spin_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
+        printf("[%s:%d] btn_addition_text_spin_event_cb\n", __FUNCTION__, __LINE__);
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -10663,7 +10972,14 @@ static void btn_addition_text_spin_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        lv_label_set_text(label_typeface_head, "旋转");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "旋转");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Spin");
+        }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
@@ -10745,7 +11061,14 @@ static void btn_addition_text_spin_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -10766,8 +11089,28 @@ static void btn_addition_text_spin_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
+
+
+
+static void sw_addition_bold_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t* obj = lv_event_get_target(e);
+    if (code == LV_EVENT_VALUE_CHANGED)
+    {
+        printf("State: %s\n", lv_obj_has_state(obj, LV_STATE_CHECKED) ? "On" : "Off");
+        buzzer_enable = 1;
     }
 }
 
@@ -10783,7 +11126,8 @@ static void button_addition_text_event_cb(lv_event_t* e)
 
     if ((code == LV_EVENT_CLICKED)&& (print_status == 0))
     {
-           printf("addition text\n");
+        printf("addition text\n");
+        buzzer_enable = 1;
         file_management_win = lv_obj_create(lv_scr_act());
         /* 设置大小 */
         lv_obj_set_size(file_management_win, 480, 272);
@@ -10813,7 +11157,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management, "文本");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management,  "文本");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management, "Text");
+        }
         lv_obj_align(label_file_management, LV_ALIGN_TOP_LEFT, 200, 4);
 
 #if 0
@@ -10867,7 +11218,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_text = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_text, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_text, "文本");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_text,  "文本");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_text, "Text");
+        }
         lv_obj_align(label_file_management_text, LV_ALIGN_TOP_LEFT, 45, 139);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -10900,7 +11258,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_typeface = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_typeface, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_typeface, "字体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_typeface,  "字体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_typeface, "Typeface");
+        }
         lv_obj_align(label_file_management_typeface, LV_ALIGN_TOP_LEFT, 45, 167);
 
 
@@ -10934,7 +11299,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_word_space = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_word_space, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_word_space, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_word_space, "间隔");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_word_space,  "间隔");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_word_space, "Space");
+        }
         lv_obj_align(label_file_management_word_space, LV_ALIGN_TOP_LEFT, 285, 139);
 
 
@@ -10968,7 +11340,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_word_size = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_word_size, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_word_size, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_word_size, "字号");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_word_size,  "字号");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_word_size, "Size");
+        }
         lv_obj_align(label_file_management_word_size, LV_ALIGN_TOP_LEFT, 45, 195);
 
 
@@ -11004,7 +11383,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_spin = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_spin, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_spin, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_spin, "旋转");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_spin, "旋转");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_spin, "Spin");
+        }
         lv_obj_align(label_file_management_spin, LV_ALIGN_TOP_LEFT, 285, 167);
 
 
@@ -11068,7 +11454,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_bold = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_bold, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_bold, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_bold, "粗体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_bold, "粗体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_bold, "Bold");
+        }
         lv_obj_align(label_file_management_bold, LV_ALIGN_TOP_LEFT, 285, 223);
 
         sw_file_management_bold = lv_switch_create(lv_scr_act());
@@ -11076,6 +11469,7 @@ static void button_addition_text_event_cb(lv_event_t* e)
         lv_obj_set_width(sw_file_management_bold, 48);
         lv_obj_set_height(sw_file_management_bold, 23);
         lv_obj_set_style_bg_color(sw_file_management_bold, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
+        lv_obj_add_event_cb(sw_file_management_bold, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(italic);
@@ -11087,7 +11481,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_management_line_italic = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_management_line_italic, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_management_line_italic, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_management_line_italic, "斜体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_management_line_italic, "斜体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_management_line_italic, "Italic");
+        }
         lv_obj_align(label_management_line_italic, LV_ALIGN_TOP_LEFT, 45, 223);
 
         sw_management_line_italic = lv_switch_create(lv_scr_act());
@@ -11096,6 +11497,7 @@ static void button_addition_text_event_cb(lv_event_t* e)
         lv_obj_set_height(sw_management_line_italic, 23);
         //lv_obj_set_style_bg_color(bold_sw, lv_color_hex(0x00ff00), LV_PART_MAIN);
         lv_obj_set_style_bg_color(sw_management_line_italic, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
+        lv_obj_add_event_cb(sw_management_line_italic, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
         file_management_bottom_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(file_management_bottom_bg, 480, 24);
@@ -11110,7 +11512,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_return, "Return");
+        }
         lv_obj_align(label_file_management_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -11132,7 +11541,14 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_confirm, "Confirm");
+        }
         lv_obj_align(label_file_management_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -11153,6 +11569,7 @@ static void btn_label_speed_print_mode_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -11167,15 +11584,14 @@ static void btn_label_speed_print_mode_event_cb(lv_event_t* e)
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
-        if (obj == btn_file_management_word_space_label)
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
+            lv_label_set_text(label_typeface_head,  "喷印速度");
         }
-        else if (obj == btn_file_management_word_size_label)
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
+            lv_label_set_text(label_typeface_head, "Printing speed");
         }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
@@ -11256,7 +11672,14 @@ static void btn_label_speed_print_mode_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -11278,7 +11701,14 @@ static void btn_label_speed_print_mode_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -11291,6 +11721,7 @@ static void dropdown_addition_count_law_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -11304,6 +11735,8 @@ static void button_addition_count_times_repetition_confirm_event_cb(lv_event_t* 
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_addition_count_times_repetition_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -11317,7 +11750,7 @@ static void button_addition_count_times_repetition_confirm_event_cb(lv_event_t* 
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_count_times_repetition, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+       
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -11341,6 +11774,8 @@ static void btn_addition_count_times_repetition_mode_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_times_repetition_mode_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -11354,8 +11789,15 @@ static void btn_addition_count_times_repetition_mode_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        printf("btn_file_management_word_size_label\n");
-        lv_label_set_text(label_typeface_head, "重复");
+       
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "重复");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Repetition");
+        }
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
         lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -11434,7 +11876,15 @@ static void btn_addition_count_times_repetition_mode_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -11456,7 +11906,14 @@ static void btn_addition_count_times_repetition_mode_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -11471,9 +11928,10 @@ static void button_addition_count_typeface_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_addition_count_typeface_confirm_event_cb\n");
+        buzzer_enable = 1;
         lv_label_set_text(label_btn_addition_count_typeface, typeface_name[g_typeface]);
 
-        printf("button_typeface_confirm_event_cb\n");
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_return);
         lv_obj_del(btn_typeface_return);
@@ -11510,8 +11968,8 @@ static void btn_addition_count_typeface_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
-        printf("btn_file_management_typeface_event_cb\n");
-
+        printf("btn_addition_count_typeface_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -11524,7 +11982,14 @@ static void btn_addition_count_typeface_event_cb(lv_event_t* e)
         label_typeface_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_head, "字体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "字体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Typeface");
+        }
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
         win_obj_typeface = lv_obj_create(lv_scr_act());
@@ -11599,7 +12064,14 @@ static void btn_addition_count_typeface_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -11621,7 +12093,14 @@ static void btn_addition_count_typeface_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -11637,6 +12116,8 @@ static void button_addition_count_size_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_addition_count_size_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -11650,7 +12131,7 @@ static void button_addition_count_size_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_count_size, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+       
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -11676,6 +12157,8 @@ static void btn_addition_count_size_event_cb(lv_event_t* e)
     {
         printf("btn_addition_count_size_event_cb\n");
 
+        buzzer_enable = 1;
+
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -11689,8 +12172,14 @@ static void btn_addition_count_size_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-    
-        lv_label_set_text(label_typeface_head, "字号");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "字号");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Size");
+        }
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
         lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -11769,7 +12258,14 @@ static void btn_addition_count_size_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -11791,7 +12287,14 @@ static void btn_addition_count_size_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -11806,6 +12309,8 @@ static void btn_addition_count_space_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_space_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -11819,7 +12324,7 @@ static void btn_addition_count_space_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_count_space, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+    
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -11843,6 +12348,8 @@ static void btn_addition_count_space_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_space_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -11856,8 +12363,14 @@ static void btn_addition_count_space_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        printf("btn_file_management_word_space_label\n");
-        lv_label_set_text(label_typeface_head, "间距");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "间距");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Space");
+        }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
@@ -11937,7 +12450,14 @@ static void btn_addition_count_space_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -11959,7 +12479,14 @@ static void btn_addition_count_space_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -11972,6 +12499,7 @@ static void dropdown_addition_count_lead_zero_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -11986,6 +12514,8 @@ static void button_count_current_value_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_word_space_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -12000,7 +12530,7 @@ static void button_count_current_value_confirm_event_cb(lv_event_t* e)
         lv_label_set_text(label_btn_addition_count_current_value, temp_str);
         lv_label_set_text(label_addition_count_preview, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+      
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -12025,7 +12555,7 @@ static void btn_addition_count_current_value_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_count_current_value_event_cb\n");
-
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -12039,8 +12569,15 @@ static void btn_addition_count_current_value_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        
-        lv_label_set_text(label_typeface_head, "当前值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "当前值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Current value");
+        }
+
         
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
@@ -12120,7 +12657,14 @@ static void btn_addition_count_current_value_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -12142,7 +12686,14 @@ static void btn_addition_count_current_value_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -12156,6 +12707,8 @@ static void button_addition_count_minimum_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_word_space_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -12167,9 +12720,7 @@ static void button_addition_count_minimum_confirm_event_cb(lv_event_t* e)
         }
 
         sprintf(temp_str, "%d", i);
-        lv_label_set_text(label_btn_addition_count_minimum, temp_str);
-
-        printf("button_word_space_confirm_event_cb\n");
+        lv_label_set_text(label_btn_addition_count_minimum, temp_str);   
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -12192,6 +12743,8 @@ static void btn_addition_count_minimum_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_minimum_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -12205,9 +12758,14 @@ static void btn_addition_count_minimum_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-
-        printf("btn_addition_count_minimum_event_cb\n");
-        lv_label_set_text(label_typeface_head, "最小值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head, "最小值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Minimum");
+        }
         
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
@@ -12287,7 +12845,14 @@ static void btn_addition_count_minimum_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -12309,7 +12874,14 @@ static void btn_addition_count_minimum_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -12323,6 +12895,8 @@ static void btn_addition_count_maximum_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_maximum_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -12335,8 +12909,6 @@ static void btn_addition_count_maximum_confirm_event_cb(lv_event_t* e)
 
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_count_maximum, temp_str);
-
-        printf("button_word_space_confirm_event_cb\n");
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -12361,6 +12933,7 @@ static void btn_addition_count_maximum_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_maximum_event_cb\n");
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -12374,9 +12947,14 @@ static void btn_addition_count_maximum_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-
-        printf("btn_addition_count_maximum_event_cb\n");
-        lv_label_set_text(label_typeface_head, "最大值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "最大值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Maximum");
+        }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
@@ -12456,7 +13034,14 @@ static void btn_addition_count_maximum_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }  
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -12478,7 +13063,14 @@ static void btn_addition_count_maximum_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }  
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -12530,6 +13122,8 @@ static void btn_addition_count_step_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_step_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -12543,8 +13137,15 @@ static void btn_addition_count_step_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        printf("btn_addition_count_step_event_cb\n");
-        lv_label_set_text(label_typeface_head, "步进值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "步进值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Step");
+        }
+
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
         lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -12623,7 +13224,14 @@ static void btn_addition_count_step_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -12645,7 +13253,14 @@ static void btn_addition_count_step_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -12984,6 +13599,8 @@ static void btn_addition_count_return_event_cb(lv_event_t* e)
 static void btn_addition_count_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+    char* opts_addition_count_law;
+    char* opts_addition_count_lead_zero;
     //int temp_space = 5;
 
     code = lv_event_get_code(e);
@@ -12991,6 +13608,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("btn_addition_count_event_cb\n");
+        buzzer_enable = 1;
         addition_count_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(addition_count_head_bg, 480, 24);
         lv_obj_align(addition_count_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -13004,7 +13622,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_count_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_head, "计数");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_head,  "计数");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_head, "Count");
+        }
         lv_obj_align(label_addition_count_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -13048,11 +13673,28 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_law = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_law, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_law, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_law, "规律");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_law,  "规律");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_law, "Law");
+        } 
         lv_obj_align(label_addition_count_law, LV_ALIGN_TOP_LEFT, 50, 54);
 
-
-        static const char* opts_addition_count_law = "递增\n递减";
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            opts_addition_count_law = "递增\n递减";
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            opts_addition_count_law = "Increase\nDecrease";
+        }
+        else
+        {
+            opts_addition_count_law = "递增\n递减";
+        } 
         dropdown_addition_count_law = lv_dropdown_create(obj_addition_count_middle_bg);
         lv_obj_set_style_border_width(dropdown_addition_count_law, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(dropdown_addition_count_law, 10, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -13078,7 +13720,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_times_repetition = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_times_repetition, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_times_repetition, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_times_repetition, "重复");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_times_repetition,  "重复");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_times_repetition, "Repetition");
+        }
         lv_obj_align(label_addition_count_times_repetition, LV_ALIGN_TOP_LEFT, 50, 89);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -13112,7 +13761,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_typeface = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_typeface, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_typeface, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_typeface, "字体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_typeface,  "字体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_typeface, "Typeface");
+        }
         lv_obj_align(label_addition_count_typeface, LV_ALIGN_TOP_LEFT, 50, 124);
 
 
@@ -13147,7 +13803,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_size = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_size, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_size, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_size, "字号");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_size, "字号");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_size, "Size");
+        }
         lv_obj_align(label_addition_count_size, LV_ALIGN_TOP_LEFT, 50, 159);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -13182,7 +13845,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_space = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_space, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_space, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_space, "间距");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_space, "间距");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_space, "Space");
+        }
         lv_obj_align(label_addition_count_space, LV_ALIGN_TOP_LEFT, 50, 194);
 
 
@@ -13216,10 +13886,31 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_lead_zero = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_lead_zero, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_lead_zero, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_lead_zero, "前置零");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_lead_zero,  "前置零");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_lead_zero, "Lead zero");
+        }
         lv_obj_align(label_addition_count_lead_zero, LV_ALIGN_TOP_LEFT, 290, 54);
 
-        static const char* opts_addition_count_lead_zero = "显示\n隐藏";
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            opts_addition_count_lead_zero = "显示\n隐藏";
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            opts_addition_count_lead_zero = "Show\nHide";
+        }
+        else
+        {
+            opts_addition_count_lead_zero = "显示\n隐藏";
+        }
+
+        //static const char* opts_addition_count_lead_zero = "显示\n隐藏";
         dropdown_addition_count_lead_zero = lv_dropdown_create(obj_addition_count_middle_bg);
         lv_obj_set_style_border_width(dropdown_addition_count_lead_zero, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(dropdown_addition_count_lead_zero, 10, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -13248,7 +13939,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_current_value = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_current_value, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_current_value, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_current_value, "当前值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_current_value, "当前值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_current_value, "Current value");
+        }
         lv_obj_align(label_addition_count_current_value, LV_ALIGN_TOP_LEFT, 290, 89);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -13282,7 +13980,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_minimum = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_minimum, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_minimum, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_minimum, "最小值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_minimum, "最小值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_minimum, "Minimum");
+        }
         lv_obj_align(label_addition_count_minimum, LV_ALIGN_TOP_LEFT, 290, 124);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -13316,7 +14021,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_maximum = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_maximum, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_maximum, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_maximum, "最大值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_maximum, "最大值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_maximum, "Maximum");
+        }
         lv_obj_align(label_addition_count_maximum, LV_ALIGN_TOP_LEFT, 290, 159);
 
 
@@ -13351,7 +14063,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_step = lv_label_create(obj_addition_count_middle_bg);
         lv_obj_set_style_text_font(label_addition_count_step, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_step, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_step, "步进值");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_step, "步进值");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_step, "Step");
+        }
         lv_obj_align(label_addition_count_step, LV_ALIGN_TOP_LEFT, 290, 194);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -13389,7 +14108,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_count_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_return, "Return");
+        }
         lv_obj_align(label_addition_count_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -13411,7 +14137,14 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_addition_count_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_count_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_count_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_count_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_count_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_count_confirm, "Confirm");
+        }
         lv_obj_align(label_addition_count_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -13498,6 +14231,7 @@ static void btn_addition_symbol_one_event_cb(lv_event_t* e)
     if (code == LV_EVENT_FOCUSED)
     {
         //printf("btn_addition_symbol_one_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
         lv_obj_t* label = lv_obj_get_child(obj, 0);
         for (i = 0; i < SYMBOL_NUMBER; i++)
         {
@@ -13574,7 +14308,9 @@ static void btn_addition_symbol_confirm_event_cb(lv_event_t* e)
             lv_label_set_text(label1, g_addition_symbol[g_symbol_flag]);
             lv_obj_center(label1);
      
-            strncpy(data_structure[win_content_child_num].data.word.text, g_addition_symbol[g_symbol_flag], strlen(g_addition_symbol[g_symbol_flag]));
+            //strncpy(data_structure[win_content_child_num].data.word.text, g_addition_symbol[g_symbol_flag], strlen(g_addition_symbol[g_symbol_flag])+1);
+            snprintf(data_structure[win_content_child_num].data.word.text, sizeof(data_structure[win_content_child_num].data.word.text),"%s", g_addition_symbol[g_symbol_flag]);
+          
             data_structure[win_content_child_num].data.word.size = 20;
             printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
             data_structure[win_content_child_num].type = TYPE_SYMBOL;
@@ -13629,8 +14365,8 @@ static void btn_addition_symbol_return_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     int i;
-    int win_content_child_num;
-    char temp_typeface[128] = { 0 };
+    //int win_content_child_num;
+    //char temp_typeface[128] = { 0 };
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
@@ -13695,7 +14431,7 @@ static void btn_addition_symbol_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("btn_addition_symbol_event_cb\n");
-
+        buzzer_enable = 1;
         file_management_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(file_management_head_bg, 480, 24);
         lv_obj_align(file_management_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -13708,7 +14444,14 @@ static void btn_addition_symbol_event_cb(lv_event_t* e)
         label_file_management = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management, "符号");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management,  "符号");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management, "Symbol");
+        }
         lv_obj_align(label_file_management, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -13768,7 +14511,14 @@ static void btn_addition_symbol_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -13790,7 +14540,14 @@ static void btn_addition_symbol_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -13804,6 +14561,7 @@ static void button_icon_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_icon_confirm_event_cb\n\r");
+        buzzer_enable = 1;
 
         win_content_child_num = lv_obj_get_child_cnt(win_content);
 
@@ -13886,12 +14644,13 @@ static void button_icon_confirm_event_cb(lv_event_t* e)
 static void button_icon_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int i;
+    //int i;
     lv_obj_t* obj = lv_event_get_target(e);
     code = lv_event_get_code(e);
     if (code == LV_EVENT_FOCUSED)
     {
         printf("button_icon_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
         lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN); /* 设置边框宽度 */
 
         g_icon_type = lv_obj_get_index(obj);
@@ -13914,6 +14673,7 @@ static void button_icon_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_icon_confirm_event_cb\n\r");
+        buzzer_enable = 1;
 
         lv_obj_del(file_management_head_bg);
         lv_obj_del(label_file_management);
@@ -14039,10 +14799,10 @@ void slider_show_icon()
 static void btn_addition_icon_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int len = 0;
+    //int len = 0;
     int i;
-    int offset_address = 6;
-    int line_num = 8;
+    //int offset_address = 6;
+    //int line_num = 8;
     int size_wide = 50;
     int size_high = 67;
 
@@ -14051,6 +14811,7 @@ static void btn_addition_icon_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("btn_addition_icon_event_cb\n");
+        buzzer_enable = 1;
 
         //显示图标50*67
         file_management_head_bg = lv_obj_create(lv_scr_act());
@@ -14066,7 +14827,14 @@ static void btn_addition_icon_event_cb(lv_event_t* e)
         label_file_management = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_file_management, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management, "标识");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management,  "标识");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management, "Icon");
+        }
         lv_obj_align(label_file_management, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -14369,7 +15137,14 @@ static void btn_addition_icon_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -14391,7 +15166,14 @@ static void btn_addition_icon_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -14703,6 +15485,7 @@ static void button_date_type_event_cb(lv_event_t* e)
     if (code == LV_EVENT_FOCUSED)
     {
         printf("button_date_type_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
         printf("g_date_type=%d\n", lv_obj_get_index(obj));
         g_date_type = lv_obj_get_index(obj);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0x00ff00), LV_PART_MAIN);
@@ -14817,6 +15600,7 @@ static void button_date_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_date_confirm_event_cb\n");
+        buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_addition_date_middle, lv_label_get_text(date_type_obj[g_date_type].obj_date_label));
         lv_label_set_text(label_btn_addition_date_text, lv_label_get_text(date_type_obj[g_date_type].obj_date_label));
@@ -14858,6 +15642,8 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
     {
         printf("btn_addition_date_text_event_cb\n");
 
+        buzzer_enable = 1;
+
         obj_addition_date_text_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(obj_addition_date_text_head_bg, 480, 24);
         lv_obj_align(obj_addition_date_text_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -14870,7 +15656,14 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
         label_addition_date_text_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_text_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_text_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_text_head, "日期");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_text_head,  "日期");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_text_head, "Date");
+        }
         lv_obj_align(label_addition_date_text_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
         obj_addition_date_text_middle_bg = lv_obj_create(lv_scr_act());
@@ -14944,7 +15737,14 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
                     sprintf(temp_str, "%02d年%02d月%02d日", now_year%100, now_month, now_day);
                     break;
                 case 14:
-                    sprintf(temp_str, "自定义");
+                    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                    {
+                        sprintf(temp_str, "自定义");
+                    }
+                    else if(system_data.system.language == LANGUAGE_ENGLISH)
+                    {
+                        sprintf(temp_str, "Custom");
+                    }
                     break;
                 case 15:
                     sprintf(temp_str, "延期");
@@ -14963,7 +15763,14 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
         label_addition_date_text_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_text_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_text_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_text_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_text_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_text_return, "Return");
+        }
         lv_obj_align(label_addition_date_text_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -14984,7 +15791,14 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
         label_addition_date_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_confirm, "Confirm");
+        }
         lv_obj_align(label_addition_date_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -14997,7 +15811,7 @@ static void button_time_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_date_confirm_event_cb\n");
+        printf("button_time_confirm_event_cb\n");
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_addition_date_middle, lv_label_get_text(date_type_obj[g_time_type].obj_date_label));
         lv_label_set_text(label_btn_label_addition_time, lv_label_get_text(date_type_obj[g_time_type].obj_date_label));
@@ -15031,6 +15845,7 @@ static void button_time_type_event_cb(lv_event_t* e)
     if (code == LV_EVENT_FOCUSED)
     {
         printf("button_date_type_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
         printf("g_date_type=%d\n", lv_obj_get_index(obj));
         g_time_type = lv_obj_get_index(obj);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0x00ff00), LV_PART_MAIN);
@@ -15154,6 +15969,8 @@ static void btn_addition_time_event_cb(lv_event_t* e)
     {
         printf("btn_addition_time_event_cb\n");
 
+        buzzer_enable = 1;
+
         obj_addition_date_text_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(obj_addition_date_text_head_bg, 480, 24);
         lv_obj_align(obj_addition_date_text_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -15166,7 +15983,14 @@ static void btn_addition_time_event_cb(lv_event_t* e)
         label_addition_date_text_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_text_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_text_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_text_head, "时间");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_text_head, "时间");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_text_head, "Time");
+        }
         lv_obj_align(label_addition_date_text_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
         obj_addition_date_text_middle_bg = lv_obj_create(lv_scr_act());
@@ -15227,7 +16051,14 @@ static void btn_addition_time_event_cb(lv_event_t* e)
                 sprintf(temp_str, "%02d时%02d分%02d秒", now_hour, now_minute, now_second);
                 break;
             case 5:
-                sprintf(temp_str, "自定义");
+                if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                {
+                    sprintf(temp_str, "自定义");
+                }
+                else if(system_data.system.language == LANGUAGE_ENGLISH)
+                {
+                    sprintf(temp_str, "Custom");
+                }
                 break;
             case 6:
                 sprintf(temp_str, "延期");
@@ -15281,7 +16112,7 @@ static void btn_addition_date_time_spin_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_text_spin_confirm_event_cb\n");
-
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -15326,10 +16157,12 @@ static void btn_addition_date_spin_event_cb(lv_event_t* e)
     //int line_num = 5;
     //int size_wide = 85;
     //int size_high = 24;
-    lv_obj_t* obj = lv_event_get_target(e);
+    //lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("[%s:%d] btn_addition_date_spin_event_cb\n", __FUNCTION__, __LINE__);
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -15343,16 +16176,13 @@ static void btn_addition_date_spin_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-
-        if (obj == btn_file_management_word_space_label)
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
+            lv_label_set_text(label_typeface_head,  "旋转");
         }
-        else if (obj == btn_file_management_word_size_label)
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
+            lv_label_set_text(label_typeface_head, "Spin");
         }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
@@ -15433,7 +16263,14 @@ static void btn_addition_date_spin_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -15455,7 +16292,14 @@ static void btn_addition_date_spin_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -15507,6 +16351,8 @@ static void btn_date_time_typeface_event_cb(lv_event_t* e)
     {
         printf("btn_file_management_typeface_event_cb\n");
 
+        buzzer_enable = 1;
+
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -15519,7 +16365,14 @@ static void btn_date_time_typeface_event_cb(lv_event_t* e)
         label_typeface_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_head, "字体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "字体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Typeface");
+        }
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
         win_obj_typeface = lv_obj_create(lv_scr_act());
@@ -15594,7 +16447,14 @@ static void btn_date_time_typeface_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -15616,7 +16476,14 @@ static void btn_date_time_typeface_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -15669,6 +16536,8 @@ static void btn_date_time_word_size_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("[%s:%d]btn_date_time_word_size_event_cb\n", __FUNCTION__, __LINE__);
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -15682,7 +16551,14 @@ static void btn_date_time_word_size_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        lv_label_set_text(label_typeface_head, "字号");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "字号");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Size");
+        }
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
         lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -15761,7 +16637,14 @@ static void btn_date_time_word_size_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -15783,7 +16666,14 @@ static void btn_date_time_word_size_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -15798,6 +16688,8 @@ static void button_date_time_word_space_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_word_space_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -15810,8 +16702,6 @@ static void button_date_time_word_space_confirm_event_cb(lv_event_t* e)
 
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_date_word_space, temp_str);
-
-        printf("button_word_space_confirm_event_cb\n");
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -15834,6 +16724,8 @@ static void btn_date_time_word_space_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("[%s:%d]btn_date_time_word_space_event_cb\n", __FUNCTION__, __LINE__);
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -15847,7 +16739,15 @@ static void btn_date_time_word_space_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        lv_label_set_text(label_typeface_head, "间距");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "间距");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Space");
+        }
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
         lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -15926,7 +16826,15 @@ static void btn_date_time_word_space_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -15948,7 +16856,14 @@ static void btn_date_time_word_space_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -15975,6 +16890,8 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_date_time_confirm_event_cb\n");
+
+         buzzer_enable = 1;
 
         int len = strlen(lv_label_get_text(label_addition_date_middle)) + 1;
         printf("len=%u\n\r", len);
@@ -16185,6 +17102,8 @@ static void button_date_time_return_event_cb(lv_event_t* e)
     {
         printf("button_date_time_return_event_cb\n");
 
+        buzzer_enable = 1;
+
         lv_obj_del(label_addition_date_time_confirm);
         lv_obj_del(imgbtn_addition_date_time_confirm);
         lv_obj_del(imgbtn_addition_date_time_return);
@@ -16273,7 +17192,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("addition text\n");
-
+        buzzer_enable = 1;
         addition_date_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(addition_date_head_bg, 480, 24);
         lv_obj_align(addition_date_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -16287,7 +17206,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_head, "日期和时间");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_head, "日期和时间");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_head, "Date & Time");
+        }
         lv_obj_align(label_addition_date_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -16326,7 +17252,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_text = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_text, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_text, "日期");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_text, "日期");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_text, "Date");
+        }
         lv_obj_align(label_addition_date_text, LV_ALIGN_TOP_LEFT, 45, 139);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -16360,7 +17293,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_typeface = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_typeface, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_typeface, "字体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_typeface, "字体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_typeface, "Typeface");
+        }
         lv_obj_align(label_addition_date_typeface, LV_ALIGN_TOP_LEFT, 45, 167);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -16396,7 +17336,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_word_size = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_word_size, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_word_size, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_word_size, "字号");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_word_size, "字号");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_word_size, "Size");
+        }
         lv_obj_align(label_addition_date_word_size, LV_ALIGN_TOP_LEFT, 45, 195);
 
 
@@ -16430,15 +17377,22 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_italic = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_italic, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_italic, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_italic, "斜体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_italic, "斜体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_italic, "Italic");
+        }
         lv_obj_align(label_addition_date_italic, LV_ALIGN_TOP_LEFT, 45, 223);
 
         sw_addition_date_italic = lv_switch_create(lv_scr_act());
         lv_obj_set_pos(sw_addition_date_italic, 95, 220);
         lv_obj_set_width(sw_addition_date_italic, 48);
         lv_obj_set_height(sw_addition_date_italic, 23);
-        //lv_obj_set_style_bg_color(bold_sw, lv_color_hex(0x00ff00), LV_PART_MAIN);
         lv_obj_set_style_bg_color(sw_addition_date_italic, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
+        lv_obj_add_event_cb(sw_addition_date_italic, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(date_time);
@@ -16450,7 +17404,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_time = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_time, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_time, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_time, "时间");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_time, "时间");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_time, "Time");
+        }
         lv_obj_align(label_addition_time, LV_ALIGN_TOP_LEFT, 285, 139);
 
 
@@ -16485,7 +17446,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_word_space = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_word_space, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_word_space, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_word_space, "间距");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_word_space, "间距");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_word_space, "Space");
+        }
         lv_obj_align(label_addition_date_word_space, LV_ALIGN_TOP_LEFT, 285, 167);
 
 
@@ -16520,7 +17488,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_spin = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_spin, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_spin, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_spin, "旋转");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_spin, "旋转");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_spin, "Spin");
+        }
         lv_obj_align(label_addition_date_spin, LV_ALIGN_TOP_LEFT, 285, 195);
 
 
@@ -16554,7 +17529,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_bold = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_bold, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_bold, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_bold, "粗体");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_bold, "粗体");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_bold, "Bold");
+        }
         lv_obj_align(label_addition_date_bold, LV_ALIGN_TOP_LEFT, 285, 223);
 
         sw_addition_date_bold = lv_switch_create(lv_scr_act());
@@ -16562,7 +17544,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         lv_obj_set_width(sw_addition_date_bold, 48);
         lv_obj_set_height(sw_addition_date_bold, 23);
         lv_obj_set_style_bg_color(sw_addition_date_bold, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
-
+        lv_obj_add_event_cb(sw_addition_date_bold, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         addition_date_bottom_bg = lv_obj_create(lv_scr_act());
@@ -16578,7 +17560,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_time_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_time_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_time_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_time_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_time_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_time_return, "Return");
+        }
         lv_obj_align(label_addition_date_time_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -16600,7 +17589,14 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_addition_date_time_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_time_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_time_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_time_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_time_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_time_confirm, "Confirm");
+        }
         lv_obj_align(label_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -16618,6 +17614,8 @@ static void btn_addition_picture_delete_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_picture_delete_event_cb\n");
+
+        buzzer_enable = 1;
 
         //删除选中的文件，重新新建表格
         sprintf(picture_name, "/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
@@ -16649,7 +17647,7 @@ static void btn_addition_picture_delete_event_cb(lv_event_t* e)
 }
 
 
-
+#if 0
 static void btn_addition_picture_open_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -16659,6 +17657,8 @@ static void btn_addition_picture_open_event_cb(lv_event_t* e)
     if (code == LV_EVENT_FOCUSED)
     {
         printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
+
         lv_obj_t* label = lv_obj_get_child(obj, 0);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
 
@@ -16678,6 +17678,7 @@ static void btn_addition_picture_open_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
     }
 }
+#endif
 
 
 // 检查文件是否为图片文件
@@ -16809,24 +17810,33 @@ static void get_image_name(const char *filename, char *output, size_t output_siz
     // 查找最后一个点号的位置
     const char *dot = strrchr(filename, '.');
 
-    if (dot != NULL) {
+    if (dot != NULL) 
+    {
         // 计算名称的长度
         size_t name_length = dot - filename;
 
         // 确保名称长度不超过输出缓冲区大小
-        if (name_length < output_size) {
+        if (name_length < output_size) 
+        {
             // 复制名称部分到输出缓冲区
             strncpy(output, filename, name_length);
             output[name_length] = '\0'; // 添加字符串结束符
-        } else {
+        } 
+        else 
+        {
             // 如果名称过长，截断并添加结束符
-            strncpy(output, filename, output_size - 1);
-            output[output_size - 1] = '\0';
+            //strncpy(output, filename, output_size - 1);
+            //output[output_size - 1] = '\0';
+            snprintf(output,300,"%s",filename);
         }
-    } else {
+    } 
+    else 
+    {
         // 如果没有点号，直接复制整个字符串
-        strncpy(output, filename, output_size - 1);
-        output[output_size - 1] = '\0';
+        //strncpy(output, filename, output_size - 1);
+        //output[output_size - 1] = '\0';
+        snprintf(output,300,"%s",filename);
+        printf("get_image_name error\n\r");
     }
 }
 
@@ -16842,7 +17852,7 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
     DIR *dir;
     struct dirent *entry;
     struct stat file_stat;
-    char path[128];
+    char path[300];
     unsigned char picture_count = 0;
     int picture_type = 0;
     char created_time[20] ={0};
@@ -16898,7 +17908,7 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
 
             while ((entry = readdir(dir)) != NULL) 
             {
-                snprintf(path, sizeof(path), "%s/%s", "/mnt", entry->d_name);
+                snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
                 if (stat(path, &file_stat) == -1) 
                 {
                     perror("stat");
@@ -16969,7 +17979,7 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
 
             while ((entry = readdir(dir)) != NULL) 
             {
-                snprintf(path, sizeof(path), "%s/%s", "/mnt", entry->d_name);
+                snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
                 if (stat(path, &file_stat) == -1) 
                 {
                     perror("stat");
@@ -17039,9 +18049,9 @@ static void btn_addition_picture_search_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_picture_search_event_cb\n\r");
+        buzzer_enable = 1;
         textarea_bg_keyboard = lv_obj_create(lv_scr_act());
         /* 设置大小 */
-
         lv_obj_set_size(textarea_bg_keyboard, 480, 272);
         lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -17109,7 +18119,14 @@ static void btn_addition_picture_search_event_cb(lv_event_t* e)
         label_keyboard_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_return, "Return");
+        }
         lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -17130,7 +18147,14 @@ static void btn_addition_picture_search_event_cb(lv_event_t* e)
         label_keyboard_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_return, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_return, "Confirm");
+        }
         lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -17144,6 +18168,9 @@ static void imgbtn_addition_picture_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_addition_picture_return_event_cb\n");
+
+        buzzer_enable = 1;
+
         lv_obj_del(obj_addition_picture_head_bg);
         lv_obj_del(label_addition_picture_head);
         lv_obj_del(obj_addition_picture_preview_bg);
@@ -17208,6 +18235,8 @@ static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_addition_picture_confirm_event_cb\n");
+
+        buzzer_enable = 1;
 
         win_content_child_num = lv_obj_get_child_cnt(win_content);
 
@@ -17394,6 +18423,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("button_addition_picture_event_cb\n");
+        buzzer_enable = 1;
         obj_addition_picture_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(obj_addition_picture_head_bg, 480, 24);
         lv_obj_align(obj_addition_picture_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -17407,7 +18437,14 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         label_addition_picture_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_head, "图片");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_head,  "图片");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_head, "Picture");
+        }
         lv_obj_align(label_addition_picture_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -17439,10 +18476,22 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_obj_add_style(table_addition_picture, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
         lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 160, 24);
         lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
-        lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
-        lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
-        lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
+            lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
+            lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
+            lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_table_set_cell_value(table_addition_picture, 0, 0, "Name");
+            lv_table_set_cell_value(table_addition_picture, 0, 1, "Type");
+            lv_table_set_cell_value(table_addition_picture, 0, 2, "Size");
+            lv_table_set_cell_value(table_addition_picture, 0, 3, "Time");
+        }
+
         lv_table_set_col_width(table_addition_picture, 0, 115);
         lv_table_set_col_width(table_addition_picture, 1, 50);
         lv_table_set_col_width(table_addition_picture, 2, 56);
@@ -17504,7 +18553,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         DIR *dir;
         struct dirent *entry;
         struct stat file_stat;
-        char path[128];
+        char path[300];
         unsigned char picture_count = 0;
         int picture_type = 0;
         char created_time[20] ={0};
@@ -17522,7 +18571,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
 
         while ((entry = readdir(dir)) != NULL) 
         {
-            snprintf(path, sizeof(path), "%s/%s", "/mnt", entry->d_name);
+            snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
             if (stat(path, &file_stat) == -1) 
             {
                 perror("stat");
@@ -17604,9 +18653,6 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_img_set_src(right_stop_img_typeface, &right_stop_typeface);
         lv_obj_align(right_stop_img_typeface, LV_ALIGN_TOP_LEFT, 460, 24);
 
-
-     
-
         LV_IMG_DECLARE(picture_delete);
         btn_addition_picture_delete = lv_imgbtn_create(lv_scr_act());
         lv_imgbtn_set_src(btn_addition_picture_delete, LV_IMGBTN_STATE_RELEASED, NULL, &picture_delete, NULL);
@@ -17614,13 +18660,12 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_obj_align(btn_addition_picture_delete, LV_ALIGN_TOP_LEFT, 10, 180);
         lv_obj_add_event_cb(btn_addition_picture_delete, btn_addition_picture_delete_event_cb, LV_EVENT_CLICKED, NULL);
 
-
         LV_IMG_DECLARE(open_25_1);
         btn_addition_picture_open = lv_imgbtn_create(lv_scr_act());
         lv_imgbtn_set_src(btn_addition_picture_open, LV_IMGBTN_STATE_RELEASED, NULL, &open_25_1, NULL);
         lv_obj_set_size(btn_addition_picture_open, open_25_1.header.w, open_25_1.header.h);
         lv_obj_align(btn_addition_picture_open, LV_ALIGN_TOP_LEFT, 90, 180);
-        lv_obj_add_event_cb(btn_addition_picture_open, btn_addition_picture_open_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_addition_picture_open, imgbtn_addition_picture_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(search);
@@ -17632,7 +18677,14 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         label_addition_picture_search = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_search, "搜索");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_search,  "搜索");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_search, "Search");
+        }
         lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 42, 222);
 
 
@@ -17669,7 +18721,14 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         label_addition_picture_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_return, "Return");
+        }
         lv_obj_align(label_addition_picture_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -17691,7 +18750,14 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         label_addition_picture_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_picture_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_picture_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_picture_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_confirm, "Confirm");
+        }
         lv_obj_align(label_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -17707,7 +18773,7 @@ static void update_preview_QR_bar_code(void)
     unsigned char* pnew_data = NULL;
      lv_obj_t* img = NULL;
      char bmp_name[64]={0};
-    char bmp_name_1[64]={0};
+    char bmp_name_1[100]={0};
 
     str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
     if (str_len == 0)
@@ -19139,6 +20205,7 @@ static void button_keyboard_confirm_QR_code_text_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_keyboard_confirm_event_cb\n");
+        buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_addition_QR_code_text, lv_textarea_get_text(textarea_text_keyboard));
         lv_obj_del(textarea_bg_keyboard);
@@ -19163,6 +20230,8 @@ static void btn_addition_QR_code_text_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_QR_code_text_event_cb\n");
+
+        buzzer_enable = 1;
 
         textarea_bg_keyboard = lv_obj_create(lv_scr_act());
         /* 设置大小 */
@@ -19230,7 +20299,14 @@ static void btn_addition_QR_code_text_event_cb(lv_event_t* e)
         label_keyboard_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_return, "Return");
+        }
         lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -19251,7 +20327,14 @@ static void btn_addition_QR_code_text_event_cb(lv_event_t* e)
         label_keyboard_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_keyboard_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_confirm, "Confirm");
+        }
         lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -19266,6 +20349,7 @@ static void button_qr_code_event_cb(lv_event_t* e)
     if (code == LV_EVENT_FOCUSED)
     {
         printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
         lv_obj_t* label = lv_obj_get_child(obj, 0);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
 
@@ -19295,7 +20379,7 @@ static void button_QR_code_type_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_QR_code_type_confirm_event_cb\n");
-
+        buzzer_enable = 1;
         lv_label_set_text(label_btn_addition_QR_code_QR, QR_code_name[QR_code_type]);
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_return);
@@ -19328,6 +20412,7 @@ static void btn_addition_QR_code_QR_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -19341,7 +20426,15 @@ static void btn_addition_QR_code_QR_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        lv_label_set_text(label_typeface_head, "二维码类型");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "二维码类型");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Qr code type");
+        }
+
 
         win_obj_typeface = lv_obj_create(lv_scr_act());
         lv_obj_align(win_obj_typeface, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -19383,13 +20476,18 @@ static void btn_addition_QR_code_QR_event_cb(lv_event_t* e)
             lv_obj_set_style_text_color(typeface_obj[i].obj_typeface_label, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         }
 
-
-
         LV_FONT_DECLARE(heiFont16_1);
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -19411,7 +20509,14 @@ static void btn_addition_QR_code_QR_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -19424,6 +20529,10 @@ static void button_QR_code_height_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_QR_code_height_confirm_event_cb\n");
+
+        buzzer_enable = 1;
+
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -19441,7 +20550,7 @@ static void button_QR_code_height_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_QR_code_height, temp_str);
 
-        printf("button_QR_code_height_confirm_event_cb\n");
+   
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -19465,6 +20574,8 @@ static void btn_addition_QR_code_height_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_QR_code_height_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -19479,8 +20590,14 @@ static void btn_addition_QR_code_height_event_cb(lv_event_t* e)
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
-        printf("btn_file_management_word_space_label\n");
-        lv_label_set_text(label_typeface_head, "高度");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "高度");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Height");
+        }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
@@ -19560,7 +20677,14 @@ static void btn_addition_QR_code_height_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -19582,7 +20706,14 @@ static void btn_addition_QR_code_height_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -19595,6 +20726,7 @@ static void sw_addition_QR_code_border_event_cb(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         printf("State: %s\n", lv_obj_has_state(obj, LV_STATE_CHECKED) ? "On" : "Off");
+        buzzer_enable = 1;
         update_preview_QR_bar_code();
     }
 }
@@ -19609,6 +20741,7 @@ static void button_bar_code_event_cb(lv_event_t* e)
     if (code == LV_EVENT_FOCUSED)
     {
         printf("button_typeface_event_cb LV_EVENT_FOCUSED\n");
+        buzzer_enable = 1;
         lv_obj_t* label = lv_obj_get_child(obj, 0);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0x7FFFD4), LV_PART_MAIN);
 
@@ -19640,6 +20773,8 @@ static void button_bar_code_type_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_bar_code_type_confirm_event_cb\n");
+
+        buzzer_enable = 1;
 
         lv_label_set_text(label_btn_addition_QR_code_bar_code, bar_code_name[bar_code_type]);
         lv_obj_del(typeface_head_bg);
@@ -19675,6 +20810,7 @@ static void btn_addition_QR_code_bar_code_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -19688,7 +20824,14 @@ static void btn_addition_QR_code_bar_code_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        lv_label_set_text(label_typeface_head, "条形码类型");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "条形码类型");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Barcode type");
+        }
 
         win_obj_typeface = lv_obj_create(lv_scr_act());
         lv_obj_align(win_obj_typeface, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -19735,7 +20878,14 @@ static void btn_addition_QR_code_bar_code_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -19757,7 +20907,14 @@ static void btn_addition_QR_code_bar_code_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -19771,6 +20928,8 @@ static void button_QR_code_width_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("button_QR_code_width_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -19788,7 +20947,7 @@ static void button_QR_code_width_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_QR_code_width, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+      
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -19813,6 +20972,8 @@ static void btn_addition_QR_code_width_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_QR_code_width_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -19826,9 +20987,14 @@ static void btn_addition_QR_code_width_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-
-        printf("btn_file_management_word_space_label\n");
-        lv_label_set_text(label_typeface_head, "宽度");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "宽度");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Width");
+        }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
@@ -19908,7 +21074,14 @@ static void btn_addition_QR_code_width_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -19930,7 +21103,14 @@ static void btn_addition_QR_code_width_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -19944,6 +21124,7 @@ static void btn_addition_QR_code_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_QR_code_return_event_cb\n");
+        buzzer_enable = 1;
         lv_obj_del(btn_addition_QR_code_confirm);
         lv_obj_del(label_addition_QR_code_confirm);
         lv_obj_del(btn_addition_QR_code_return);
@@ -20019,13 +21200,14 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
     unsigned char* pdata = NULL; 
     unsigned char* pnew_data = NULL;
     lv_obj_t* img = NULL;
-    char bmp_name[128] = {0};
+    char bmp_name[100] = {0};
     char bmp_name_1[128] = {0};
 
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_QR_code_confirm_event_cb\n");
+        buzzer_enable = 1;
         //在主界面显示二维码
         str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
         printf("str_len=%u\n\r", str_len);
@@ -21903,7 +23085,8 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
 
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
-        printf("btn_file_management_text_event_cb\n");
+        printf("btn_addition_QR_code_event_cb\n");
+        buzzer_enable = 1;
         addition_QR_code_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(addition_QR_code_head_bg, 480, 24);
         lv_obj_align(addition_QR_code_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -21916,7 +23099,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_head, "二维码");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_head,  "二维码和条码");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_head, "Qr codes and bar codes");
+        }
         lv_obj_align(label_addition_QR_code_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -21947,7 +23137,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_text = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_text, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_text, "文本");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_text, "文本");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_text, "Text");
+        }
         lv_obj_align(label_addition_QR_code_text, LV_ALIGN_TOP_LEFT, 46, 134);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -21980,7 +23177,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_QR = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_QR, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_QR, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_QR, "二维码");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_QR,  "二维码");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_QR, "QR code");
+        }
         lv_obj_align(label_addition_QR_code_QR, LV_ALIGN_TOP_LEFT, 46, 164);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -22014,7 +23218,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_height = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_height, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_height, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_height, "高度");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_height, "高度");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_height, "Height");
+        }
         lv_obj_align(label_addition_QR_code_height, LV_ALIGN_TOP_LEFT, 46, 194);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -22048,9 +23259,15 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_figure = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_figure, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_figure, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_figure, "数字");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_figure, "数字");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_figure, "Figure");
+        }
         lv_obj_align(label_addition_QR_code_figure, LV_ALIGN_TOP_LEFT, 46, 224);
-
 
 
         sw_addition_QR_code_figure = lv_switch_create(lv_scr_act());
@@ -22072,7 +23289,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_bar_code = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_bar_code, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_bar_code, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_bar_code, "条形码");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_bar_code, "条形码");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_bar_code, "Bar code");
+        }
         lv_obj_align(label_addition_QR_code_bar_code, LV_ALIGN_TOP_LEFT, 276, 164);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -22106,7 +23330,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_width = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_width, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_width, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_width, "宽度");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_width, "宽度");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_width, "Width");
+        }
         lv_obj_align(label_addition_QR_code_width, LV_ALIGN_TOP_LEFT, 276, 194);
 
         LV_FONT_DECLARE(heiFont16_1);
@@ -22140,7 +23371,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_border = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_border, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_border, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_border, "边框");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_border, "边框");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_border, "Border");
+        }
         lv_obj_align(label_addition_QR_code_border, LV_ALIGN_TOP_LEFT, 276, 224);
 
 
@@ -22165,7 +23403,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_return, "Return");
+        }
         lv_obj_align(label_addition_QR_code_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -22186,7 +23431,14 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_addition_QR_code_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_QR_code_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_QR_code_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_QR_code_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_QR_code_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_QR_code_confirm, "Confirm");
+        }
         lv_obj_align(label_addition_QR_code_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
         
     }
@@ -22216,6 +23468,7 @@ static void button_addition_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("addition\n");
+        buzzer_enable = 1;
         LV_IMG_DECLARE(img_addition_bg_2);
         img_addition_bg = lv_img_create(lv_scr_act());
         lv_img_set_src(img_addition_bg, &img_addition_bg_2);
@@ -22233,7 +23486,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_text = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_text, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_text, "文本");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_text,  "文本");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_text, "Text");
+        }
         lv_obj_align(label_btn_addition_text, LV_ALIGN_TOP_LEFT, 65, 85);
         lv_obj_set_style_text_color(label_btn_addition_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22249,7 +23509,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_date = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_date, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_date, "日期");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_date,  "日期");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_date, "Date");
+        }
         lv_obj_align(label_btn_addition_date, LV_ALIGN_TOP_LEFT, 145, 85);
         lv_obj_set_style_text_color(label_btn_addition_date, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22264,11 +23531,17 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_picture = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_picture, "图片");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_picture,  "图片");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_picture, "Picture");
+        }
         lv_obj_align(label_btn_addition_picture, LV_ALIGN_TOP_LEFT, 220, 85);
         lv_obj_set_style_text_color(label_btn_addition_picture, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-
-
 
         LV_IMG_DECLARE(img_QR_40);
         btn_addition_QR_code = lv_imgbtn_create(lv_scr_act());
@@ -22280,7 +23553,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_QR_code = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_QR_code, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_QR_code, "二维码");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_QR_code,  "二维码");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_QR_code, "QR code");
+        }
         lv_obj_align(label_btn_addition_QR_code, LV_ALIGN_TOP_LEFT, 300, 85);
         lv_obj_set_style_text_color(label_btn_addition_QR_code, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22294,7 +23574,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_bar_code = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_bar_code, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_bar_code, "条码");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_bar_code, "条码");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_bar_code, "Bar code");
+        }
         lv_obj_align(label_btn_addition_bar_code, LV_ALIGN_TOP_LEFT, 385, 85);
         lv_obj_set_style_text_color(label_btn_addition_bar_code, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22310,10 +23597,16 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_count = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_count, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count, "计数");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_count, "计数");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_count, "Count");
+        }
         lv_obj_align(label_btn_addition_count, LV_ALIGN_TOP_LEFT, 65, 175);
         lv_obj_set_style_text_color(label_btn_addition_count, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-
 
 
         LV_IMG_DECLARE(img_subsection_40);
@@ -22327,7 +23620,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_subsection = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_subsection, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_subsection, "分段");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_subsection, "分段");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_subsection, "Subsection");
+        }
         lv_obj_align(label_btn_addition_subsection, LV_ALIGN_TOP_LEFT, 145, 175);
         lv_obj_set_style_text_color(label_btn_addition_subsection, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22343,7 +23643,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_symbol = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_symbol, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_symbol, "符号");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_symbol, "符号");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_symbol, "Symbol");
+        }
         lv_obj_align(label_btn_addition_symbol, LV_ALIGN_TOP_LEFT, 225, 175);
         lv_obj_set_style_text_color(label_btn_addition_symbol, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22359,7 +23666,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_icon = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_icon, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_icon, "图标");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_icon, "标识");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_icon, "Icon");
+        }
         lv_obj_align(label_btn_addition_icon, LV_ALIGN_TOP_LEFT, 305, 175);
         lv_obj_set_style_text_color(label_btn_addition_icon, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22375,7 +23689,14 @@ static void button_addition_event_cb(lv_event_t* e)
         LV_FONT_DECLARE(heiFont16_1);
         label_btn_addition_more_functions = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_btn_addition_more_functions, &heiFont16_1, LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_more_functions, "更多");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_more_functions, "更多");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_more_functions, "More");
+        }
         lv_obj_align(label_btn_addition_more_functions, LV_ALIGN_TOP_LEFT, 385, 175);
         lv_obj_set_style_text_color(label_btn_addition_more_functions, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
@@ -22425,6 +23746,7 @@ static void button_delete_event_cb(lv_event_t* e)
     {
         if (temp_focused_obj != NULL)
         {
+            buzzer_enable = 1;
             k = lv_obj_get_index(temp_focused_obj);
             win_content_child_num = lv_obj_get_child_cnt(win_content);
 
@@ -22439,14 +23761,15 @@ static void button_delete_event_cb(lv_event_t* e)
             {
                 printf("\n\r###############################\n");
                 printf("i=%d\n", i);
-                printf("text=%s\n", data_structure[i].data.word.text);
-                printf("typeface=%d\n", data_structure[i].data.word.typeface);
-                printf("italic_bold=%d\n", data_structure[i].data.word.italic_bold);
-                printf("space=%d\n", data_structure[i].data.word.space);
-                printf("size=%d\n", data_structure[i].data.word.size);
+                //printf("text=%s\n", data_structure[i].data.word.text);
+                //printf("typeface=%d\n", data_structure[i].data.word.typeface);
+                //printf("italic_bold=%d\n", data_structure[i].data.word.italic_bold);
+                //printf("space=%d\n", data_structure[i].data.word.space);
+                //printf("size=%d\n", data_structure[i].data.word.size);
                 printf("x=%d\n", data_structure[i].x);
                 printf("y=%d\n", data_structure[i].y);
-                printf("spin=%d\n", data_structure[i].data.word.spin);
+                printf("type=%d\n", data_structure[i].type);
+                //printf("spin=%d\n", data_structure[i].data.word.spin);
             }
             
             //删除所有数据
@@ -24857,7 +26180,7 @@ static void label_btn_modification_text_spin_event_cb(lv_event_t* e)
     }
 }
 
-
+#if 0
 static void button_modification_text_event_cb(void)
 {
 
@@ -25141,7 +26464,7 @@ static void button_modification_text_event_cb(void)
     lv_label_set_text(label_file_management_confirm, "确定");
     lv_obj_align(label_file_management_confirm, LV_ALIGN_TOP_LEFT, 277, 252);   
 }
-
+#endif
 
 
 //文本界面，默认字体，思源1
@@ -25160,6 +26483,8 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("modification_text_confirm_event_cb\n\r");
+
+        buzzer_enable = 1;
 
         int len = strlen(lv_label_get_text(label_file_management_label));
         printf("len=%u\n\r", len);
@@ -25343,7 +26668,8 @@ static void modification_text_return_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
-        printf("modification_text_confirm_event_cb\n\r");
+        printf("modification_text_return_event_cb\n\r");
+        buzzer_enable = 1;
         lv_obj_del(file_management_win);
         lv_obj_del(file_management_head_bg);
         //lv_obj_del(label_file_management_total_output);
@@ -25424,7 +26750,14 @@ static void modification_text(void)
     label_file_management = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management, "文本");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management,  "文本");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management, "Text");
+    }
     lv_obj_align(label_file_management, LV_ALIGN_TOP_LEFT, 200, 4);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -25452,7 +26785,14 @@ static void modification_text(void)
     label_file_management_text = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management_text, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management_text, "文本");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_text,  "文本");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_text, "Text");
+    }
     lv_obj_align(label_file_management_text, LV_ALIGN_TOP_LEFT, 45, 139);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -25485,7 +26825,14 @@ static void modification_text(void)
     label_file_management_typeface = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management_typeface, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management_typeface, "字体");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_typeface,  "字体");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_typeface, "Typeface");
+    }
     lv_obj_align(label_file_management_typeface, LV_ALIGN_TOP_LEFT, 45, 167);
 
 
@@ -25519,7 +26866,14 @@ static void modification_text(void)
     label_file_management_word_space = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management_word_space, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management_word_space, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management_word_space, "间隔");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_word_space,  "间隔");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_word_space, "Space");
+    }
     lv_obj_align(label_file_management_word_space, LV_ALIGN_TOP_LEFT, 285, 139);
 
 
@@ -25554,7 +26908,14 @@ static void modification_text(void)
     label_file_management_word_size = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management_word_size, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management_word_size, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management_word_size, "字号");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_word_size,  "字号");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_word_size, "Size");
+    }
     lv_obj_align(label_file_management_word_size, LV_ALIGN_TOP_LEFT, 45, 195);
 
 
@@ -25589,7 +26950,14 @@ static void modification_text(void)
     label_file_management_spin = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management_spin, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management_spin, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management_spin, "旋转");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_spin,  "旋转");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_spin, "Spin");
+    }
     lv_obj_align(label_file_management_spin, LV_ALIGN_TOP_LEFT, 285, 167);
 
 
@@ -25624,7 +26992,14 @@ static void modification_text(void)
     label_file_management_bold = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management_bold, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management_bold, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management_bold, "粗体");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_bold,  "粗体");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_bold, "Bold");
+    }
     lv_obj_align(label_file_management_bold, LV_ALIGN_TOP_LEFT, 285, 223);
 
     sw_file_management_bold = lv_switch_create(lv_scr_act());
@@ -25632,7 +27007,7 @@ static void modification_text(void)
     lv_obj_set_width(sw_file_management_bold, 48);
     lv_obj_set_height(sw_file_management_bold, 23);
     lv_obj_set_style_bg_color(sw_file_management_bold, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
-
+    lv_obj_add_event_cb(sw_file_management_bold, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
     if ((data_structure[g_modification_id].data.word.italic_bold & FT_FONT_STYLE_BOLD) == FT_FONT_STYLE_BOLD)
     {
@@ -25652,7 +27027,14 @@ static void modification_text(void)
     label_management_line_italic = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_management_line_italic, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_management_line_italic, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_management_line_italic, "斜体");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_management_line_italic,  "斜体");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_management_line_italic, "Italic");
+    }
     lv_obj_align(label_management_line_italic, LV_ALIGN_TOP_LEFT, 45, 223);
 
     sw_management_line_italic = lv_switch_create(lv_scr_act());
@@ -25660,7 +27042,7 @@ static void modification_text(void)
     lv_obj_set_width(sw_management_line_italic, 48);
     lv_obj_set_height(sw_management_line_italic, 23);
     lv_obj_set_style_bg_color(sw_management_line_italic, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
-
+    lv_obj_add_event_cb(sw_management_line_italic, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
     if ((data_structure[g_modification_id].data.word.italic_bold & FT_FONT_STYLE_ITALIC) == FT_FONT_STYLE_ITALIC)
     {
@@ -25699,7 +27081,14 @@ static void modification_text(void)
     label_file_management_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_confirm,  "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_confirm, "Confirm");
+    }
     lv_obj_align(label_file_management_confirm, LV_ALIGN_TOP_LEFT, 277, 252);   
 }
 
@@ -25712,6 +27101,7 @@ static void btn_modification_QR_code_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_modification_QR_code_return_event_cb\n");
+        buzzer_enable = 1;
         lv_obj_del(btn_addition_QR_code_confirm);
         lv_obj_del(label_addition_QR_code_confirm);
         lv_obj_del(btn_addition_QR_code_return);
@@ -25765,13 +27155,14 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
     unsigned char* pdata = NULL; 
     unsigned char* pnew_data = NULL;
     lv_obj_t* img = NULL;
-    char bmp_name[128] = {0};
+    char bmp_name[100] = {0};
     char bmp_name_1[128] = {0};
 
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_modification_QR_code_confirm_event_cb\n\r");
+        buzzer_enable = 1;
         //在主界面显示二维码
         str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
         printf("str_len=%u\n\r", str_len);
@@ -27658,6 +29049,7 @@ static void modification_QR_code(void)
     char tempBuf[32]={0};
 
     printf("modification_QR_code\n");
+    buzzer_enable = 1;
     addition_QR_code_head_bg = lv_obj_create(lv_scr_act());
     lv_obj_set_size(addition_QR_code_head_bg, 480, 24);
     lv_obj_align(addition_QR_code_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -27670,7 +29062,15 @@ static void modification_QR_code(void)
     label_addition_QR_code_head = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_head, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_head, "二维码");
+
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_head,  "二维码");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_head, "QR code");
+    }
     lv_obj_align(label_addition_QR_code_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -27701,7 +29101,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_text = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_text, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_text, "文本");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_text,  "文本");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_text, "Text");
+    }
     lv_obj_align(label_addition_QR_code_text, LV_ALIGN_TOP_LEFT, 46, 134);
 
 
@@ -27735,7 +29142,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_QR = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_QR, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_QR, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_QR, "二维码");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_QR,  "二维码");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_QR, "QR code");
+    }
     lv_obj_align(label_addition_QR_code_QR, LV_ALIGN_TOP_LEFT, 46, 164);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -27783,7 +29197,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_height = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_height, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_height, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_height, "高度");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_height,  "高度");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_height, "Height");
+    }
     lv_obj_align(label_addition_QR_code_height, LV_ALIGN_TOP_LEFT, 46, 194);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -27818,7 +29239,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_figure = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_figure, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_figure, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_figure, "数字");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_figure,  "数字");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_figure, "Figure");
+    }
     lv_obj_align(label_addition_QR_code_figure, LV_ALIGN_TOP_LEFT, 46, 224);
 
 
@@ -27840,7 +29268,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_bar_code = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_bar_code, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_bar_code, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_bar_code, "条形码");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_bar_code,  "条形码");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_bar_code, "Bar code");
+    }
     lv_obj_align(label_addition_QR_code_bar_code, LV_ALIGN_TOP_LEFT, 276, 164);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -27883,7 +29318,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_width = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_width, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_width, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_width, "宽度");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_width,  "宽度");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_width, "Width");
+    }
     lv_obj_align(label_addition_QR_code_width, LV_ALIGN_TOP_LEFT, 276, 194);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -27918,7 +29360,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_border = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_border, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_border, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_border, "边框");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_border,  "边框");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_border, "Border");
+    }
     lv_obj_align(label_addition_QR_code_border, LV_ALIGN_TOP_LEFT, 276, 224);
 
 
@@ -27942,7 +29391,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_return = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_return, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_return, "返回");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_return,  "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_return, "Return");
+    }
     lv_obj_align(label_addition_QR_code_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
     LV_IMG_DECLARE(get_back);
@@ -27963,7 +29419,14 @@ static void modification_QR_code(void)
     label_addition_QR_code_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_QR_code_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_QR_code_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_QR_code_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_QR_code_confirm,  "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_QR_code_confirm, "Confirm");
+    }
     lv_obj_align(label_addition_QR_code_confirm, LV_ALIGN_TOP_LEFT, 277, 252); 
 
     update_preview_QR_bar_code();
@@ -27992,6 +29455,7 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_date_time_confirm_event_cb\n");
+        buzzer_enable = 1;
 
         lv_style_reset(&data_structure[g_modification_id].data.date_time.style);
         lv_ft_font_destroy(data_structure[g_modification_id].data.date_time.info.font);
@@ -28181,7 +29645,7 @@ static void button_modification_date_time_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_modification_date_time_return_event_cb\n");
-
+        buzzer_enable = 1;
         lv_obj_del(label_addition_date_time_confirm);
         lv_obj_del(imgbtn_addition_date_time_confirm);
         lv_obj_del(imgbtn_addition_date_time_return);
@@ -28237,7 +29701,7 @@ static void button_modification_date_time_return_event_cb(lv_event_t* e)
 
 static void modification_date(void)
 {
-    lv_event_code_t code;
+    //lv_event_code_t code;
     char date_time_str[128]={0};
 
     printf("modification_date\n\r");
@@ -28254,7 +29718,14 @@ static void modification_date(void)
     label_addition_date_head = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_head, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_head, "日期和时间");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_head,  "日期和时间");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_head, "Date & Time");
+    }
     lv_obj_align(label_addition_date_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -28293,7 +29764,14 @@ static void modification_date(void)
     label_addition_date_text = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_text, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_text, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_text, "日期");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_text,  "日期");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_text, "Date");
+    }
     lv_obj_align(label_addition_date_text, LV_ALIGN_TOP_LEFT, 45, 139);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -28389,7 +29867,14 @@ static void modification_date(void)
     label_addition_date_typeface = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_typeface, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_typeface, "字体");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_typeface,  "字体");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_typeface, "typeface");
+    }
     lv_obj_align(label_addition_date_typeface, LV_ALIGN_TOP_LEFT, 45, 167);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -28422,7 +29907,14 @@ static void modification_date(void)
     label_addition_date_word_size = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_word_size, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_word_size, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_word_size, "字号");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_word_size,  "字号");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_word_size, "Size");
+    }
     lv_obj_align(label_addition_date_word_size, LV_ALIGN_TOP_LEFT, 45, 195);
 
 
@@ -28436,7 +29928,7 @@ static void modification_date(void)
     label_btn_addition_date_word_size = lv_label_create(btn_addition_date_word_size);
     lv_obj_set_style_text_font(label_btn_addition_date_word_size, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_btn_addition_date_word_size, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-    sprintf(date_time_str,"%s",data_structure[g_modification_id].data.date_time.size);
+    sprintf(date_time_str,"%d",data_structure[g_modification_id].data.date_time.size);
     lv_label_set_text(label_btn_addition_date_word_size, date_time_str);
     lv_obj_align(label_btn_addition_date_word_size, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_border_width(label_btn_addition_date_word_size, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -28457,7 +29949,14 @@ static void modification_date(void)
     label_addition_date_italic = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_italic, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_italic, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_italic, "斜体");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_italic,  "斜体");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_italic, "Italic");
+    }
     lv_obj_align(label_addition_date_italic, LV_ALIGN_TOP_LEFT, 45, 223);
 
     sw_addition_date_italic = lv_switch_create(lv_scr_act());
@@ -28465,6 +29964,7 @@ static void modification_date(void)
     lv_obj_set_width(sw_addition_date_italic, 48);
     lv_obj_set_height(sw_addition_date_italic, 23);
     lv_obj_set_style_bg_color(sw_addition_date_italic, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
+    lv_obj_add_event_cb(sw_addition_date_italic, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
     if((data_structure[g_modification_id].data.date_time.italic_bold & FT_FONT_STYLE_ITALIC) == FT_FONT_STYLE_ITALIC)
     {
@@ -28485,7 +29985,14 @@ static void modification_date(void)
     label_addition_time = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_time, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_time, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_time, "时间");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_time, "时间");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_time, "Time");
+    }
     lv_obj_align(label_addition_time, LV_ALIGN_TOP_LEFT, 285, 139);
 
 
@@ -28568,7 +30075,14 @@ static void modification_date(void)
     label_addition_date_word_space = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_word_space, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_word_space, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_word_space, "间距");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_word_space, "间距");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_word_space, "Space");
+    }
     lv_obj_align(label_addition_date_word_space, LV_ALIGN_TOP_LEFT, 285, 167);
 
 
@@ -28582,7 +30096,7 @@ static void modification_date(void)
     label_btn_addition_date_word_space = lv_label_create(btn_addition_date_word_space);
     lv_obj_set_style_text_font(label_btn_addition_date_word_space, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_btn_addition_date_word_space, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-    sprintf(date_time_str,"%s",data_structure[g_modification_id].data.date_time.space);
+    sprintf(date_time_str,"%d",data_structure[g_modification_id].data.date_time.space);
     lv_label_set_text(label_btn_addition_date_word_space, date_time_str);
     lv_obj_align(label_btn_addition_date_word_space, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_border_width(label_btn_addition_date_word_space, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -28602,7 +30116,14 @@ static void modification_date(void)
     label_addition_date_spin = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_spin, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_spin, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_spin, "旋转");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_spin, "旋转");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_spin, "Spin");
+    }
     lv_obj_align(label_addition_date_spin, LV_ALIGN_TOP_LEFT, 285, 195);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -28615,7 +30136,7 @@ static void modification_date(void)
     label_btn_addition_date_spin = lv_label_create(btn_addition_date_spin);
     lv_obj_set_style_text_font(label_btn_addition_date_spin, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_btn_addition_date_spin, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-    sprintf(date_time_str,"%s",data_structure[g_modification_id].data.date_time.spin);
+    sprintf(date_time_str,"%d",data_structure[g_modification_id].data.date_time.spin);
     lv_label_set_text(label_btn_addition_date_spin, date_time_str);
     lv_obj_align(label_btn_addition_date_spin, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_border_width(label_btn_addition_date_spin, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -28636,7 +30157,14 @@ static void modification_date(void)
     label_addition_date_bold = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_bold, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_bold, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_bold, "粗体");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_bold, "粗体");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_bold, "Bold");
+    }
     lv_obj_align(label_addition_date_bold, LV_ALIGN_TOP_LEFT, 285, 223);
 
     sw_addition_date_bold = lv_switch_create(lv_scr_act());
@@ -28644,6 +30172,7 @@ static void modification_date(void)
     lv_obj_set_width(sw_addition_date_bold, 48);
     lv_obj_set_height(sw_addition_date_bold, 23);
     lv_obj_set_style_bg_color(sw_addition_date_bold, lv_color_hex(0x00ff00), LV_STATE_CHECKED | LV_PART_INDICATOR);
+    lv_obj_add_event_cb(sw_addition_date_bold, sw_addition_bold_event_cb, LV_EVENT_CLICKED, NULL);
 
 
     if((data_structure[g_modification_id].data.date_time.italic_bold & FT_FONT_STYLE_BOLD) == FT_FONT_STYLE_BOLD)
@@ -28668,7 +30197,14 @@ static void modification_date(void)
     label_addition_date_time_return = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_time_return, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_time_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_time_return, "返回");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_time_return, "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_time_return, "Return");
+    }
     lv_obj_align(label_addition_date_time_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -28690,7 +30226,14 @@ static void modification_date(void)
     label_addition_date_time_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_date_time_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_date_time_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_date_time_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_date_time_confirm, "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_date_time_confirm, "Confirm");
+    }
     lv_obj_align(label_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
 }
 
@@ -28711,6 +30254,8 @@ static void imgbtn_modification_picture_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_modification_picture_confirm_event_cb\n");
+
+        buzzer_enable = 1;
 
         win_content_child_num = g_modification_id;
 
@@ -28850,9 +30395,10 @@ static void imgbtn_modification_picture_return_event_cb(lv_event_t* e)
 
 static void modification_picture(void)
 {
-    char file_name[100]={0};
+    //char file_name[100]={0};
 
     printf("modification_picture\n");
+    buzzer_enable = 1;
     obj_addition_picture_head_bg = lv_obj_create(lv_scr_act());
     lv_obj_set_size(obj_addition_picture_head_bg, 480, 24);
     lv_obj_align(obj_addition_picture_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -28865,7 +30411,14 @@ static void modification_picture(void)
     label_addition_picture_head = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_picture_head, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_picture_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_picture_head, "图片");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_picture_head,  "图片");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_picture_head, "Picture");
+    }
     lv_obj_align(label_addition_picture_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -28895,10 +30448,21 @@ static void modification_picture(void)
     lv_obj_add_style(table_addition_picture, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
     lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 160, 24);
     lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
-    lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
-    lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
-    lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
-    lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
+        lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
+        lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
+        lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_table_set_cell_value(table_addition_picture, 0, 0, "Name");
+        lv_table_set_cell_value(table_addition_picture, 0, 1, "Type");
+        lv_table_set_cell_value(table_addition_picture, 0, 2, "Size");
+        lv_table_set_cell_value(table_addition_picture, 0, 3, "Time");
+    }
     lv_table_set_col_width(table_addition_picture, 0, 115);
     lv_table_set_col_width(table_addition_picture, 1, 50);
     lv_table_set_col_width(table_addition_picture, 2, 56);
@@ -28958,7 +30522,7 @@ static void modification_picture(void)
     DIR *dir;
     struct dirent *entry;
     struct stat file_stat;
-    char path[128];
+    char path[300];
     unsigned char picture_count = 0;
     int picture_type = 0;
     char created_time[20] ={0};
@@ -28974,7 +30538,7 @@ static void modification_picture(void)
 
     while ((entry = readdir(dir)) != NULL) 
     {
-        snprintf(path, sizeof(path), "%s/%s", "/mnt", entry->d_name);
+        snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
         if (stat(path, &file_stat) == -1) 
         {
             perror("stat");
@@ -29074,7 +30638,7 @@ static void modification_picture(void)
     lv_imgbtn_set_src(btn_addition_picture_open, LV_IMGBTN_STATE_RELEASED, NULL, &open_25_1, NULL);
     lv_obj_set_size(btn_addition_picture_open, open_25_1.header.w, open_25_1.header.h);
     lv_obj_align(btn_addition_picture_open, LV_ALIGN_TOP_LEFT, 90, 180);
-    lv_obj_add_event_cb(btn_addition_picture_open, btn_addition_picture_open_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(btn_addition_picture_open, imgbtn_modification_picture_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
 
     LV_IMG_DECLARE(search);
@@ -29086,7 +30650,14 @@ static void modification_picture(void)
     label_addition_picture_search = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_picture_search, "搜索");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_picture_search,  "搜索");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_picture_search, "Search");
+    }
     lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 42, 222);
 
 
@@ -29123,7 +30694,14 @@ static void modification_picture(void)
     label_addition_picture_return = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_picture_return, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_picture_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_picture_return, "返回");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_picture_return, "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_picture_return, "Return");
+    }
     lv_obj_align(label_addition_picture_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -29145,7 +30723,14 @@ static void modification_picture(void)
     label_addition_picture_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_picture_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_picture_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_picture_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_picture_confirm, "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_picture_confirm, "Confirm");
+    }
     lv_obj_align(label_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
 }
 
@@ -29159,6 +30744,8 @@ static void button_modification_icon_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_icon_confirm_event_cb\n\r");
+
+        buzzer_enable = 1;
 
         win_content_child_num = g_modification_id;
 
@@ -29218,7 +30805,7 @@ static void button_modification_icon_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_icon_confirm_event_cb\n\r");
-
+        buzzer_enable = 1;
         lv_obj_del(file_management_head_bg);
         lv_obj_del(label_file_management);
 
@@ -29246,10 +30833,10 @@ static void button_modification_icon_return_event_cb(lv_event_t* e)
 
 static void modification_icon(void)
 {
-    int len = 0;
+    //int len = 0;
     int i;
-    int offset_address = 6;
-    int line_num = 8;
+    //int offset_address = 6;
+    //int line_num = 8;
     int size_wide = 50;
     int size_high = 67;
 
@@ -29269,7 +30856,14 @@ static void modification_icon(void)
     label_file_management = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management, "标识");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management, "标识");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management, "Icon");
+    }
     lv_obj_align(label_file_management, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -29572,7 +31166,14 @@ static void modification_icon(void)
     label_typeface_return = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_typeface_return, "返回");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_typeface_return, "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_typeface_return, "Return");
+    }
     lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
     LV_IMG_DECLARE(get_back);
@@ -29594,7 +31195,14 @@ static void modification_icon(void)
     label_typeface_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_typeface_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_typeface_confirm, "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_typeface_confirm, "Confirm");
+    }
     lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     
 }
@@ -29608,6 +31216,7 @@ static void btn_modification_count_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_modification_count_return_event_cb\n");
+        buzzer_enable = 1;
 
         lv_obj_del(addition_count_head_bg);
         lv_obj_del(label_addition_count_head);
@@ -29680,6 +31289,8 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_modification_count_confirm_event_cb\n");
+
+        buzzer_enable = 1;
         win_content_child_num = g_modification_id;
 
         lv_style_reset(&data_structure[g_modification_id].data.count.style);
@@ -29886,6 +31497,8 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
 static void modification_count(void)
 {
     char tempBuf[128]={0};
+    char* opts_addition_count_law;
+    char* opts_addition_count_lead_zero;
 
     printf("modification_count\n");
     addition_count_head_bg = lv_obj_create(lv_scr_act());
@@ -29901,7 +31514,14 @@ static void modification_count(void)
     label_addition_count_head = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_count_head, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_head, "计数");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_head,  "计数");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_head, "Count");
+    }
     lv_obj_align(label_addition_count_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -29944,11 +31564,29 @@ static void modification_count(void)
     label_addition_count_law = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_law, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_law, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_law, "规律");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_law,  "规律");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_law, "Law");
+    }
     lv_obj_align(label_addition_count_law, LV_ALIGN_TOP_LEFT, 50, 54);
 
 
-    static const char* opts_addition_count_law = "递增\n递减";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts_addition_count_law = "递增\n递减";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts_addition_count_law = "Increase\nDecrease";
+    }
+    else
+    {
+        opts_addition_count_law = "递增\n递减";
+    } 
     dropdown_addition_count_law = lv_dropdown_create(obj_addition_count_middle_bg);
     lv_obj_set_style_border_width(dropdown_addition_count_law, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     lv_obj_set_style_radius(dropdown_addition_count_law, 10, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -29976,7 +31614,14 @@ static void modification_count(void)
     label_addition_count_times_repetition = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_times_repetition, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_times_repetition, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_times_repetition, "重复");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_times_repetition,  "重复");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_times_repetition, "Repetition");
+    }
     lv_obj_align(label_addition_count_times_repetition, LV_ALIGN_TOP_LEFT, 50, 89);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -30011,7 +31656,14 @@ static void modification_count(void)
     label_addition_count_typeface = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_typeface, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_typeface, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_typeface, "字体");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_typeface,  "字体");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_typeface, "Typeface");
+    }
     lv_obj_align(label_addition_count_typeface, LV_ALIGN_TOP_LEFT, 50, 124);
 
 
@@ -30046,7 +31698,14 @@ static void modification_count(void)
     label_addition_count_size = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_size, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_size, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_size, "字号");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_size,  "字号");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_size, "Size");
+    }
     lv_obj_align(label_addition_count_size, LV_ALIGN_TOP_LEFT, 50, 159);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -30081,7 +31740,14 @@ static void modification_count(void)
     label_addition_count_space = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_space, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_space, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_space, "间距");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_space,  "间距");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_space, "Space");
+    }
     lv_obj_align(label_addition_count_space, LV_ALIGN_TOP_LEFT, 50, 194);
 
 
@@ -30116,10 +31782,29 @@ static void modification_count(void)
     label_addition_count_lead_zero = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_lead_zero, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_lead_zero, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_lead_zero, "前置零");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_lead_zero,  "前置零");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_lead_zero, "Lead zero");
+    }
     lv_obj_align(label_addition_count_lead_zero, LV_ALIGN_TOP_LEFT, 290, 54);
 
-    static const char* opts_addition_count_lead_zero = "显示\n隐藏";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts_addition_count_lead_zero = "显示\n隐藏";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts_addition_count_lead_zero = "Show\nHide";
+    }
+    else
+    {
+        opts_addition_count_lead_zero = "显示\n隐藏";
+    }
+
     dropdown_addition_count_lead_zero = lv_dropdown_create(obj_addition_count_middle_bg);
     lv_obj_set_style_border_width(dropdown_addition_count_lead_zero, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     lv_obj_set_style_radius(dropdown_addition_count_lead_zero, 10, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -30148,7 +31833,14 @@ static void modification_count(void)
     label_addition_count_current_value = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_current_value, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_current_value, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_current_value, "当前值");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_current_value,  "当前值");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_current_value, "Current value");
+    }
     lv_obj_align(label_addition_count_current_value, LV_ALIGN_TOP_LEFT, 290, 89);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -30182,7 +31874,14 @@ static void modification_count(void)
     label_addition_count_minimum = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_minimum, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_minimum, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_minimum, "最小值");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_minimum,  "最小值");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_minimum, "Minimum");
+    }
     lv_obj_align(label_addition_count_minimum, LV_ALIGN_TOP_LEFT, 290, 124);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -30217,7 +31916,14 @@ static void modification_count(void)
     label_addition_count_maximum = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_maximum, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_maximum, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_maximum, "最大值");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_maximum,  "最大值");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_maximum, "Maximum");
+    }
     lv_obj_align(label_addition_count_maximum, LV_ALIGN_TOP_LEFT, 290, 159);
 
 
@@ -30253,7 +31959,14 @@ static void modification_count(void)
     label_addition_count_step = lv_label_create(obj_addition_count_middle_bg);
     lv_obj_set_style_text_font(label_addition_count_step, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_step, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_step, "步进值");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_step,  "步进值");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_step, "Step");
+    }
     lv_obj_align(label_addition_count_step, LV_ALIGN_TOP_LEFT, 290, 194);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -30292,7 +32005,14 @@ static void modification_count(void)
     label_addition_count_return = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_count_return, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_return, "返回");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_return,  "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_return, "return");
+    }
     lv_obj_align(label_addition_count_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -30314,9 +32034,15 @@ static void modification_count(void)
     label_addition_count_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_addition_count_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_addition_count_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_addition_count_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_addition_count_confirm,  "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_addition_count_confirm, "Confirm");
+    }
     lv_obj_align(label_addition_count_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
-    
 }
 
 
@@ -30326,9 +32052,11 @@ static void btn_modification_symbol_return_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     int i;
+    code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_modification_symbol_return_event_cb\n");
+        buzzer_enable = 1;
         for (i = 0; i < SYMBOL_NUMBER; i++)
         {
             lv_obj_del(typeface_obj[i].obj_typeface_label);
@@ -30360,6 +32088,8 @@ static void btn_modification_symbol_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_symbol_confirm_event_cb\n");
+
+        buzzer_enable = 1;
 
         win_content_child_num = g_modification_id;
 
@@ -30402,7 +32132,9 @@ static void btn_modification_symbol_confirm_event_cb(lv_event_t* e)
         lv_label_set_text(label1, g_addition_symbol[g_symbol_flag]);
         lv_obj_center(label1);
     
-        strncpy(data_structure[win_content_child_num].data.word.text, g_addition_symbol[g_symbol_flag], strlen(g_addition_symbol[g_symbol_flag]));
+        //strncpy(data_structure[win_content_child_num].data.word.text, g_addition_symbol[g_symbol_flag], strlen(g_addition_symbol[g_symbol_flag]));
+        snprintf(data_structure[win_content_child_num].data.word.text, sizeof(data_structure[win_content_child_num].data.word.text), "%s", g_addition_symbol[g_symbol_flag]);
+     
         data_structure[win_content_child_num].data.word.size = 20;
         printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
         data_structure[win_content_child_num].type = TYPE_SYMBOL;
@@ -30445,7 +32177,14 @@ static void modification_symbol(void)
     label_file_management = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_file_management, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_file_management, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-    lv_label_set_text(label_file_management, "符号");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management,  "符号");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management, "symbol");
+    }
     lv_obj_align(label_file_management, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -30504,7 +32243,14 @@ static void modification_symbol(void)
     label_typeface_return = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_typeface_return, "返回");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_typeface_return,  "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_typeface_return, "return");
+    }
     lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
     LV_IMG_DECLARE(get_back);
@@ -30526,7 +32272,14 @@ static void modification_symbol(void)
     label_typeface_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_typeface_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_typeface_confirm,  "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_typeface_confirm, "Confirm");
+    }
     lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
 }
 
@@ -30545,6 +32298,7 @@ static void button_modification_event_cb(lv_event_t* e)
         printf("button_modification_event_cb\n");
         if (temp_focused_obj != NULL)
         {
+            buzzer_enable = 1;
             g_modification_id = lv_obj_get_index(temp_focused_obj);
 
             printf("g_modification_id=%d\n\r",g_modification_id);
@@ -30600,8 +32354,11 @@ static void imgbtn_set_tv_bottom_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        pwm_brightness((int)system_data.system.brightness);
         printf("get_back\n");
+        buzzer_enable = 1;
+        set_system_time_flag = 0;
+        pwm_brightness((int)(100-system_data.system.brightness)*4/5);
+      
         lv_obj_del(set_tv);
         lv_obj_del(set_tv_bottom_bg);
         lv_obj_del(set_tv_bottom_return);
@@ -30623,19 +32380,8 @@ static void imgbtn_set_tv_bottom_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_set_tv_bottom_confirm_event_cb\n");
-#if 0
-        lv_dropdown_get_selected_str(concentration_mode, buf, sizeof(buf));
-        concentration = atoi(buf);
-        system_data.print.concentration = concentration;
-        print_data.concentration = concentration;
-
-        lv_dropdown_get_selected_str(width_mode, buf, sizeof(buf));
-        width = atoi(buf);
-        system_data.print.width = width;
-        print_data.word_width = width;
-#endif
+        buzzer_enable = 1;
         set_system_time_flag = 0;
-
         system_data.print.trigger_mode = lv_dropdown_get_selected(trigger_mode);
         system_data.print.nozzle = lv_dropdown_get_selected(nozzle_mode);
         system_data.print.concentration = lv_dropdown_get_selected(concentration_mode);
@@ -30648,18 +32394,32 @@ static void imgbtn_set_tv_bottom_confirm_event_cb(lv_event_t* e)
         system_data.print.trigger_delay = atoi(lv_label_get_text(label_btn_trigger_delay_mode));
         system_data.print.print_speed = atoi(lv_label_get_text(label_btn_label_speed_print_mode));
         system_data.print.flash_set = atoi(lv_label_get_text(label_btn_label_set_print_mode));
+
         system_data.system.buzzer = lv_dropdown_get_selected(key_sound_mode);
         system_data.system.brightness = lv_slider_get_value(slider_screen_luminance);
         system_data.system.language = lv_dropdown_get_selected(dropdown_language);
         system_data.system.screen_off = lv_dropdown_get_selected(dropdown_breath_plate);
+
+
+        printf("trigger_mode=%d\n", system_data.print.trigger_mode);
+        printf("nozzle=%d\n", system_data.print.nozzle);
         printf("concentration=%d\n", system_data.print.concentration);
         printf("width=%d\n", system_data.print.width);
-        printf("nozzle=%d\n", system_data.print.nozzle);
+        printf("encoder=%d\n", system_data.print.encoder);
+        printf("print_direction=%d\n", system_data.print.print_direction);
+        printf("print_voltage=%d\n", system_data.print.print_voltage);
+        printf("print_number=%d\n", system_data.print.print_number);
+        printf("print_speed=%d\n", system_data.print.print_speed);
+        printf("flash_set=%d\n", system_data.print.flash_set);
+        printf("buzzer=%d\n", system_data.system.buzzer);
+        printf("brightness=%d\n", system_data.system.brightness);
+        printf("language=%d\n", system_data.system.language);
+        printf("screen_off=%d\n", system_data.system.screen_off);
 
         set_system_data();
 
         pwm_voltage();
-        pwm_brightness((int)system_data.system.brightness);
+        pwm_brightness((int)(100-system_data.system.brightness)*4/5);
 
         lv_obj_del(set_tv);
         lv_obj_del(set_tv_bottom_bg);
@@ -30677,6 +32437,7 @@ static void trigger_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
         if (lv_dropdown_get_selected(obj) == 0)
@@ -30697,6 +32458,7 @@ static void print_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30821,6 +32583,7 @@ static void voltage_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30833,6 +32596,7 @@ static void width_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30845,6 +32609,7 @@ static void encoder_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
         if (lv_dropdown_get_selected(obj) == 0)
@@ -30865,6 +32630,7 @@ static void key_sound_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30877,6 +32643,7 @@ static void dropdown_language_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30890,6 +32657,7 @@ static void dropdown_breath_plate_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30902,6 +32670,7 @@ static void nozzle_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30915,6 +32684,7 @@ static void concentration_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
     }
@@ -30927,8 +32697,45 @@ static void number_continuous_print_mode_event_handler(lv_event_t* e)
     if (code == LV_EVENT_VALUE_CHANGED)
     {
         char buf[32];
+        buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
+    }
+}
+
+
+static void  btn_interval_continuous_print_mode_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i=0;
+    char temp_str[12] = { 0 };
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
+        if ((pwd_txt != NULL))
+        {
+            i = atoi(pwd_txt);
+            if (i > 150)
+            {
+                i = 150;
+            }
+        }
+
+        sprintf(temp_str, "%d", i);
+        lv_label_set_text(label_btn_interval_continuous_print_mode, temp_str);
+
+        printf("button_word_space_confirm_event_cb\n");
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
     }
 }
 
@@ -30948,6 +32755,8 @@ static void btn_interval_continuous_print_mode_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_file_management_word_space_label\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -30962,15 +32771,13 @@ static void btn_interval_continuous_print_mode_event_cb(lv_event_t* e)
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
-        if (obj == btn_file_management_word_space_label)
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
+            lv_label_set_text(label_typeface_head,  "连喷间隔");
         }
-        else if (obj == btn_file_management_word_size_label)
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
+            lv_label_set_text(label_typeface_head, "Continuous spray interval");
         }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
@@ -31051,7 +32858,15 @@ static void btn_interval_continuous_print_mode_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -31067,14 +32882,58 @@ static void btn_interval_continuous_print_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
         lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(btn_typeface_confirm, button_word_space_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_confirm, btn_interval_continuous_print_mode_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
+
+
+
+static void btn_trigger_delay_mode_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i=0;
+    char temp_str[12] = { 0 };
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
+        if ((pwd_txt != NULL))
+        {
+            i = atoi(pwd_txt);
+            if (i > 1000)
+            {
+                i = 1000;
+            }
+        }
+
+        sprintf(temp_str, "%d", i);
+        lv_label_set_text(label_btn_trigger_delay_mode, temp_str);
+
+        printf("button_word_space_confirm_event_cb\n");
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
     }
 }
 
@@ -31095,6 +32954,8 @@ static void btn_trigger_delay_mode_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_trigger_delay_mode_event_cb\n");
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -31109,15 +32970,13 @@ static void btn_trigger_delay_mode_event_cb(lv_event_t* e)
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
-        if (obj == btn_file_management_word_space_label)
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
+            lv_label_set_text(label_typeface_head,  "触发延迟");
         }
-        else if (obj == btn_file_management_word_size_label)
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
+            lv_label_set_text(label_typeface_head, "Trigger delay");
         }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
@@ -31198,7 +33057,14 @@ static void btn_trigger_delay_mode_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -31214,13 +33080,20 @@ static void btn_trigger_delay_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
         lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(btn_typeface_confirm, button_word_space_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_confirm, btn_trigger_delay_mode_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -31243,6 +33116,7 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -31256,16 +33130,15 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
+        
 
-        if (obj == btn_file_management_word_space_label)
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            printf("btn_file_management_word_space_label\n");
-            lv_label_set_text(label_typeface_head, "间隔");
+            lv_label_set_text(label_typeface_head,  "闪喷设置");
         }
-        else if (obj == btn_file_management_word_size_label)
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            printf("btn_file_management_word_size_label\n");
-            lv_label_set_text(label_typeface_head, "字号");
+            lv_label_set_text(label_typeface_head, "Flash spray setting");
         }
 
         typeface_slider_bg = lv_obj_create(lv_scr_act());
@@ -31346,7 +33219,14 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -31368,7 +33248,14 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -31376,8 +33263,13 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
 static void set_tv_print_create(lv_obj_t* parent)
 {
     char tempbuf[64]={0};
+    char* opts;
+    char* opts_print;
+    char* opts_encoder;
+    char* opts_nozzle;
 
     printf("set_tv_print_create\n");
+    buzzer_enable = 1;
     lv_obj_set_style_pad_all(parent, 0, LV_STATE_DEFAULT);
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* set_print_obj = lv_obj_create(parent);
@@ -31393,9 +33285,28 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_trigger_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_trigger_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_trigger_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_trigger_mode, "触发方式");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_trigger_mode,  "触发方式");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_trigger_mode, "Trigger mode");
+    }
     lv_obj_align(label_trigger_mode, LV_ALIGN_TOP_LEFT, 2, 20);
-    static const char* opts = "按键\n光电";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts = "按键\n光电";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts = "Key\nOptoelectronic";
+    }
+    else
+    {
+        opts = "按键\n光电";
+    }
+
     trigger_mode = lv_dropdown_create(set_print_obj);
     lv_obj_set_style_border_width(trigger_mode, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     //lv_obj_set_style_radius(trigger_mode, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -31417,10 +33328,28 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_print_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_print_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_print_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_print_mode, "喷印方向");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_print_mode, "喷印方向");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_print_mode, "Printing direction");
+    }
     lv_obj_align(label_print_mode, LV_ALIGN_TOP_LEFT, 160, 70);
     //正向模式 逆向模式 正倒模式 逆倒模式
-    static const char* opts_print = "正向\n逆向\n正倒\n逆倒";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts_print = "正向\n逆向\n正倒\n逆倒";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts_print = "Forward\nBackward\nUpright\nReverse";
+    }
+    else
+    {
+        opts_print = "正向\n逆向\n正倒\n逆倒";
+    }
     print_mode = lv_dropdown_create(set_print_obj);
     lv_obj_set_style_border_width(print_mode, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     //lv_obj_set_style_radius(print_mode, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -31442,7 +33371,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_voltage_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_voltage_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_voltage_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_voltage_mode, "打印电压");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_voltage_mode, "打印电压");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_voltage_mode, "Printing voltage");
+    }
     lv_obj_align(label_voltage_mode, LV_ALIGN_TOP_LEFT, 160, 120);
 
     static const char* opts_voltage = "8.0V\n8.2V\n8.4V\n8.6V\n8.8V\n"
@@ -31472,7 +33408,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_width_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_width_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_width_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_width_mode, "字体宽度");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_width_mode, "字体宽度");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_width_mode, "Set width");
+    }
     lv_obj_align(label_width_mode, LV_ALIGN_TOP_LEFT, 2, 170);
     static const char* opts_width = "1\n2\n3\n4\n5\n";
     width_mode = lv_dropdown_create(set_print_obj);
@@ -31496,9 +33439,27 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_encoder_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_encoder_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_encoder_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_encoder_mode, "编码器");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_encoder_mode, "编码器");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_encoder_mode, "Encoder");
+    }
     lv_obj_align(label_encoder_mode, LV_ALIGN_TOP_LEFT, 160, 20);
-    static const char* opts_encoder = "开启\n关闭\n";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts_encoder = "开启\n关闭\n";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts_encoder = "On\nOff\n";
+    }
+    else
+    {
+        opts_encoder = "开启\n关闭\n";
+    }
     encoder_mode = lv_dropdown_create(set_print_obj);
     lv_obj_set_style_border_width(encoder_mode, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     //lv_obj_set_style_radius(encoder_mode, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -31520,9 +33481,27 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_nozzle_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_nozzle_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_nozzle_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_nozzle_mode, "喷头选择");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_nozzle_mode, "喷头选择");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_nozzle_mode, "Nozzle selection");
+    }
     lv_obj_align(label_nozzle_mode, LV_ALIGN_TOP_LEFT, 2, 70);
-    static const char* opts_nozzle = "左喷\n右喷\n";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts_nozzle = "左喷\n右喷";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts_nozzle = "Left\nRight";
+    }
+    else
+    {
+        opts_nozzle = "左喷\n右喷";
+    }
     nozzle_mode = lv_dropdown_create(set_print_obj);
     lv_obj_set_style_border_width(nozzle_mode, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     //lv_obj_set_style_radius(nozzle_mode, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -31546,7 +33525,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_concentration_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_concentration_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_concentration_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_concentration_mode, "喷墨浓度");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_concentration_mode,  "喷墨浓度");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_concentration_mode, "Inkjet concentration");
+    }
     lv_obj_align(label_concentration_mode, LV_ALIGN_TOP_LEFT, 2, 120);
     static const char* opts_concentration = "1\n2\n3\n4\n";
     concentration_mode = lv_dropdown_create(set_print_obj);
@@ -31571,7 +33557,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_number_continuous_print_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_number_continuous_print_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_number_continuous_print_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_number_continuous_print_mode, "连喷次数");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_number_continuous_print_mode,  "连喷次数");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_number_continuous_print_mode, "Number of consecutive sprays");
+    }
     lv_obj_align(label_number_continuous_print_mode, LV_ALIGN_TOP_LEFT, 160, 170);
     static const char* opts_number_continuous_print = "1\n2\n3\n4\n5\n6\n7\n8\n9\n";
     number_continuous_print_mode = lv_dropdown_create(set_print_obj);
@@ -31596,7 +33589,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_interval_continuous_print_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_interval_continuous_print_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_interval_continuous_print_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_interval_continuous_print_mode, "连喷间隔");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_interval_continuous_print_mode,  "连喷间隔");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_interval_continuous_print_mode, "Continuous spray interval");
+    }
     lv_obj_align(label_interval_continuous_print_mode, LV_ALIGN_TOP_LEFT, 318, 20);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -31627,7 +33627,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_trigger_delay_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_trigger_delay_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_trigger_delay_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_trigger_delay_mode, "触发延迟");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_trigger_delay_mode,  "触发延迟");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_trigger_delay_mode, "Trigger delay");
+    }
     lv_obj_align(label_trigger_delay_mode, LV_ALIGN_TOP_LEFT, 318, 70);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -31658,7 +33665,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_speed_print_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_speed_print_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_speed_print_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_speed_print_mode, "喷印速度");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_speed_print_mode,  "喷印速度");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_speed_print_mode, "Printing speed");
+    }
     lv_obj_align(label_speed_print_mode, LV_ALIGN_TOP_LEFT, 318, 120);
 
 
@@ -31689,7 +33703,14 @@ static void set_tv_print_create(lv_obj_t* parent)
     label_set_print_mode = lv_label_create(set_print_obj);
     lv_obj_set_style_text_font(label_set_print_mode, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_set_print_mode, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_set_print_mode, "闪喷设置");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_set_print_mode,  "闪喷设置");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_set_print_mode, "Flash spray setting");
+    }
     lv_obj_align(label_set_print_mode, LV_ALIGN_TOP_LEFT, 318, 170);
 
 
@@ -31734,6 +33755,8 @@ static void btn_system_date_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
+
         static lv_style_t style_sel;
         lv_style_init(&style_sel);
         lv_style_set_text_font(&style_sel, &lv_font_montserrat_20);
@@ -31751,7 +33774,15 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_system_date_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_system_date_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        lv_label_set_text(label_system_date_head, "系统时间设置");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_head,  "系统时间设置");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_head, "System time setting");
+        }
  
         system_date_middle_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(system_date_middle_bg, 480, 224);
@@ -31767,44 +33798,85 @@ static void btn_system_date_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_system_date_year_middle, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_year_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_obj_align(label_system_date_year_middle, LV_ALIGN_TOP_LEFT, 25, 5);
-        lv_label_set_text(label_system_date_year_middle, "年");
 
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_year_middle, "年");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_year_middle, "Year");
+        }
 
         LV_FONT_DECLARE(heiFont16_1);
         label_system_date_month_middle = lv_label_create(system_date_middle_bg);
         lv_obj_set_style_text_font(label_system_date_month_middle, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_month_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_obj_align(label_system_date_month_middle, LV_ALIGN_TOP_LEFT, 100, 5);
-        lv_label_set_text(label_system_date_month_middle, "月");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_month_middle, "月");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_month_middle, "Month");
+        }
 
         LV_FONT_DECLARE(heiFont16_1);
         label_system_date_day_middle = lv_label_create(system_date_middle_bg);
         lv_obj_set_style_text_font(label_system_date_day_middle, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_day_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_obj_align(label_system_date_day_middle, LV_ALIGN_TOP_LEFT, 175, 5);
-        lv_label_set_text(label_system_date_day_middle, "日");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_day_middle, "日");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_day_middle, "Day");
+        }
 
         LV_FONT_DECLARE(heiFont16_1);
         label_system_date_hour_middle = lv_label_create(system_date_middle_bg);
         lv_obj_set_style_text_font(label_system_date_hour_middle, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_hour_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_obj_align(label_system_date_hour_middle, LV_ALIGN_TOP_LEFT, 250, 5);
-        lv_label_set_text(label_system_date_hour_middle, "时");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_hour_middle, "时");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_hour_middle, "Hour");
+        }
 
         LV_FONT_DECLARE(heiFont16_1);
         label_system_date_minute_middle = lv_label_create(system_date_middle_bg);
         lv_obj_set_style_text_font(label_system_date_minute_middle, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_minute_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_obj_align(label_system_date_minute_middle, LV_ALIGN_TOP_LEFT, 325, 5);
-        lv_label_set_text(label_system_date_minute_middle, "分");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_minute_middle, "分");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_minute_middle, "Minute");
+        }
 
         LV_FONT_DECLARE(heiFont16_1);
         label_system_date_second_middle = lv_label_create(system_date_middle_bg);
         lv_obj_set_style_text_font(label_system_date_second_middle, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_second_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_obj_align(label_system_date_second_middle, LV_ALIGN_TOP_LEFT, 400, 5);
-        lv_label_set_text(label_system_date_second_middle, "秒");
-
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_second_middle, "秒");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_second_middle, "Second");
+        }
 
         system_date_roller_year = lv_roller_create(system_date_middle_bg);
         lv_roller_set_options(system_date_roller_year,
@@ -32137,7 +34209,15 @@ static void btn_system_date_event_cb(lv_event_t* e)
         label_system_date_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_system_date_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_system_date_return, "返回");
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_return, "Return");
+        }
         lv_obj_align(label_system_date_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -32159,7 +34239,14 @@ static void btn_system_date_event_cb(lv_event_t* e)
         label_system_date_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_system_date_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_system_date_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_system_date_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_system_date_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_system_date_confirm, "Confirm");
+        }
         lv_obj_align(label_system_date_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -32450,24 +34537,57 @@ static void btn_system_time_event_cb(lv_event_t* e)
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
+#if 0
+void mydelay_s(int n)
+{
+    int i,j;
+    for(j=0;j<n;j++)
+    {
+        for(i=0;i<1000;i++)
+        {
+            usleep(1000);
+        }
+    }
+}
+#endif
 
 
 static void btn_calibration_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int i;
-    pid_t status;
+    //lv_obj_t* obj = lv_event_get_target(e);
 
-    lv_obj_t* obj = lv_event_get_target(e);
     code = lv_event_get_code(e);
     if (code == LV_EVENT_LONG_PRESSED)
     {
         printf("btn_calibration_event_cb\n");
+        buzzer_enable = 1;
+
+        screen_off_obj = lv_obj_create(lv_scr_act());
+        lv_obj_align(screen_off_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_size(screen_off_obj, 480, 272);
+        lv_obj_set_style_bg_color(screen_off_obj, lv_color_hex(0xff0000), LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(screen_off_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(screen_off_obj, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(screen_off_obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(screen_off_obj, 0, LV_STATE_DEFAULT); /* 设置圆角 */ 
+
+        g_screen_touch_flag = 1;     
+
+#if 0
+        mydelay_s(5);
+    
+        printf("screen_off_obj\n");
+        lv_obj_del(screen_off_obj);
+
         status = system("ts_calibrate");
         if (-1 == status)
         {
             printf("ts_calibrate error\n");
         }
+
+        lv_obj_update_layout(set_tv);
+#endif
     }
 }
 
@@ -32481,6 +34601,7 @@ static void button_unencrypt_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_set_developer_confirm_event_cb\r\n");
+        buzzer_enable = 1;
         //解密
         sprintf(tempBuf,"%s",lv_label_get_text(label_btn_yield_reset));
 
@@ -32576,6 +34697,7 @@ static void button_unencrypt_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_set_developer_confirm_event_cb\r\n");
+        buzzer_enable = 1;
         //解密
 
         //比对序列号
@@ -32611,6 +34733,7 @@ static void button_unencrypt_keyboard_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_date_keyboard_confirm_event_cb\n");
+        buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_yield_reset, lv_textarea_get_text(textarea_text_keyboard));
         lv_obj_del(textarea_bg_keyboard);
@@ -32628,6 +34751,8 @@ static void button_unencrypt_keyboard_confirm_event_cb(lv_event_t* e)
 
 static void btn_unencrypt_event_cb(lv_event_t* e)
 {
+    buzzer_enable = 1;
+
     textarea_bg_keyboard = lv_obj_create(lv_scr_act());
     /* 设置大小 */
 
@@ -32690,7 +34815,14 @@ static void btn_unencrypt_event_cb(lv_event_t* e)
     label_keyboard_return = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_keyboard_return, "返回");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_keyboard_return,  "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_keyboard_return, "Return");
+    }
     lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
     LV_IMG_DECLARE(get_back);
@@ -32711,7 +34843,14 @@ static void btn_unencrypt_event_cb(lv_event_t* e)
     label_keyboard_confirm = lv_label_create(lv_scr_act());
     lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-    lv_label_set_text(label_keyboard_confirm, "确定");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_keyboard_confirm,  "确定");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_keyboard_confirm, "Confirm");
+    }
     lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
 }
 
@@ -32727,6 +34866,7 @@ static void btn_check_updates_event_cb(lv_event_t* e)
     if (code == LV_EVENT_LONG_PRESSED)
     {
         printf("btn_check_updates_event_cb LV_EVENT_LONG_PRESSED\n");
+        buzzer_enable = 1;
         set_developer_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(set_developer_bg, 480, 24);
         lv_obj_align(set_developer_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -32740,7 +34880,14 @@ static void btn_check_updates_event_cb(lv_event_t* e)
         label_set_developer_head = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_set_developer_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_set_developer_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
-        lv_label_set_text(label_set_developer_head, "取消加密");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_set_developer_head, "取消加密");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_set_developer_head, "Cancel encryption");
+        }
         lv_obj_align(label_set_developer_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
 
@@ -32756,7 +34903,14 @@ static void btn_check_updates_event_cb(lv_event_t* e)
         label_Rf_frequency_text = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_Rf_frequency_text, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_Rf_frequency_text, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_Rf_frequency_text, "机器码:");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_Rf_frequency_text, "机器码:");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_Rf_frequency_text, "Machine code:");
+        }
         lv_obj_align(label_Rf_frequency_text, LV_ALIGN_TOP_LEFT, 45, 60);
 
 
@@ -32797,7 +34951,14 @@ static void btn_check_updates_event_cb(lv_event_t* e)
         label_yield_reset = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_yield_reset, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_yield_reset, "授权码:");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_yield_reset, "授权码:");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_yield_reset, "Authorization code:");
+        }
         lv_obj_align(label_yield_reset, LV_ALIGN_TOP_LEFT, 45, 120);
 
         LV_FONT_DECLARE(heiFont14);
@@ -32843,7 +35004,14 @@ static void btn_check_updates_event_cb(lv_event_t* e)
         label_addition_date_time_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_time_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_time_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_time_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_time_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_time_return, "Return");
+        }
         lv_obj_align(label_addition_date_time_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -32865,7 +35033,14 @@ static void btn_check_updates_event_cb(lv_event_t* e)
         label_addition_date_time_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_addition_date_time_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_time_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_time_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_date_time_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_date_time_confirm, "Confirm");
+        }
         lv_obj_align(label_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -32875,12 +35050,13 @@ static void btn_check_updates_event_cb(lv_event_t* e)
 static void btn_factory_reset_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int i;
-    lv_obj_t* obj = lv_event_get_target(e);
+    //int i;
+    //lv_obj_t* obj = lv_event_get_target(e);
     code = lv_event_get_code(e);
     if (code == LV_EVENT_LONG_PRESSED)
     {
         printf("btn_factory_reset_event_cb\n");
+        buzzer_enable = 1;
         system_data.init = 0;
         set_system_data();
         get_system_data();
@@ -32912,6 +35088,7 @@ static void button_yield_reset_keyboard_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_yield_reset_keyboard_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -32955,6 +35132,7 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -32968,7 +35146,14 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_typeface_head, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         lv_obj_align(label_typeface_head, LV_ALIGN_TOP_LEFT, 200, 4);
-        lv_label_set_text(label_typeface_head, "产量重置");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_head,  "产量重置");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_head, "Output reset");
+        }
         typeface_slider_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_slider_bg, 480, 224);
         lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 0, 24);
@@ -33047,7 +35232,14 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
         label_typeface_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_return, "Return");
+        }
         lv_obj_align(label_typeface_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
         LV_IMG_DECLARE(get_back);
@@ -33069,7 +35261,14 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
         label_typeface_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_typeface_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_typeface_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_typeface_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_typeface_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_typeface_confirm, "Confirm");
+        }
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -33082,7 +35281,7 @@ static void button_set_developer_confirm_event_cb(lv_event_t* e)
     {
         printf("button_set_developer_confirm_event_cb\r\n");
         //保存总产量数据到文件
-        
+        buzzer_enable = 1;
         
         //删除开发者模式界面
         lv_obj_del(set_developer_bg);
@@ -33122,15 +35321,35 @@ static void button_set_developer_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_set_developer_confirm_event_cb\r\n");
-        //保存总产量数据到文件
-
-
+        printf("button_set_developer_return_event_cb\r\n");
+        buzzer_enable = 1;
         //删除开发者模式界面
+        lv_obj_del(set_developer_bg);
+        lv_obj_del(label_set_developer_head);
+        lv_obj_del(set_developer_middle_bg);
+        lv_obj_del(img_Rf_frequency);
+        lv_obj_del(label_Rf_frequency_text);
+        lv_obj_del(label_Rf_frequency_label);
+        lv_obj_del(img_surrogate_information);
+        lv_obj_del(label_surrogate_information_name);
+        lv_obj_del(label_surrogate_information_label);
+        lv_obj_del(img_print_pulse_width);
+        lv_obj_del(label_print_pulse_width);
+        lv_obj_del(dropdown_print_pulse_width);
+        lv_obj_del(img_yield_reset);
+        lv_obj_del(label_yield_reset);
+        lv_obj_del(label_btn_yield_reset);
+        lv_obj_del(btn_yield_reset);
+        lv_obj_del(addition_date_bottom_bg);
+        lv_obj_del(label_addition_date_time_return);
+        lv_obj_del(imgbtn_addition_date_time_return);
+        lv_obj_del(imgbtn_addition_date_time_confirm);
+        lv_obj_del(label_addition_date_time_confirm);
 
-
-
-        //删除
+        //删除密码界面
+        lv_obj_del(hint_label);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_main_cont);
     }
 }
 
@@ -33153,6 +35372,7 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
     if (code == LV_EVENT_CLICKED)
     {
         printf("[%s:%d] confirm button clicked\n", __FUNCTION__, __LINE__);
+        buzzer_enable = 1;
         if (pwd_text_area != NULL)
         {
             const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
@@ -33198,7 +35418,15 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         label_Rf_frequency_text = lv_label_create(lv_scr_act());
                         lv_obj_set_style_text_font(label_Rf_frequency_text, &heiFont16_1, LV_STATE_DEFAULT);
                         lv_obj_set_style_text_color(label_Rf_frequency_text, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-                        lv_label_set_text(label_Rf_frequency_text, "射频次数:");
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(label_Rf_frequency_text, "射频次数:");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(label_Rf_frequency_text, "Radio frequency frequency:");
+                        }
+
                         lv_obj_align(label_Rf_frequency_text, LV_ALIGN_TOP_LEFT, 45, 39);
 
 
@@ -33222,7 +35450,14 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         label_surrogate_information_name = lv_label_create(lv_scr_act());
                         lv_obj_set_style_text_font(label_surrogate_information_name, &heiFont16_1, LV_STATE_DEFAULT);
                         lv_obj_set_style_text_color(label_surrogate_information_name, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-                        lv_label_set_text(label_surrogate_information_name, "代理信息:");
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(label_surrogate_information_name, "代理信息:");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(label_surrogate_information_name, "Surrogate information:");
+                        }
                         lv_obj_align(label_surrogate_information_name, LV_ALIGN_TOP_LEFT, 295, 39);
 
 
@@ -33243,7 +35478,7 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         AES_convert_key(&context);
                         AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
 
-                        if(authorization.device_id = g_sd_serial)
+                        if(authorization.device_id == g_sd_serial)
                         {
                             if(authorization.locked_state == 1)
                             {
@@ -33311,7 +35546,14 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         label_print_pulse_width = lv_label_create(lv_scr_act());
                         lv_obj_set_style_text_font(label_print_pulse_width, &heiFont16_1, LV_STATE_DEFAULT);
                         lv_obj_set_style_text_color(label_print_pulse_width, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-                        lv_label_set_text(label_print_pulse_width, "打印脉宽");
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(label_print_pulse_width, "打印脉宽:");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(label_print_pulse_width, "Print pulse width:");
+                        }
                         lv_obj_align(label_print_pulse_width, LV_ALIGN_TOP_LEFT, 45, 90);
 
 
@@ -33344,7 +35586,14 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         label_yield_reset = lv_label_create(lv_scr_act());
                         lv_obj_set_style_text_font(label_yield_reset, &heiFont16_1, LV_STATE_DEFAULT);
                         lv_obj_set_style_text_color(label_yield_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-                        lv_label_set_text(label_yield_reset, "产量重置");
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(label_yield_reset, "产量重置:");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(label_yield_reset, "Output reset:");
+                        }
                         lv_obj_align(label_yield_reset, LV_ALIGN_TOP_LEFT, 295, 90);
 
                         LV_FONT_DECLARE(heiFont14);
@@ -33385,7 +35634,15 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         label_addition_date_time_return = lv_label_create(lv_scr_act());
                         lv_obj_set_style_text_font(label_addition_date_time_return, &heiFont16_1, LV_STATE_DEFAULT);
                         lv_obj_set_style_text_color(label_addition_date_time_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-                        lv_label_set_text(label_addition_date_time_return, "返回");
+
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(label_addition_date_time_return, "返回");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(label_addition_date_time_return, "Return");
+                        }
                         lv_obj_align(label_addition_date_time_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -33407,7 +35664,14 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         label_addition_date_time_confirm = lv_label_create(lv_scr_act());
                         lv_obj_set_style_text_font(label_addition_date_time_confirm, &heiFont16_1, LV_STATE_DEFAULT);
                         lv_obj_set_style_text_color(label_addition_date_time_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-                        lv_label_set_text(label_addition_date_time_confirm, "确定");
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(label_addition_date_time_confirm, "确定");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(label_addition_date_time_confirm, "Confirm");
+                        }
                         lv_obj_align(label_addition_date_time_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
                     }
                 }
@@ -33415,14 +35679,28 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                 {
                     if (hint_label != NULL)
                     {
-                        lv_label_set_text(hint_label, "Password can not be empty!");
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(hint_label, "密码不能为空!");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(hint_label, "Password can not be empty!");
+                        }
                     }
                 }
                 else
                 {
                     if (hint_label != NULL)
                     {
-                        lv_label_set_text(hint_label, "未链接调试设备或验证码错误！");
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(hint_label, "未链接调试设备或验证码错误！");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(hint_label, "Verification code error！");
+                        }
                     }
                 }
             }
@@ -33458,6 +35736,7 @@ static void cancel_btn_event_callback(lv_event_t* event)
         }
 #endif
         printf("cancel_btn_event_callback\n");
+        buzzer_enable = 1;
         lv_obj_del(pwd_main_cont);
 
 
@@ -33473,6 +35752,7 @@ static void btn_developer_model_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_developer_model_event_cb\n");
+        buzzer_enable = 1;
         // 当前页面的画布容器
         pwd_main_cont = lv_obj_create(lv_scr_act()); // 基于屏幕创建了一个容器
         if (pwd_main_cont == NULL)
@@ -33543,7 +35823,14 @@ static void btn_developer_model_event_cb(lv_event_t* e)
         //lv_obj_set_height(title_label, 23); // 设置对象的高度
         lv_obj_add_style(title_label, &title_label_style, 0); // 给btn_label添加样式
         lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 5); // 顶部居中显示
-        lv_label_set_text(title_label, "请链接调试设备输入验证码"); // 设置文本内容
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(title_label, "请链接调试设备输入验证码"); // 设置文本内容
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(title_label, "Please enter the verification code"); // 设置文本内容
+        }
 
         // 基于键盘背景对象创建密码框
         pwd_text_area = lv_textarea_create(pwd_bg_cont);
@@ -33646,7 +35933,14 @@ static void btn_developer_model_event_cb(lv_event_t* e)
             return;
         }
         LV_FONT_DECLARE(heiFont16_1);
-        lv_label_set_text(confirm_btn_label, "确定"); // 设置文本内容
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(confirm_btn_label,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(confirm_btn_label, "Confirm");
+        }
         lv_obj_center(confirm_btn_label); // 居中显示
         lv_obj_set_style_text_font(confirm_btn_label, &heiFont16_1, 0);
         lv_obj_t* cancel_btn = lv_btn_create(pwd_bg_cont);
@@ -33668,7 +35962,14 @@ static void btn_developer_model_event_cb(lv_event_t* e)
             return;
         }
 
-        lv_label_set_text(cancel_btn_label, "返回"); // 设置文本内容
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(cancel_btn_label, "返回"); // 设置文本内容
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(cancel_btn_label, "Return"); // 设置文本内容
+        }
         lv_obj_set_style_text_font(cancel_btn_label, &heiFont16_1, 0);
         lv_obj_center(cancel_btn_label);
     }
@@ -33683,8 +35984,10 @@ static void slider_screen_luminance_event_cb(lv_event_t* e)
   //  lv_label_set_text(slider_label, buf);
    // lv_obj_align_to(slider_label, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
     int i = lv_slider_get_value(slider);
+    i = 100 - i;
     printf("i=%d\n\r",i);
-    pwm_brightness(i);
+
+    pwm_brightness(i*4/5);
 }
 
 /*
@@ -33695,7 +35998,11 @@ static void slider_screen_luminance_event_cb(lv_event_t* e)
 */
 static void set_tv_system_create(lv_obj_t* parent)
 {
+    char* opts_key_sound;
+    char* opts_breath_plate;
+
     printf("set_tv_system_create\n");
+    buzzer_enable = 1;
     lv_obj_set_style_pad_all(parent, 0, LV_STATE_DEFAULT);
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* set_system_obj = lv_obj_create(parent);
@@ -33712,7 +36019,15 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_system_date = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_system_date, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_system_date, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_system_date, "系统日期");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_system_date,  "系统日期");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_system_date, "System date");
+    }
+
     lv_obj_align(label_system_date, LV_ALIGN_TOP_LEFT, 2, 20);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -33742,7 +36057,14 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_system_time = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_system_time, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_system_time, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_system_time, "系统时间");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_system_time,  "系统时间");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_system_time, "System time");
+    }
     lv_obj_align(label_system_time, LV_ALIGN_TOP_LEFT, 2, 66);
 
     LV_FONT_DECLARE(heiFont16_1);
@@ -33773,10 +36095,29 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_key_sound = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_key_sound, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_key_sound, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_key_sound, "按键声音");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_key_sound,  "按键声音");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_key_sound, "Key press sound");
+    }
     lv_obj_align(label_key_sound, LV_ALIGN_TOP_LEFT, 2, 112);
 
-    static const char* opts_key_sound = "开启\n关闭\n";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts_key_sound = "开启\n关闭\n";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts_key_sound = "On\nOff\n";
+    }
+    else
+    {
+        opts_key_sound = "开启\n关闭\n";
+    }
+
     key_sound_mode = lv_dropdown_create(set_system_obj);
     lv_obj_set_style_border_width(key_sound_mode, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     //lv_obj_set_style_border_color(key_sound_mode, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT);
@@ -33800,7 +36141,14 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_screen_luminance = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_screen_luminance, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_screen_luminance, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_screen_luminance, "屏幕亮度");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_screen_luminance, "屏幕亮度");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_screen_luminance, "Screen luminance");
+    }
     lv_obj_align(label_screen_luminance, LV_ALIGN_TOP_LEFT, 2, 152);
 
     /*Create a slider in the center of the display*/
@@ -33821,7 +36169,14 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_USB_transfer = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_USB_transfer, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_USB_transfer, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_USB_transfer, "USB传输");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_USB_transfer, "USB传输");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_USB_transfer, "USB transmission");
+    }
     lv_obj_align(label_USB_transfer, LV_ALIGN_TOP_LEFT, 2, 190);
 
     sw_USB_transfer = lv_switch_create(set_system_obj);
@@ -33835,7 +36190,14 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_language = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_language, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_language, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_language, "语言选择");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_language, "语言选择");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_language, "Language selection");
+    }
     lv_obj_align(label_language, LV_ALIGN_TOP_LEFT, 240, 20);
 
 
@@ -33862,10 +36224,28 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_breath_plate = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_breath_plate, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_breath_plate, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_breath_plate, "息屏时间");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_breath_plate, "息屏时间");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_breath_plate, "Screen-off time");
+    }
     lv_obj_align(label_breath_plate, LV_ALIGN_TOP_LEFT, 240, 66);
 
-    static const char* opts_breath_plate = "1分钟\n5分钟\n30分钟\n常亮\n";
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        opts_breath_plate = "1分钟\n5分钟\n30分钟\n常亮\n";
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        opts_breath_plate = "1min\n5min\n30min\nEver\n";
+    }
+    else
+    {
+        opts_breath_plate = "1分钟\n5分钟\n30分钟\n常亮\n"; 
+    }
     dropdown_breath_plate = lv_dropdown_create(set_system_obj);
     lv_obj_set_style_border_width(dropdown_breath_plate, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
     //lv_obj_set_style_border_color(dropdown_breath_plate, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT);
@@ -33898,7 +36278,14 @@ static void set_tv_system_create(lv_obj_t* parent)
     LV_FONT_DECLARE(heiFont16_1);
     label_btn_calibration = lv_label_create(btn_calibration);
     lv_obj_set_style_text_font(label_btn_calibration, &heiFont16_1, LV_STATE_DEFAULT);
-    lv_label_set_text(label_btn_calibration, "触屏校准");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_btn_calibration, "触屏校准");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_btn_calibration, "Screen calibration");
+    }
     lv_obj_center(label_btn_calibration);
     lv_obj_set_style_text_color(label_btn_calibration, lv_color_hex(0x000000), LV_STATE_DEFAULT);
 
@@ -33916,7 +36303,14 @@ static void set_tv_system_create(lv_obj_t* parent)
     LV_FONT_DECLARE(heiFont16_1);
     label_btn_factory_reset = lv_label_create(btn_factory_reset);
     lv_obj_set_style_text_font(label_btn_factory_reset, &heiFont16_1, LV_STATE_DEFAULT);
-    lv_label_set_text(label_btn_factory_reset, "恢复出厂");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_btn_factory_reset, "恢复出厂");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_btn_factory_reset, "Factory reset");
+    }
     lv_obj_center(label_btn_factory_reset);
     lv_obj_set_style_text_color(label_btn_factory_reset, lv_color_hex(0x000000), LV_STATE_DEFAULT);
 
@@ -33925,7 +36319,14 @@ static void set_tv_system_create(lv_obj_t* parent)
     label_bluetooth_transfer = lv_label_create(set_system_obj);
     lv_obj_set_style_text_font(label_bluetooth_transfer, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_bluetooth_transfer, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_bluetooth_transfer, "蓝牙传输");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_bluetooth_transfer, "蓝牙传输");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_bluetooth_transfer, "Bluetooth transmission");
+    }
     lv_obj_align(label_bluetooth_transfer, LV_ALIGN_TOP_LEFT, 240, 190);
 
     sw_label_bluetooth_transfer = lv_switch_create(set_system_obj);
@@ -33945,6 +36346,7 @@ static void set_tv_system_create(lv_obj_t* parent)
 static void set_tv_about_create(lv_obj_t* parent)
 {
     printf("set_tv_about_create\n");
+    buzzer_enable = 1;
     lv_obj_set_style_pad_all(parent, 0, LV_STATE_DEFAULT);
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* set_about_obj = lv_obj_create(parent);
@@ -33961,7 +36363,15 @@ static void set_tv_about_create(lv_obj_t* parent)
     label_device_type = lv_label_create(set_about_obj);
     lv_obj_set_style_text_font(label_device_type, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_device_type, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_device_type, "设备型号：X1PLUS");
+
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+         lv_label_set_text(label_device_type, "设备型号：X1PLUS");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+         lv_label_set_text(label_device_type, "Model：X1PLUS");
+    }
     lv_obj_align(label_device_type, LV_ALIGN_TOP_LEFT, 2, 20);
 
 
@@ -33969,7 +36379,15 @@ static void set_tv_about_create(lv_obj_t* parent)
     label_hardware_version = lv_label_create(set_about_obj);
     lv_obj_set_style_text_font(label_hardware_version, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_hardware_version, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_hardware_version, "硬件版本：XMB127PH1-ZC-V1.1");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_hardware_version, "硬件版本：XMB127PH1-ZC-V1.1");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_hardware_version, "Hardware version：XMB127PH1-ZC-V1.1");
+    }
+
     lv_obj_align(label_hardware_version, LV_ALIGN_TOP_LEFT, 2, 70);
 
 
@@ -33977,7 +36395,14 @@ static void set_tv_about_create(lv_obj_t* parent)
     label_manufacturer_information = lv_label_create(set_about_obj);
     lv_obj_set_style_text_font(label_manufacturer_information, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_manufacturer_information, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_manufacturer_information, "厂商信息：XMB127PH1-ZC-V1.1");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_manufacturer_information, "厂商信息：XMB127PH1-ZC-V1.1");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_manufacturer_information, "Manufacturer：XMB127PH1-ZC-V1.1");
+    }
     lv_obj_align(label_manufacturer_information, LV_ALIGN_TOP_LEFT, 2, 120);
 
 
@@ -33986,7 +36411,14 @@ static void set_tv_about_create(lv_obj_t* parent)
     label_software_version = lv_label_create(set_about_obj);
     lv_obj_set_style_text_font(label_software_version, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_software_version, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-    lv_label_set_text(label_software_version, "软件版本：V1.0_20250107");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_software_version, "软件版本：V1.0_20250107");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_software_version, "Software version：V1.0_20250502");
+    }
     lv_obj_align(label_software_version, LV_ALIGN_TOP_LEFT, 240, 20);
 
 
@@ -34004,7 +36436,14 @@ static void set_tv_about_create(lv_obj_t* parent)
     LV_FONT_DECLARE(heiFont16_1);
     label_btn_check_updates = lv_label_create(btn_check_updates);
     lv_obj_set_style_text_font(label_btn_check_updates, &heiFont16_1, LV_STATE_DEFAULT);
-    lv_label_set_text(label_btn_check_updates, "检查更新");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_btn_check_updates, "检查更新");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_btn_check_updates, "Check for updates");
+    }
     lv_obj_center(label_btn_check_updates);
     lv_obj_set_style_text_color(label_btn_check_updates, lv_color_hex(0x000000), LV_STATE_DEFAULT);
 
@@ -34021,7 +36460,14 @@ static void set_tv_about_create(lv_obj_t* parent)
     LV_FONT_DECLARE(heiFont16_1);
     label_btn_developer_model = lv_label_create(btn_developer_model);
     lv_obj_set_style_text_font(label_btn_developer_model, &heiFont16_1, LV_STATE_DEFAULT);
-    lv_label_set_text(label_btn_developer_model, "开发者模式");
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_btn_developer_model, "开发者模式");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_btn_developer_model, "Developer Mode");
+    }
     lv_obj_center(label_btn_developer_model);
     lv_obj_set_style_text_color(label_btn_developer_model, lv_color_hex(0x000000), LV_STATE_DEFAULT);
 
@@ -34034,10 +36480,21 @@ static void button_set_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
         printf("set\n");
+        buzzer_enable = 1;
+ 
         set_tv = lv_tabview_create(lv_scr_act(), LV_DIR_TOP, 24);
-        set_tv_print = lv_tabview_add_tab(set_tv, "打印设置");
-        set_tv_system = lv_tabview_add_tab(set_tv, "系统设置");
-        set_tv_about = lv_tabview_add_tab(set_tv, "关于本机");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            set_tv_print = lv_tabview_add_tab(set_tv, "打印设置");
+            set_tv_system = lv_tabview_add_tab(set_tv, "系统设置");
+            set_tv_about = lv_tabview_add_tab(set_tv, "关于本机");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            set_tv_print = lv_tabview_add_tab(set_tv, "Print setup");
+            set_tv_system = lv_tabview_add_tab(set_tv, "System setup");
+            set_tv_about = lv_tabview_add_tab(set_tv, "About this machine");
+        }
 
         set_tv_print_create(set_tv_print);
         set_tv_system_create(set_tv_system);
@@ -34055,7 +36512,14 @@ static void button_set_event_cb(lv_event_t* e)
         set_tv_bottom_return = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(set_tv_bottom_return, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(set_tv_bottom_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(set_tv_bottom_return, "返回");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(set_tv_bottom_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(set_tv_bottom_return, "Return");
+        }
         lv_obj_align(set_tv_bottom_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
 
@@ -34077,7 +36541,14 @@ static void button_set_event_cb(lv_event_t* e)
         label_set_tv_bottom_confirm = lv_label_create(lv_scr_act());
         lv_obj_set_style_text_font(label_set_tv_bottom_confirm, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_set_tv_bottom_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-        lv_label_set_text(label_set_tv_bottom_confirm, "确定");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_set_tv_bottom_confirm,  "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_set_tv_bottom_confirm, "Confirm");
+        }
         lv_obj_align(label_set_tv_bottom_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
@@ -34122,8 +36593,10 @@ void get_system_data(void)
         system_data.print.concentration = 1;
         system_data.print.nozzle = 0;
         system_data.print.width = 1;
-        system_data.print.print_voltage = 70;
+        system_data.print.print_voltage = 0;
+        system_data.print.flash_set = 1;
         system_data.system.brightness = 70;
+        system_data.system.buzzer = 1;
         lv_res = lv_fs_open(&lv_file, "A:/root/system_data.dat", LV_FS_MODE_WR);
         if (lv_res != LV_FS_RES_OK)
         {
@@ -34334,34 +36807,12 @@ void delete_bmp_files(void)
 
 
 
-void screen_touched_event_handler(lv_event_t * e)
-{
-    lv_event_code_t code = lv_event_get_code(e);
-    lv_obj_t * obj = lv_event_get_target(e);
-    
-    if(code == LV_EVENT_PRESSED) 
-    {
-        printf("lv_scr_act Pressed\n");
-        if(g_screen_off_status == 1)
-        {
-            pwm_brightness((int)system_data.system.brightness);
-        }
-        else
-        {
-            g_screen_off_count = 0;
-        }
-
-        g_data_structure_count = 0;
-    }
-}
-
-
 void recovery_data(void)
 {
-    lv_event_code_t code;
+    //lv_event_code_t code;
     int win_content_child_num = 0;
     int i;
-    char file_name[128]={ 0 };
+    //char file_name[128]={ 0 };
     char temp_typeface[128] = { 0 };
     int word_space = 0;
     //int word_size = 0;
@@ -34382,7 +36833,7 @@ void recovery_data(void)
     char bmp_name[64]={0};
     char bmp_name_1[100]={0};  
     char date_time_str[64]={ 0 };
-    lv_img_t* img_obj = NULL;
+    lv_obj_t* img_obj = NULL;
     lv_img_t* img_1 = NULL;
     lv_img_dsc_t* img_dsc = NULL;
 
@@ -34390,7 +36841,7 @@ void recovery_data(void)
     memset(&data_structure, 0, sizeof(data_structure));
 
     // 打开文件以写入二进制数据
-    FILE* file = fopen("/media/file/data_structure.dat", "rb");
+    FILE* file = fopen("/media/system_file/data_structure.dat", "rb");
     if (file == NULL) 
     {
         perror("Failed to open file");
@@ -36482,12 +38933,19 @@ void recovery_data(void)
     }   
 }
 
-void get_sd_id(void)
+int get_sd_id(void)
 {
   FILE *fp = fopen("/sys/block/mmcblk0/device/serial", "r");
     if (!fp) 
     {
         perror("无法打开 serial 文件");
+        return -1;
+    }
+
+    if (fseek(fp, 2, SEEK_SET) != 0) 
+    {
+        perror("无法跳过第1个字符");
+        fclose(fp);
         return -1;
     }
 
@@ -36500,6 +38958,8 @@ void get_sd_id(void)
 
     fclose(fp);
     printf("SD 卡序列号: %08X\n", g_sd_serial);
+
+    return 0;
 }
 
 
@@ -36676,9 +39136,7 @@ void lv_demo_widgets(void)
 
     get_sd_id();
 
-
-
-    lv_obj_add_event_cb(lv_scr_act(), screen_touched_event_handler, LV_EVENT_PRESSED, NULL);
+    //lv_obj_add_event_cb(lv_scr_act(), screen_touched_event_handler, LV_EVENT_PRESSED, NULL);
 
     LV_IMG_DECLARE(head_background_image);
     Head_background_image = lv_img_create(lv_scr_act()); /* 创建图片部件 */
@@ -37149,7 +39607,7 @@ void lv_demo_widgets(void)
     }
     else if(system_data.system.language == LANGUAGE_ENGLISH)
     {
-        lv_label_set_text(label_modification, "Modification");
+        lv_label_set_text(label_modification, "Rewrite");
     }
 
     lv_obj_align(label_modification, LV_ALIGN_TOP_LEFT, 238, 251);
@@ -37173,7 +39631,7 @@ void lv_demo_widgets(void)
     }
     else if(system_data.system.language == LANGUAGE_ENGLISH)
     {
-        lv_label_set_text(label_set, "Set");
+        lv_label_set_text(label_set, "Setting");
     }
 
     lv_obj_align(label_set, LV_ALIGN_TOP_LEFT, 293, 251);
@@ -37182,7 +39640,7 @@ void lv_demo_widgets(void)
     LV_IMG_DECLARE(left);
     lv_obj_t* imgbtn_turn_left = lv_imgbtn_create(lv_scr_act());
     lv_imgbtn_set_src(imgbtn_turn_left, LV_IMGBTN_STATE_RELEASED, NULL, &left, NULL);
-    printf("zhangchuan-%u %u\n\r",left.header.w,left.header.h);
+    //printf("zhangchuan-%u %u\n\r",left.header.w,left.header.h);
     lv_obj_set_size(imgbtn_turn_left, left.header.w, left.header.h);
     lv_obj_align(imgbtn_turn_left, LV_ALIGN_TOP_LEFT, 347, 216);
     lv_obj_add_event_cb(imgbtn_turn_left, button_left_event_cb, LV_EVENT_CLICKED, NULL);
@@ -37334,7 +39792,7 @@ void lv_demo_widgets(void)
 
     pwm_init();
     pwm_voltage();
-    pwm_brightness((int)system_data.system.brightness);
+    pwm_brightness((int)(100-system_data.system.brightness)*4/5);
 
     fd_adc = open("/dev/adc", O_RDWR);
 	if(fd_adc < 0)
