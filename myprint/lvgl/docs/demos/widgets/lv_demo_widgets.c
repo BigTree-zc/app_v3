@@ -25,6 +25,10 @@
 #include "../../examples/libs/Zint/stb_image_write.h"
 #include <dirent.h>
 #include "sw_aes.h"
+#include <regex.h> // 用于正则表达式匹配
+
+
+#define  SOFTWARE_VERSION  "V1.0_20250811"
 
 
 
@@ -146,6 +150,7 @@ static lv_obj_t* screen_off_obj;
 
 #define CANVAS_WIDTH_1  1000
 #define CANVAS_HEIGHT_1 150
+#define WORD_MAX_SIZE 200
 
 
 typedef struct _PRINT_DATA_
@@ -169,13 +174,17 @@ static PRINT_DATA print_data;
 static unsigned int buzzer_enable = 0;
 static unsigned int buzzer_count = 0;
 static int fd_buzzer;
-static int fd_mp1484_en;
+//static int fd_mp1484_en;
 static int fd_bm8563;
+static int fd_rc522;
 static int fd_adc;
+static int fd_optoelectronic;
 //static int print_width[CANVAS_HEIGHT] = {0};
 static int print_button_enable = 0;
 static int fd_gpio_in;
-static unsigned int key_value;
+static unsigned int key_value = 1;
+static unsigned int key_value_1 = 1;
+static unsigned int key_value_2 = 1;
 //static unsigned int encoder_enalbe = 0;
 //static unsigned int encoder_low_flag = 0;
 //static unsigned int encoder_count = 0;
@@ -205,6 +214,7 @@ lv_obj_t* file_management_middle_bg;
 lv_obj_t* img_file_management_text;
 lv_obj_t* label_file_management_text;
 lv_obj_t* label_file_management_text_label;
+lv_obj_t* label_file_management_text_label_1;
 lv_obj_t* img_file_management_text_time;
 lv_obj_t* label_file_management_text_time;
 lv_obj_t* label_file_management_text_time_label;
@@ -345,7 +355,8 @@ typedef struct  _QR_BAR_STRUCTURE_
 
 typedef struct  _PICTURE_STRUCTURE_
 {
-    char text[TEXT_MAX_LENGTH];//存储图片名称
+    char text_1[128];//存储图片名称
+    char text_2[128];//存储图片名称
     unsigned int size;
 }PICTURE_STRUCTURE;
 
@@ -478,7 +489,7 @@ static char typeface_name[37][16] = {
     "点阵圆点1",
 };
 
-enum
+typedef enum
 {
     CHANG_YONG_SONG_TI = 0,
     CHANG_YONG_HEI_TI = 1,
@@ -518,7 +529,8 @@ enum
     D_DIN_PRO_400_REGULAR = 35,
     MARCELLUS_REGULAR = 36,
     JIN_ZI_SHE_TONG_YUAN_REGULAR = 37,
-};
+    FONT_TYPE_MAX,
+}FontType;
 
 
 lv_obj_t* typeface_head_bg;
@@ -910,6 +922,7 @@ lv_obj_t* obj_addition_QR_code_bottom_bg;
 lv_obj_t* img_addition_QR_code_text;
 lv_obj_t* btn_addition_QR_code_text;
 lv_obj_t* label_btn_addition_QR_code_text;
+lv_obj_t* label_btn_addition_QR_code_text_1;
 lv_obj_t* img_addition_QR_code;
 lv_obj_t* label_addition_QR_code_QR;
 lv_obj_t* dropdown_addition_QR_code_QR;
@@ -1101,7 +1114,7 @@ static unsigned char bar_code_type = 0;
 static unsigned char g_system_time[6]={0};
 
 static int set_system_time_flag = 0;
-static int read_writer_rtc_enable = 1;
+static volatile int read_writer_rtc_enable = 1;
 
 static char QR_code_name[4][16] = {
     "QR CODE",
@@ -1210,6 +1223,14 @@ lv_obj_t* btn_yield_reset;
 lv_obj_t* label_btn_yield_reset;
 lv_obj_t* label_prompt_message;
 
+
+static lv_obj_t* Ink_cartridge_error_win;
+static lv_obj_t* label_warning;
+static lv_obj_t* Ink_cartridge_error_content;
+static lv_obj_t* label_warning_content;
+static lv_obj_t* button_ack;
+static lv_obj_t* button_ack_label;
+
 unsigned char g_file_num = 0;
 
 static int set_linux_time_flag = 0;
@@ -1236,7 +1257,8 @@ typedef struct {
 static unsigned char  g_icon_type = 0;
 
 #define ICON_NUMBER 98
-
+#define QR_BAR_MAX_HIGHT 200
+#define QR_BAR_MIN_HIGHT 100
 
 lv_img_dsc_t icon_buf[ICON_NUMBER] = { 0 };
 
@@ -1345,6 +1367,27 @@ static uint8_t original_msg[MSG_SIZE] =
 #endif
 
 
+// 字体样式标志位（可组合使用，如粗体+斜体）
+typedef enum {
+    FONT_STYLE_NORMAL = 0x00, // 默认
+    FONT_STYLE_BOLD = 0x01, // 粗体
+    FONT_STYLE_ITALIC = 0x02, // 斜体
+    FONT_STYLE_BOLD_ITALIC = FONT_STYLE_BOLD | FONT_STYLE_ITALIC
+} FontStyle;
+
+
+
+typedef struct FontNode {
+    FontType type;          // 字体类型（如Arial）
+    uint16_t size;          // 字号（10-200）
+    FontStyle style;        // 字形样式（粗体/斜体等）
+    lv_font_t* font;        // LVGL字体对象
+    uint32_t ref_count;     // 引用计数
+    struct FontNode* next;  // 下一个节点
+} FontNode;
+
+
+
 static uint8_t out[MSG_SIZE] ;
 static uint8_t msg[MSG_SIZE] ;
 static AES_CTX context ;
@@ -1353,12 +1396,20 @@ unsigned char g_authorization_buf[16]={0};
 unsigned char g_screen_touch_flag = 0;
 unsigned int g_screen_touch_count = 0;
 
+CARD_INFORMATION card_info_newest;
+
+int read_card_info_result = 0;
+
+unsigned int total_output_last;
+
+AUTHORIZATION_INFORMATION  g_authorization;
+
 static void textarea_text_event_cb(lv_event_t* e);
 static void drag_event_handler(lv_event_t* e);
 
 unsigned short get_print_data_for_each_column(unsigned int line_number,unsigned int A_number,unsigned char odd_even);
 void set_mp1484_en(unsigned char gpio_status);
-void delay_100ns(unsigned char ns);
+void delay_100ns(unsigned int ns);
 void p_74hc595d(unsigned short data);
 void initialize(void);
 void function_20240522(void);
@@ -1373,7 +1424,7 @@ void get_system_data(void);
 void set_system_data(void);
 //void delete_bmp_files(const char *dir_path);
 void delete_bmp_files(void);
-int is_bmp_file(const char *filename);
+int is_bmp_png_file(const char *filename);
 void save_as_bmp_half_size_noalloc(const char* filename, const lv_img_dsc_t* img);
 void formatNumberWithLeadingZeros(unsigned int a, unsigned int b, char *strA);
 void remove_dat_suffix(const char *filename, char *output);
@@ -1390,7 +1441,125 @@ int pwm_brightness(int vaule);
 unsigned char stringToHex(char a);
 unsigned char CRC8(unsigned char buf[],unsigned char len);
 time_t datetime_to_seconds(int year, int month, int day, int hour, int minute, int second);
+int compare_files(const void *a, const void *b);
+void font_list_release(FontType type, uint16_t size, FontStyle style);
+FontNode* font_list_find(FontType type, uint16_t size, FontStyle style);
+lv_font_t* font_list_get(FontType type, uint16_t size, FontStyle style);
+void font_list_gc(void);
+static void btn_addition_count_updata(void);
+void addition_text_updata(void);
+void addition_QR_bar_updata(void);
+int check_string_format(const char *str);
+void check_hp45(void);
 
+
+
+static FontNode* font_list_head = NULL;
+
+FontNode* font_list_find(FontType type, uint16_t size, FontStyle style)
+{
+    FontNode* current = font_list_head;
+    while (current != NULL)
+    {
+        if (current->type == type && current->size == size && current->style == style)
+        {
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+
+lv_font_t* font_list_get(FontType type, uint16_t size, FontStyle style)
+{
+    char tempBuf[128] = { 0 };
+
+    // 参数检查
+    if (size < 10 || size > 200 || type > FONT_TYPE_MAX)
+    {
+        LV_LOG_ERROR("Invalid font params: type=%d, size=%d", type, size);
+        return NULL;
+    }
+
+    // 查询缓存
+    FontNode* node = font_list_find(type, size, style);
+    if (node != NULL)
+    {
+        node->ref_count++;
+        return node->font;
+    }
+
+    // 新建节点
+    FontNode* new_node = lv_mem_alloc(sizeof(FontNode));
+    new_node->type = type;
+    new_node->size = size;
+    new_node->style = style;
+    new_node->ref_count = 1;
+    new_node->next = NULL;
+
+    //sprintf(tempBuf, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[type]);
+    sprintf(tempBuf, "/media/%s", typeface_buf[type]);
+
+    printf("%s\n\r", tempBuf);
+
+    lv_ft_info_t ft_info = {
+        .name = tempBuf,
+        .weight = size,
+        .style = style,
+        .font = NULL
+    };
+
+    if (!lv_ft_font_init(&ft_info))
+    {
+        lv_mem_free(new_node);
+        LV_LOG_ERROR("Failed to init font: %s (size:%d, style:%d)", tempBuf, size, style);
+        return NULL;
+    }
+
+    new_node->font = ft_info.font;
+
+    // 添加到链表尾部
+    if (font_list_head == NULL)
+    {
+        font_list_head = new_node;
+    }
+    else
+    {
+        FontNode* tail = font_list_head;
+        while (tail->next != NULL) tail = tail->next;
+        tail->next = new_node;
+    }
+
+    return new_node->font;
+}
+
+
+void font_list_gc(void)
+{
+    FontNode** ptr = &font_list_head;
+    while (*ptr != NULL)
+    {
+        if ((*ptr)->ref_count == 0) {
+            FontNode* to_free = *ptr;
+            lv_ft_font_destroy(to_free->font); // LVGL 8.3 官方释放方法
+            *ptr = to_free->next;
+            lv_mem_free(to_free);
+        }
+        else {
+            ptr = &(*ptr)->next;
+        }
+    }
+}
+
+void font_list_release(FontType type, uint16_t size, FontStyle style)
+{
+    FontNode* node = font_list_find(type, size, style);
+    if (node && node->ref_count > 0)
+    {
+        node->ref_count--;
+    }
+}
 
 
 time_t datetime_to_seconds(int year, int month, int day, int hour, int minute, int second) 
@@ -2793,7 +2962,7 @@ void pwm_init(void)
         printf("open error\n");
     }
 }
-
+#if 0
 void set_mp1484_en(unsigned char gpio_status)
 {
     unsigned char databuf[2];
@@ -2807,10 +2976,11 @@ void set_mp1484_en(unsigned char gpio_status)
         close(fd_mp1484_en);
     }    
 }
+#endif
 
-void delay_100ns(unsigned char ns)
+void delay_100ns(unsigned int ns)
 {
-    unsigned char i;
+    unsigned int i;
     for(i=0;i<ns;i++);
 }
 
@@ -2852,7 +3022,7 @@ void initialize(void)
     }
 }
 
-
+#if 0
 void function_20240522(void)
 {
     int retvalue;
@@ -2882,6 +3052,7 @@ void function_20240522(void)
         set_system_data();
     }   
 }
+#endif
 
 
 
@@ -3002,6 +3173,8 @@ static void timer_100ms_cb(lv_timer_t * t)
     static int time_count_1s = 0;
     static int adc_count_5s = 0;
     static int flash_set_count = 0;
+    static int rept_count = 0;
+    static int rc522_count = 0;
     int voltage = 0;
     char cmd[64]={0};
     unsigned char* pdata = NULL;
@@ -3014,6 +3187,7 @@ static void timer_100ms_cb(lv_timer_t * t)
     unsigned char win_content_child_num;
     char date_time_str[64]={0};
     pid_t status;
+    //unsigned char *temp_p = NULL;
 
     time_count_1s++;
     if(time_count_1s >= 10)
@@ -3029,32 +3203,34 @@ static void timer_100ms_cb(lv_timer_t * t)
             if(retvalue < 0)
             {
                 printf("fd_bm8563 Failed!\r\n");
-                close(fd_bm8563);
+                //close(fd_bm8563);
             }
-            
-            //printf("%u %u %u %u %u %u\n\r",databuf[0],databuf[1],databuf[2],databuf[3],databuf[4],databuf[5]);
-            sprintf(g_time_data_string,"%04u/%02u/%02u",2000+databuf[0],databuf[1],databuf[2]);
-            sprintf(g_time_time_string,"%02u:%02u:%02u",databuf[3],databuf[4],databuf[5]);
-            memcpy(g_system_time,databuf,6);
-            //printf("%u %u %u %u %u %u\n\r",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]); 
-            lv_label_set_text(Date_label, g_time_data_string);
-            lv_label_set_text(Time_label, g_time_time_string);
-
-            if(set_system_time_flag == 1)
-            {
-                sprintf(g_time_data_string,"%04u-%02u-%02u",2000+databuf[0],databuf[1],databuf[2]);
-                lv_label_set_text(label_btn_system_date, g_time_data_string);
+            else 
+            {       
+                //printf("%u %u %u %u %u %u\n\r",databuf[0],databuf[1],databuf[2],databuf[3],databuf[4],databuf[5]);
+                sprintf(g_time_data_string,"%04u/%02u/%02u",2000+databuf[0],databuf[1],databuf[2]);
                 sprintf(g_time_time_string,"%02u:%02u:%02u",databuf[3],databuf[4],databuf[5]);
-                lv_label_set_text(label_btn_system_time, g_time_time_string);            
-            }
+                memcpy(g_system_time,databuf,6);
+                //printf("%u %u %u %u %u %u\n\r",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]); 
+                lv_label_set_text(Date_label, g_time_data_string);
+                lv_label_set_text(Time_label, g_time_time_string);
 
-            if(set_linux_time_flag == 0)
-            {
-                set_linux_time_flag = 1;
-                printf("%u %u %u %u %u %u\n\r",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
-                //设置系统时间
-                snprintf(cmd, sizeof(cmd), "date -s '%04d-%02d-%02d %02d:%02d:%02d'", 2000+g_system_time[0],g_system_time[1],g_system_time[2], g_system_time[3],g_system_time[4],g_system_time[5]);
-                system(cmd);               
+                if(set_system_time_flag == 1)
+                {
+                    sprintf(g_time_data_string,"%04u-%02u-%02u",2000+databuf[0],databuf[1],databuf[2]);
+                    lv_label_set_text(label_btn_system_date, g_time_data_string);
+                    sprintf(g_time_time_string,"%02u:%02u:%02u",databuf[3],databuf[4],databuf[5]);
+                    lv_label_set_text(label_btn_system_time, g_time_time_string);            
+                }
+
+                if(set_linux_time_flag == 0)
+                {
+                    set_linux_time_flag = 1;
+                    printf("%u %u %u %u %u %u\n\r",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                    //设置系统时间
+                    snprintf(cmd, sizeof(cmd), "date -s '%04d-%02d-%02d %02d:%02d:%02d'", 2000+g_system_time[0],g_system_time[1],g_system_time[2], g_system_time[3],g_system_time[4],g_system_time[5]);
+                    system(cmd);               
+                }
             }
         }
     }
@@ -3079,9 +3255,11 @@ static void timer_100ms_cb(lv_timer_t * t)
     }
 
     g_data_structure_count++;
-    if(g_data_structure_count > 600)
+    if(g_data_structure_count > 800)
     {
         g_data_structure_count = 0;
+
+        font_list_gc();
         for(i=0;i<NEW_TEXT_MAX_NUMBER;i++)
         {
             if(data_structure[i].type != 0)
@@ -3095,6 +3273,118 @@ static void timer_100ms_cb(lv_timer_t * t)
                     data_structure_last[i].type = data_structure[i].type;
                     data_structure_last[i].x = data_structure[i].x;
                     data_structure_last[i].y = data_structure[i].y;
+
+                    if(data_structure[i].type == TYPE_DATE)
+                    {
+                        if(data_structure[i].data.date_time.date_or_time == 0)
+                        {
+                            switch(data_structure[i].data.date_time.date_or_time_type)
+                            {
+                                case 0:
+                                    sprintf(date_time_str, "%04d/%02d/%02d", 2000 + g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 1:
+                                    sprintf(date_time_str, "%02d/%02d/%02d", g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 2:
+                                    sprintf(date_time_str, "%04d-%02d-%02d", 2000 + g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 3:
+                                    sprintf(date_time_str, "%02d-%02d-%02d", g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 4:
+                                    sprintf(date_time_str, "%04d.%02d.%02d", 2000 + g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 5:
+                                    sprintf(date_time_str, "%02d.%02d.%02d", g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 6:
+                                    sprintf(date_time_str, "%02d/%02d/%04d", g_system_time[2],  g_system_time[1], 2000 + g_system_time[0]);
+                                    break;
+                                case 7:
+                                    sprintf(date_time_str, "%02d/%02d/%02d", g_system_time[2],  g_system_time[1], g_system_time[0]);
+                                    break;
+                                case 8:
+                                    sprintf(date_time_str, "%02d-%02d-%04d", g_system_time[2],  g_system_time[1], 2000 + g_system_time[0]);
+                                    break;
+                                case 9:
+                                    sprintf(date_time_str, "%02d-%02d-%02d", g_system_time[2],  g_system_time[1], g_system_time[0]);
+                                    break;
+                                case 10:
+                                    sprintf(date_time_str, "%02d.%02d.%04d", g_system_time[2],  g_system_time[1], 2000 + g_system_time[0]);
+                                    break;
+                                case 11:
+                                    sprintf(date_time_str, "%02d.%02d.%02d", g_system_time[2],  g_system_time[1], g_system_time[0]);
+                                    break;
+                                case 12:
+                                    sprintf(date_time_str, "%04d年%02d月%02d日", 2000 + g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 13:
+                                    sprintf(date_time_str, "%02d年%02d月%02d日", g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 14:
+                                    sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                                    break;
+                                case 15:
+                                    sprintf(date_time_str, "延期");
+                                    break;
+                            }
+                        }
+                        else
+                        {
+                            switch(data_structure[i].data.date_time.date_or_time_type)
+                            {
+                                case 0:
+                                    sprintf(date_time_str, "%02d:%02d:%02d", g_system_time[3], g_system_time[4], g_system_time[5]);
+                                    break;
+                                case 1:
+                                    sprintf(date_time_str, "%02d:%02d", g_system_time[3], g_system_time[4]);
+                                    break;
+                                case 2:
+                                    if (g_system_time[3] > 12)
+                                    {
+                                        sprintf(date_time_str, "%02d:%02d:%02d PM", g_system_time[3] - 12, g_system_time[4], g_system_time[5]);
+                                    }
+                                    else
+                                    {
+                                        sprintf(date_time_str, "%02d:%02d:%02d AM", g_system_time[3], g_system_time[4], g_system_time[5]);
+                                    }
+                                    break;
+                                case 3:
+                                    if (g_system_time[3] > 12)
+                                    {
+                                        sprintf(date_time_str, "%02d:%02d PM", g_system_time[3] - 12, g_system_time[4]);
+                                    }
+                                    else
+                                    {
+                                        sprintf(date_time_str, "%02d:%02d AM", g_system_time[3], g_system_time[4]);
+                                    }
+                                    break;
+                                case 4:
+                                    sprintf(date_time_str, "%02d时%02d分%02d秒", g_system_time[3], g_system_time[4], g_system_time[5]);
+                                    break;
+                                case 5:
+                                    sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                                    break;
+                                case 6:
+                                    sprintf(date_time_str, "延期");
+                                    break;
+                            }              
+                        }
+
+                        sprintf(data_structure[i].data.date_time.text,"%s",date_time_str);
+                    }
+
+                    printf("save data data_structure_last[%d].type=%d\n",i,data_structure_last[i].type);
+
+                    if (remove("/media/system_file/data_structure.dat") == 0) 
+                    {
+                        printf("文件 /media/system_file/data_structure.dat 删除成功\n\r");
+                    } 
+                    else
+                    {
+                        perror("删除文件 /media/system_file/data_structure.dat 失败");
+                    }
   
                     FILE* file = fopen("/media/system_file/data_structure.dat", "wb");
                     if (file == NULL) 
@@ -3126,11 +3416,11 @@ static void timer_100ms_cb(lv_timer_t * t)
     }
 
     adc_count_5s++;
-    if(adc_count_5s >= 500)
+    if(adc_count_5s >= 5000)
     {
         adc_count_5s = 0;
     }
-
+#if 0
     if((adc_count_5s %300) == 0)
     {
         MemoryInfo mem;
@@ -3143,6 +3433,7 @@ static void timer_100ms_cb(lv_timer_t * t)
             printf("Failed to get memory info.\n");
         }
     }
+#endif
 
     if(adc_count_5s == 5)
     {
@@ -3156,7 +3447,7 @@ static void timer_100ms_cb(lv_timer_t * t)
 		else
 		{
 			memcpy((unsigned char *)&voltage,databuf,4);
-			printf("voltage=%u\n",voltage);
+			//printf("voltage=%u\n",voltage);
 
             if(voltage == 63)
             {
@@ -3513,11 +3804,25 @@ static void timer_100ms_cb(lv_timer_t * t)
     }
     else if(print_button_enable == 2)
     {
-        read(fd_gpio_in, &key_value, 4); 
+        if(system_data.print.trigger_mode == 0)
+        {
+            read(fd_gpio_in, &key_value, 4); 
+        }
+        else
+        {
+            read(fd_optoelectronic, &key_value_1, 4); 
+            if((key_value_1 == 1)&&(key_value_2 == 0))
+            {
+                key_value = 0;
+            }
+
+            key_value_2 = key_value_1;
+        }
 
         if(key_value == 0)
         {
             printf("PRINT_KEY\n");
+            key_value = 1;
             buf[0] = 1;
 	        retvalue = write(fd_buzzer, buf, 1);
 	        if(retvalue < 0)
@@ -3534,6 +3839,9 @@ static void timer_100ms_cb(lv_timer_t * t)
 		        printf("BEEP Control Failed!\r\n");
 		        close(fd_buzzer);
             }
+
+            g_screen_off_count = 0;
+            g_data_structure_count = 0;
 
             printf("subsection_structure.total=%d\r\n",subsection_structure.total);
             printf("subsection_structure.current=%d\r\n",subsection_structure.current);
@@ -3780,7 +4088,24 @@ static void timer_100ms_cb(lv_timer_t * t)
                         }
                         else
                         {
-                            printf("fd_ph45 Control ok!\r\n");
+                            //printf("fd_ph45 Control ok!\r\n");
+                        }
+
+                        buf[0] = 1;
+                        retvalue = write(fd_buzzer, buf, 1);
+                        if(retvalue < 0)
+                        {
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
+                        }
+                        usleep(300000);
+
+                        buf[0] = 0;
+                        retvalue = write(fd_buzzer, buf, 1);
+                        if(retvalue < 0)
+                        {
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
                         }
                     }
 
@@ -3788,9 +4113,109 @@ static void timer_100ms_cb(lv_timer_t * t)
 
                     flash_set_count = 0;
 
-                    set_system_data();   
+                    //set_system_data();   
 
-                    subsection_structure.current++;                 
+    #if 0
+
+                AUTHORIZATION_INFORMATION  authorization;
+
+                memset(msg, 0, MSG_SIZE);
+                memset(&context, 0, sizeof(context));
+                AES_set_key(&context, key, iv, AES_MODE_128);
+
+                AES_convert_key(&context);
+                AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
+
+                if(authorization.device_id == g_sd_serial)
+                {
+                    if(authorization.locked_state == 1)
+                    {
+                        memset(databuf,0,sizeof(databuf));
+                        databuf[0] = 0x04;
+                        
+                        retvalue = read(fd_bm8563, databuf, 16);
+                        if(retvalue < 0)
+                        {
+                            printf("fd_bm8563 Failed!\r\n");
+                            close(fd_bm8563);
+                        }
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+
+                        CARD_INFORMATION card_info;
+
+                        AES_convert_key(&context);
+                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
+
+                        temp_p = (unsigned char *)&card_info;
+
+                        unsigned char crc =  CRC8(temp_p,16);
+                        if(card_info.crc == crc)
+                        {
+                            printf("databuf ok\n");
+
+                            if(card_info.machine_model == authorization.machine_model)
+                            {
+                                card_info.count++;
+                                card_info.rtc_time.year = g_system_time[0];
+                                card_info.rtc_time.month = g_system_time[1];
+                                card_info.rtc_time.day = g_system_time[2];
+                                card_info.rtc_time.hour = g_system_time[3];
+                                card_info.rtc_time.minute =  g_system_time[4];
+                                card_info.rtc_time.second = g_system_time[5];
+                                card_info.crc = CRC8((unsigned char *)&card_info,16);
+
+                                memset(msg, 0, MSG_SIZE);
+                                memset(&context, 0, sizeof(context));
+                                AES_set_key(&context, key, iv, AES_MODE_128);
+
+                                memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
+
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",msg[i]);
+                                }
+
+                                printf("\n\r");
+
+                                AES_set_key(&context, key, iv, AES_MODE_128);
+                                AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
+
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",out[i]);
+                                }
+
+                                printf("\n\r");
+
+                                databuf[0] = 0x03;
+                                memcpy(databuf+1,out,16);
+
+                                /* 向/dev/beep文件写入数据 */
+                                retvalue = write(fd_bm8563, databuf, 17);
+                                if(retvalue < 0)
+                                {
+                                    printf("write Control Failed!\r\n");
+                                    close(fd_bm8563);
+                                }
+
+                              //  print_button_enable = 3;
+                              subsection_structure.current++;    
+                            }
+                        }
+                    }
+                    else if(authorization.locked_state == 2)
+                    {
+                       // print_button_enable = 3;
+                       subsection_structure.current++;    
+                    }
+                }
+#endif
+                    
+
+                   // subsection_structure.current++;                 
                 }
                 else if(subsection_structure.current < subsection_structure.total)
                 {
@@ -4033,15 +4458,134 @@ static void timer_100ms_cb(lv_timer_t * t)
                         {
                             printf("fd_ph45 Control ok!\r\n");
                         }
+
+                        buf[0] = 1;
+                        retvalue = write(fd_buzzer, buf, 1);
+                        if(retvalue < 0)
+                        {
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
+                        }
+                        usleep(300000);
+
+                        buf[0] = 0;
+                        retvalue = write(fd_buzzer, buf, 1);
+                        if(retvalue < 0)
+                        {
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
+                        }
                     }
 
                     system_data.total_output++;
 
                     flash_set_count = 0;
 
-                    set_system_data();   
+                    //set_system_data();   
 
-                    subsection_structure.current++;    
+
+#if 0
+
+                AUTHORIZATION_INFORMATION  authorization;
+
+                memset(msg, 0, MSG_SIZE);
+                memset(&context, 0, sizeof(context));
+                AES_set_key(&context, key, iv, AES_MODE_128);
+
+                AES_convert_key(&context);
+                AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
+
+                if(authorization.device_id == g_sd_serial)
+                {
+                    if(authorization.locked_state == 1)
+                    {
+                        memset(databuf,0,sizeof(databuf));
+                        databuf[0] = 0x04;
+                        
+                        retvalue = read(fd_bm8563, databuf, 16);
+                        if(retvalue < 0)
+                        {
+                            printf("fd_bm8563 Failed!\r\n");
+                            close(fd_bm8563);
+                        }
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+
+                        CARD_INFORMATION card_info;
+
+                        AES_convert_key(&context);
+                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
+
+                        temp_p = (unsigned char *)&card_info;
+
+                        unsigned char crc =  CRC8(temp_p,16);
+                        if(card_info.crc == crc)
+                        {
+                            printf("databuf ok\n");
+
+                            if(card_info.machine_model == authorization.machine_model)
+                            {
+                                card_info.count++;
+                                card_info.rtc_time.year = g_system_time[0];
+                                card_info.rtc_time.month = g_system_time[1];
+                                card_info.rtc_time.day = g_system_time[2];
+                                card_info.rtc_time.hour = g_system_time[3];
+                                card_info.rtc_time.minute =  g_system_time[4];
+                                card_info.rtc_time.second = g_system_time[5];
+                                card_info.crc = CRC8((unsigned char *)&card_info,16);
+
+                                memset(msg, 0, MSG_SIZE);
+                                memset(&context, 0, sizeof(context));
+                                AES_set_key(&context, key, iv, AES_MODE_128);
+
+                                memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
+
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",msg[i]);
+                                }
+
+                                printf("\n\r");
+
+                                AES_set_key(&context, key, iv, AES_MODE_128);
+                                AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
+
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",out[i]);
+                                }
+
+                                printf("\n\r");
+
+                                databuf[0] = 0x03;
+                                memcpy(databuf+1,out,16);
+
+                                /* 向/dev/beep文件写入数据 */
+                                retvalue = write(fd_bm8563, databuf, 17);
+                                if(retvalue < 0)
+                                {
+                                    printf("write Control Failed!\r\n");
+                                    close(fd_bm8563);
+                                }
+
+                                //print_button_enable = 3;
+
+                                subsection_structure.current++;    
+                            }
+                        }
+                    }
+                    else if(authorization.locked_state == 2)
+                    {
+                        //print_button_enable = 3;
+
+                        subsection_structure.current++;    
+                    }
+                }
+#endif
+
+                    //subsection_structure.current++;    
                 }
                 else
                 {
@@ -4284,15 +4828,130 @@ static void timer_100ms_cb(lv_timer_t * t)
                         {
                             printf("fd_ph45 Control ok!\r\n");
                         }
+
+                        buf[0] = 1;
+                        retvalue = write(fd_buzzer, buf, 1);
+                        if(retvalue < 0)
+                        {
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
+                        }
+                        usleep(300000);
+
+                        buf[0] = 0;
+                        retvalue = write(fd_buzzer, buf, 1);
+                        if(retvalue < 0)
+                        {
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
+                        }
                     }
 
                     system_data.total_output++;
 
                     flash_set_count = 0;
 
-                    set_system_data();   
+                    //set_system_data();   
 
-                    print_button_enable = 3;             
+#if 0
+
+                AUTHORIZATION_INFORMATION  authorization;
+
+                memset(msg, 0, MSG_SIZE);
+                memset(&context, 0, sizeof(context));
+                AES_set_key(&context, key, iv, AES_MODE_128);
+
+                AES_convert_key(&context);
+                AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
+
+                if(authorization.device_id == g_sd_serial)
+                {
+                    if(authorization.locked_state == 1)
+                    {
+                        memset(databuf,0,sizeof(databuf));
+                        databuf[0] = 0x04;
+                        
+                        retvalue = read(fd_bm8563, databuf, 16);
+                        if(retvalue < 0)
+                        {
+                            printf("fd_bm8563 Failed!\r\n");
+                            close(fd_bm8563);
+                        }
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+
+                        CARD_INFORMATION card_info;
+
+                        AES_convert_key(&context);
+                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
+
+                        temp_p = (unsigned char *)&card_info;
+
+                        unsigned char crc =  CRC8(temp_p,16);
+                        if(card_info.crc == crc)
+                        {
+                            printf("databuf ok\n");
+
+                            if(card_info.machine_model == authorization.machine_model)
+                            {
+                                card_info.count++;
+                                card_info.rtc_time.year = g_system_time[0];
+                                card_info.rtc_time.month = g_system_time[1];
+                                card_info.rtc_time.day = g_system_time[2];
+                                card_info.rtc_time.hour = g_system_time[3];
+                                card_info.rtc_time.minute =  g_system_time[4];
+                                card_info.rtc_time.second = g_system_time[5];
+                                card_info.crc = CRC8((unsigned char *)&card_info,16);
+
+                                memset(msg, 0, MSG_SIZE);
+                                memset(&context, 0, sizeof(context));
+                                AES_set_key(&context, key, iv, AES_MODE_128);
+
+                                memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
+
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",msg[i]);
+                                }
+
+                                printf("\n\r");
+
+                                AES_set_key(&context, key, iv, AES_MODE_128);
+                                AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
+
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",out[i]);
+                                }
+
+                                printf("\n\r");
+
+                                databuf[0] = 0x03;
+                                memcpy(databuf+1,out,16);
+
+                                /* 向/dev/beep文件写入数据 */
+                                retvalue = write(fd_bm8563, databuf, 17);
+                                if(retvalue < 0)
+                                {
+                                    printf("write Control Failed!\r\n");
+                                    close(fd_bm8563);
+                                }
+
+                                print_button_enable = 3;
+                            }
+                        }
+                    }
+                    else if(authorization.locked_state == 2)
+                    {
+                        print_button_enable = 3;
+                    }
+                }
+#endif
+
+
+                    //print_button_enable = 3;             
                 }
             }
             else
@@ -4537,13 +5196,30 @@ static void timer_100ms_cb(lv_timer_t * t)
                     {
                         printf("fd_ph45 Control ok!\r\n");
                     }
+
+                    buf[0] = 1;
+                    retvalue = write(fd_buzzer, buf, 1);
+                    if(retvalue < 0)
+                    {
+                        printf("BEEP Control Failed!\r\n");
+                        close(fd_buzzer);
+                    }
+                    usleep(300000);
+
+                    buf[0] = 0;
+                    retvalue = write(fd_buzzer, buf, 1);
+                    if(retvalue < 0)
+                    {
+                        printf("BEEP Control Failed!\r\n");
+                        close(fd_buzzer);
+                    }
                 }
 
                 system_data.total_output++;
 
                 flash_set_count = 0;
 
-                set_system_data();
+//                set_system_data();
 #if 0
 
                 AUTHORIZATION_INFORMATION  authorization;
@@ -4555,7 +5231,7 @@ static void timer_100ms_cb(lv_timer_t * t)
                 AES_convert_key(&context);
                 AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
 
-                if(authorization.device_id = g_sd_serial)
+                if(authorization.device_id == g_sd_serial)
                 {
                     if(authorization.locked_state == 1)
                     {
@@ -4569,16 +5245,32 @@ static void timer_100ms_cb(lv_timer_t * t)
                             close(fd_bm8563);
                         }
 
-                        //memset(msg, 0, MSG_SIZE);
-                        //memset(&context, 0, sizeof(context));
-                        //AES_set_key(&context, key, iv, AES_MODE_128);
+                        printf("读卡密文:\r\n");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",databuf[i]);
+                        }
+                        printf("\n\r");
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
 
                         CARD_INFORMATION card_info;
 
-                        //AES_convert_key(&context);
+                        AES_convert_key(&context);
                         AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
 
-                        unsigned char crc =  CRC8(databuf,15);
+                        temp_p = (unsigned char *)&card_info;
+
+                        printf("读卡明文:\r\n");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",*(temp_p+i));
+                        }
+                        printf("\n\r");
+                        
+                        unsigned char crc =  CRC8(temp_p,16);
                         if(card_info.crc == crc)
                         {
                             printf("databuf ok\n");
@@ -4592,7 +5284,7 @@ static void timer_100ms_cb(lv_timer_t * t)
                                 card_info.rtc_time.hour = g_system_time[3];
                                 card_info.rtc_time.minute =  g_system_time[4];
                                 card_info.rtc_time.second = g_system_time[5];
-                                card_info.crc = CRC8((unsigned char *)&card_info,15);
+                                card_info.crc = CRC8((unsigned char *)&card_info,16);
 
                                 memset(msg, 0, MSG_SIZE);
                                 memset(&context, 0, sizeof(context));
@@ -4600,8 +5292,24 @@ static void timer_100ms_cb(lv_timer_t * t)
 
                                 memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
 
+                                printf("写卡明文:\r\n");
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",msg[i]);
+                                }
+
+                                printf("\n\r");
+
                                 AES_set_key(&context, key, iv, AES_MODE_128);
                                 AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
+
+                                printf("写卡密文:\r\n");
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",out[i]);
+                                }
+
+                                printf("\n\r");
 
                                 databuf[0] = 0x03;
                                 memcpy(databuf+1,out,16);
@@ -4617,11 +5325,23 @@ static void timer_100ms_cb(lv_timer_t * t)
                                 print_button_enable = 3;
                             }
                         }
+                        else
+                        {
+                            printf("crc error!\r\n");
+                            printf("crc=0x%x\r\n",crc);
+                            printf("card_info.crc=0x%x\r\n",card_info.crc);           
+                        }
                     }
                     else if(authorization.locked_state == 2)
                     {
                         print_button_enable = 3;
                     }
+                }
+                else
+                {
+                    printf("设备未激活!\r\n");
+                    printf("device_id=0x%08x\r\n",authorization.device_id);
+                    printf("g_sd_serial=0x%08x\r\n",g_sd_serial);
                 }
 #endif
                 print_button_enable = 3;
@@ -4652,7 +5372,19 @@ static void timer_100ms_cb(lv_timer_t * t)
                 //递增
                 if (data_structure[i].data.count.law == 0)
                 {
-                    data_structure[i].data.count.current_value += data_structure[i].data.count.step;
+                    if(data_structure[i].data.count.repetition > 1)
+                    {
+                        rept_count++;
+                        if(rept_count >= data_structure[i].data.count.repetition)
+                        {
+                            data_structure[i].data.count.current_value += data_structure[i].data.count.step;
+                            rept_count = 0;
+                        }
+                    }
+                    else
+                    {
+                        data_structure[i].data.count.current_value += data_structure[i].data.count.step;
+                    }
                     if (data_structure[i].data.count.current_value < data_structure[i].data.count.minimum)
                     {
                         data_structure[i].data.count.current_value = data_structure[i].data.count.minimum;
@@ -4675,7 +5407,19 @@ static void timer_100ms_cb(lv_timer_t * t)
                 {
                     if(data_structure[i].data.count.current_value >= data_structure[i].data.count.step)
                     {
-                        data_structure[i].data.count.current_value -= data_structure[i].data.count.step;
+                        if(data_structure[i].data.count.repetition > 1)
+                        {
+                            rept_count++;
+                            if(rept_count >= data_structure[i].data.count.repetition)
+                            {
+                                data_structure[i].data.count.current_value -= data_structure[i].data.count.step;
+                                rept_count = 0;
+                            }
+                        }
+                        else
+                        {
+                            data_structure[i].data.count.current_value -= data_structure[i].data.count.step;
+                        }
                     }
 
                     if (data_structure[i].data.count.current_value < data_structure[i].data.count.minimum)
@@ -4900,7 +5644,7 @@ static void timer_100ms_cb(lv_timer_t * t)
     {
         flash_set_count = 0;
         print_data.trigger_mode = 3;
-        printf("trigger_mode=%d\n", print_data.trigger_mode);
+        //printf("trigger_mode=%d\n", print_data.trigger_mode);
         retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
         if(retvalue < 0)
         {
@@ -4909,8 +5653,16 @@ static void timer_100ms_cb(lv_timer_t * t)
         }
         else
         {
-            printf("fd_ph45 Control ok!\r\n");
+            //printf("fd_ph45 Control ok!\r\n");
         }
+    }
+
+    
+    rc522_count++;
+    if((rc522_count > 30)&&(read_card_info_result == 0))
+    {
+        rc522_count = 0;
+        check_hp45();
     }
 }
 
@@ -5093,6 +5845,8 @@ static void button_keyboard_return_event_cb(lv_event_t* e)
         lv_obj_del(btn_keyboard_return);
 
         lv_timer_resume(timer_100ms);
+
+        addition_text_updata();
     }
 }
 
@@ -5107,6 +5861,7 @@ static void button_keyboard_confirm_event_cb(lv_event_t* e)
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_file_management_text_label, lv_textarea_get_text(textarea_text_keyboard));
         lv_label_set_text(label_file_management_label, lv_textarea_get_text(textarea_text_keyboard));
+        lv_obj_set_style_text_opa(label_file_management_text_label, LV_OPA_COVER, LV_STATE_DEFAULT);
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
         lv_obj_del(textarea_text_keyboard);
@@ -5117,6 +5872,8 @@ static void button_keyboard_confirm_event_cb(lv_event_t* e)
         lv_obj_del(btn_keyboard_return);
 
         lv_timer_resume(timer_100ms);
+
+        addition_text_updata();
     }
 }
 static void button_left_event_cb(lv_event_t* e)
@@ -5126,6 +5883,7 @@ static void button_left_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
         printf("left\n");
+        buzzer_enable = 1;
         if (temp_focused_obj != NULL)
         {
             lv_coord_t x = lv_obj_get_x(temp_focused_obj);
@@ -5144,10 +5902,12 @@ static void button_left_event_cb(lv_event_t* e)
 static void button_down_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+
     code = lv_event_get_code(e);
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
         printf("down\n");
+         buzzer_enable = 1;
         if (temp_focused_obj != NULL)
         {
             lv_coord_t y = lv_obj_get_y(temp_focused_obj);
@@ -5168,43 +5928,51 @@ static void button_add_event_cb(lv_event_t* e)
     lv_event_code_t code;
     code = lv_event_get_code(e);
     uint32_t index;
-    char stringBuf[128] = { 0 };
+    lv_point_t text_size;
+    lv_font_t* temp_font = NULL;
+    //char stringBuf[128] = { 0 };
 
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
         printf("add\n");
+         buzzer_enable = 1;
         if (temp_focused_obj != NULL)
         {
             index = lv_obj_get_index(temp_focused_obj);
 
             printf("index=%u\n\r", index);
+            printf("type=%u\n\r", data_structure[index].type);
 
             switch(data_structure[index].type)
             {
                 case TYPE_WORD:
                 case TYPE_SYMBOL:
                 {
-                    if (data_structure[index].data.word.size < 150)
+                    if (data_structure[index].data.word.size < WORD_MAX_SIZE)
                     {
                         data_structure[index].data.word.size += 5;
 
-                        if (data_structure[index].data.word.size >= 150)
+                        if (data_structure[index].data.word.size >= WORD_MAX_SIZE)
                         {
-                            data_structure[index].data.word.size = 150;
+                            data_structure[index].data.word.size = WORD_MAX_SIZE;
                         }
                         
-                        lv_ft_font_destroy(data_structure[index].data.word.info.font);
+                        //lv_ft_font_destroy(data_structure[index].data.word.info.font);
+                    
+                        //sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
+                        //data_structure[index].data.word.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
 
-                        sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
-                        data_structure[index].data.word.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
                         data_structure[index].data.word.info.weight = data_structure[index].data.word.size;
                         data_structure[index].data.word.info.style = data_structure[index].data.word.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.word.info);
+                        //lv_ft_font_init(&data_structure[index].data.word.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("typeface=%d\n\r", data_structure[index].data.word.typeface);
+                        temp_font = font_list_get(data_structure[index].data.word.typeface, data_structure[index].data.word.size, data_structure[index].data.word.info.style);
+                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, temp_font, data_structure[index].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
@@ -5214,29 +5982,30 @@ static void button_add_event_cb(lv_event_t* e)
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
                         lv_obj_remove_style(label1, &data_structure[index].data.word.style, 0);
-
+                        lv_style_reset(&data_structure[index].data.word.style);
                         lv_style_init(&data_structure[index].data.word.style);
-                        lv_style_set_text_font(&data_structure[index].data.word.style, data_structure[index].data.word.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.word.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.word.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
                     }
                     else
                     {
-                        data_structure[index].data.word.size = 150;
+                        data_structure[index].data.word.size = WORD_MAX_SIZE;
 
-                        lv_ft_font_destroy(data_structure[index].data.word.info.font);
-
-                        sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
-                        data_structure[index].data.word.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.word.info.font);
+                        //sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
+                        //data_structure[index].data.word.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.word.info.weight = data_structure[index].data.word.size;
                         data_structure[index].data.word.info.style = data_structure[index].data.word.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.word.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        //lv_ft_font_init(&data_structure[index].data.word.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("typeface=%d\n\r", data_structure[index].data.word.typeface);
+                        temp_font = font_list_get(data_structure[index].data.word.typeface, data_structure[index].data.word.size, data_structure[index].data.word.info.style);
+                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, temp_font, data_structure[index].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
@@ -5245,10 +6014,10 @@ static void button_add_event_cb(lv_event_t* e)
                         lv_obj_clear_flag(temp_focused_obj, LV_OBJ_FLAG_SCROLLABLE);
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
+                        lv_style_reset(&data_structure[index].data.word.style);
                         lv_obj_remove_style(label1, &data_structure[index].data.word.style, 0);
-
                         lv_style_init(&data_structure[index].data.word.style);
-                        lv_style_set_text_font(&data_structure[index].data.word.style, data_structure[index].data.word.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.word.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.word.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
@@ -5258,28 +6027,28 @@ static void button_add_event_cb(lv_event_t* e)
                 }
                 case TYPE_DATE:
                 {
-                    if (data_structure[index].data.date_time.size < 150)
+                    if (data_structure[index].data.date_time.size < WORD_MAX_SIZE)
                     {
                         data_structure[index].data.date_time.size += 5;
 
-                        if (data_structure[index].data.date_time.size >= 150)
+                        if (data_structure[index].data.date_time.size >= WORD_MAX_SIZE)
                         {
-                            data_structure[index].data.date_time.size = 150;
+                            data_structure[index].data.date_time.size = WORD_MAX_SIZE;
                         }
                         
-                        lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
+                        //lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
 
-                        sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
-                        data_structure[index].data.date_time.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
+                        //data_structure[index].data.date_time.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.date_time.info.weight = data_structure[index].data.date_time.size;
                         data_structure[index].data.date_time.info.style = data_structure[index].data.date_time.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.date_time.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
+                        //lv_ft_font_init(&data_structure[index].data.date_time.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        temp_font = font_list_get(data_structure[index].data.date_time.typeface, data_structure[index].data.date_time.size, data_structure[index].data.date_time.italic_bold);
+                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, temp_font, data_structure[index].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
                         lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
@@ -5288,30 +6057,29 @@ static void button_add_event_cb(lv_event_t* e)
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
                         lv_obj_remove_style(label1, &data_structure[index].data.date_time.style, 0);
-
+                        lv_style_reset(&data_structure[index].data.date_time.style);
                         lv_style_init(&data_structure[index].data.date_time.style);
-                        lv_style_set_text_font(&data_structure[index].data.date_time.style, data_structure[index].data.date_time.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.date_time.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.date_time.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
                     }
                     else
                     {
-                        data_structure[index].data.date_time.size = 150;
+                        data_structure[index].data.date_time.size = WORD_MAX_SIZE;
 
-                        lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
-
-                        sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
-                        data_structure[index].data.date_time.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
+                        //sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
+                        //data_structure[index].data.date_time.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.date_time.info.weight = data_structure[index].data.date_time.size;
                         data_structure[index].data.date_time.info.style = data_structure[index].data.date_time.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.date_time.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
+                        //lv_ft_font_init(&data_structure[index].data.date_time.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        temp_font = font_list_get(data_structure[index].data.date_time.typeface, data_structure[index].data.date_time.size, data_structure[index].data.date_time.italic_bold);
+                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, temp_font, data_structure[index].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
                         lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
@@ -5320,9 +6088,9 @@ static void button_add_event_cb(lv_event_t* e)
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
                         lv_obj_remove_style(label1, &data_structure[index].data.date_time.style, 0);
-
+                        lv_style_reset(&data_structure[index].data.date_time.style);
                         lv_style_init(&data_structure[index].data.date_time.style);
-                        lv_style_set_text_font(&data_structure[index].data.date_time.style, data_structure[index].data.date_time.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.date_time.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.date_time.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
@@ -5331,69 +6099,59 @@ static void button_add_event_cb(lv_event_t* e)
                 }
                 case TYPE_COUNT:
                 {
-                    if (data_structure[index].data.count.size < 150)
+                    if (data_structure[index].data.count.size < WORD_MAX_SIZE)
                     {
                         data_structure[index].data.count.size += 5;
 
-                        if (data_structure[index].data.count.size >= 150)
+                        if (data_structure[index].data.count.size >= WORD_MAX_SIZE)
                         {
-                            data_structure[index].data.count.size = 150;
+                            data_structure[index].data.count.size = WORD_MAX_SIZE;
                         }
                         
-                        lv_ft_font_destroy(data_structure[index].data.count.info.font);
-
-                        sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
-                        data_structure[index].data.count.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.count.info.font);
+                        //sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
+                        //data_structure[index].data.count.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.count.info.weight = data_structure[index].data.count.size;
                         //data_structure[index].data.count.info.style = data_structure[index].data.count.italic_bold;
+                        //lv_ft_font_init(&data_structure[index].data.count.info);
 
-                        lv_ft_font_init(&data_structure[index].data.count.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.count.text, data_structure[index].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
+                        temp_font = font_list_get(data_structure[index].data.count.typeface, data_structure[index].data.count.size, 0);
                         lv_obj_set_style_bg_opa(temp_focused_obj, LV_OPA_TRANSP, 0);
                         lv_obj_clear_flag(temp_focused_obj, LV_OBJ_FLAG_SCROLLABLE);
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
+                        lv_txt_get_size(&text_size, lv_label_get_text(label1), temp_font, data_structure[index].data.count.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
                         lv_obj_remove_style(label1, &data_structure[index].data.count.style, 0);
 
                         lv_style_init(&data_structure[index].data.count.style);
-                        lv_style_set_text_font(&data_structure[index].data.count.style, data_structure[index].data.count.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.count.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.count.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
                     }
                     else
                     {
-                        data_structure[index].data.count.size = 150;
+                        data_structure[index].data.count.size = WORD_MAX_SIZE;
 
-                        lv_ft_font_destroy(data_structure[index].data.count.info.font);
-
-                        sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
-                        data_structure[index].data.count.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.count.info.font);
+                        //sprintf(stringBuf,"/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
+                        //data_structure[index].data.count.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.count.info.weight = data_structure[index].data.count.size;
                         //data_structure[index].data.count.info.style = data_structure[index].data.count.italic_bold;
-
-                        lv_ft_font_init(&data_structure[index].data.count.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.count.text, data_structure[index].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
+                        //lv_ft_font_init(&data_structure[index].data.count.info);
+                        temp_font = font_list_get(data_structure[index].data.count.typeface, data_structure[index].data.count.size, 0);
                         lv_obj_set_style_bg_opa(temp_focused_obj, LV_OPA_TRANSP, 0);
                         lv_obj_clear_flag(temp_focused_obj, LV_OBJ_FLAG_SCROLLABLE);
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
+                        lv_txt_get_size(&text_size, lv_label_get_text(label1), temp_font, data_structure[index].data.count.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
                         lv_obj_remove_style(label1, &data_structure[index].data.count.style, 0);
-
                         lv_style_init(&data_structure[index].data.count.style);
                         lv_style_set_text_font(&data_structure[index].data.count.style, data_structure[index].data.count.info.font);
                         lv_obj_add_style(label1, &data_structure[index].data.count.style, 0);
@@ -5425,9 +6183,13 @@ static void button_add_event_cb(lv_event_t* e)
                         // 获取图片的源文件
                         lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img_1->src;
 
+                        uint16_t zoom = lv_img_get_zoom(img_obj);
+
+                        printf("header.w : %d, header.h: %d\n", img_dsc->header.w, img_dsc->header.h);
+
                         // 获取图片的宽和高
-                        int width = img_dsc->header.w;
-                        int height = img_dsc->header.h;
+                        int width = img_dsc->header.w * zoom / 256;
+                        int height = img_dsc->header.h * zoom / 256;
 
                         // 打印宽和高
                         printf("Image width: %d, height: %d\n", width, height);
@@ -5438,6 +6200,7 @@ static void button_add_event_cb(lv_event_t* e)
                 }
                 case TYPE_PITCTURE:
                 {
+
                     if( data_structure[index].data.picture.size >= 256)
                     {
 
@@ -5453,15 +6216,25 @@ static void button_add_event_cb(lv_event_t* e)
                         lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.picture.size);
 
-                        // 获取图片对象
-                        lv_img_t* img_1 = (lv_img_t*)img_obj;
+                        lv_img_cache_invalidate_src(lv_img_get_src(img_obj));  // 清除缓存
+                        lv_obj_invalidate(img_obj);     // 强制重绘
+                        lv_img_header_t header;
+                        lv_res_t res = lv_img_decoder_get_info(lv_img_get_src(img_obj), &header);  // 直接传入文件路径
 
-                        // 获取图片的源文件
-                        lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img_1->src;
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("error\n");
+                        }
 
-                        // 获取图片的宽和高
-                        int width = img_dsc->header.w;
-                        int height = img_dsc->header.h;
+                        uint16_t zoom = lv_img_get_zoom(img_obj);
+                        printf("zoom: %d\n", zoom);
+
+                        int width = header.w * zoom / 256;
+                        int height = header.h * zoom / 256;
 
                         // 打印宽和高
                         printf("Image width: %d, height: %d\n", width, height);
@@ -5488,15 +6261,25 @@ static void button_add_event_cb(lv_event_t* e)
                         lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.qr_bar.size);
 
-                        // 获取图片对象
-                        lv_img_t* img_1 = (lv_img_t*)img_obj;
+                        lv_img_cache_invalidate_src(lv_img_get_src(img_obj));  // 清除缓存
+                        lv_obj_invalidate(img_obj);     // 强制重绘
+                        lv_img_header_t header;
+                        lv_res_t res = lv_img_decoder_get_info(lv_img_get_src(img_obj), &header);  // 直接传入文件路径
 
-                        // 获取图片的源文件
-                        lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img_1->src;
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("error\n");
+                        }
 
-                        // 获取图片的宽和高
-                        int width = img_dsc->header.w;
-                        int height = img_dsc->header.h;
+                        uint16_t zoom = lv_img_get_zoom(img_obj);
+                        printf("zoom: %d\n", zoom);
+
+                        int width = header.w * zoom / 256;
+                        int height = header.h * zoom / 256;
 
                         // 打印宽和高
                         printf("Image width: %d, height: %d\n", width, height);
@@ -5512,47 +6295,51 @@ static void button_add_event_cb(lv_event_t* e)
 
 static void button_reduce_event_cb(lv_event_t* e)
 {
-   lv_event_code_t code;
-   uint32_t index;
-    char stringBuf[128] = { 0 };
+    lv_event_code_t code;
+    uint32_t index;
+    //char stringBuf[128] = { 0 };
+    lv_font_t* temp_font = NULL;
+    lv_point_t text_size;
  
    code = lv_event_get_code(e);
    if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
    {
-       printf("reduce\n");
-       if (temp_focused_obj != NULL)
-       {
+        printf("reduce\n");
+        buzzer_enable = 1;
+        if (temp_focused_obj != NULL)
+        {
             index = lv_obj_get_index(temp_focused_obj);
 
             printf("index=%u\n\r", index);
-
+            printf("type=%u\n\r", data_structure[index].type);
             switch(data_structure[index].type)
             {
                 case TYPE_WORD:
                 case TYPE_SYMBOL:
                 {
-                    if (data_structure[index].data.word.size > 12)
+                    if (data_structure[index].data.word.size > 10)
                     {
                         data_structure[index].data.word.size -= 5;
 
-                        if (data_structure[index].data.word.size <= 12)
+                        if (data_structure[index].data.word.size <= 10)
                         {
-                            data_structure[index].data.word.size = 12;
+                            data_structure[index].data.word.size = 10;
                         }
 
-                        lv_ft_font_destroy(data_structure[index].data.word.info.font);
-
-
-                        sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
-                        data_structure[index].data.word.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.word.info.font);
+                        //sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
+                        //data_structure[index].data.word.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.word.info.weight = data_structure[index].data.word.size;
                         data_structure[index].data.word.info.style = data_structure[index].data.word.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.word.info);
+                        //lv_ft_font_init(&data_structure[index].data.word.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("typeface=%d\n\r", data_structure[index].data.word.typeface);
+                        temp_font = font_list_get(data_structure[index].data.word.typeface, data_structure[index].data.word.size, data_structure[index].data.word.info.style);
+                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, temp_font, data_structure[index].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
@@ -5562,29 +6349,31 @@ static void button_reduce_event_cb(lv_event_t* e)
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
                         lv_obj_remove_style(label1, &data_structure[index].data.word.style, 0);
-
+                        lv_style_reset(&data_structure[index].data.word.style);
                         lv_style_init(&data_structure[index].data.word.style);
-                        lv_style_set_text_font(&data_structure[index].data.word.style, data_structure[index].data.word.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.word.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.word.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
                     }
                     else
                     {
-                        data_structure[index].data.word.size = 12;
+                        data_structure[index].data.word.size = 10;
 
-                        lv_ft_font_destroy(data_structure[index].data.word.info.font);
-
-                        sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
-                        data_structure[index].data.word.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.word.info.font);
+                        //sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.word.typeface]);
+                        //data_structure[index].data.word.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.word.info.weight = data_structure[index].data.word.size;
                         data_structure[index].data.word.info.style = data_structure[index].data.word.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.word.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        //lv_ft_font_init(&data_structure[index].data.word.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.word.text, data_structure[index].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+       
+                        printf("typeface=%d\n\r", data_structure[index].data.word.typeface);
+                        temp_font = font_list_get(data_structure[index].data.word.typeface, data_structure[index].data.word.size, data_structure[index].data.word.info.style);
+                        lv_txt_get_size(&text_size, data_structure[index].data.word.text, temp_font, data_structure[index].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
@@ -5594,9 +6383,9 @@ static void button_reduce_event_cb(lv_event_t* e)
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
                         lv_obj_remove_style(label1, &data_structure[index].data.word.style, 0);
-
+                        lv_style_reset(&data_structure[index].data.word.style);
                         lv_style_init(&data_structure[index].data.word.style);
-                        lv_style_set_text_font(&data_structure[index].data.word.style, data_structure[index].data.word.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.word.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.word.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
@@ -5615,31 +6404,28 @@ static void button_reduce_event_cb(lv_event_t* e)
                             data_structure[index].data.date_time.size = 12;
                         }
 
-                        lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
-
-
-                        sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
-                        data_structure[index].data.date_time.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
+                        //sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
+                        //data_structure[index].data.date_time.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.date_time.info.weight = data_structure[index].data.date_time.size;
                         data_structure[index].data.date_time.info.style = data_structure[index].data.date_time.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.date_time.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
+                        //lv_ft_font_init(&data_structure[index].data.date_time.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        temp_font = font_list_get(data_structure[index].data.date_time.typeface, data_structure[index].data.date_time.size, data_structure[index].data.date_time.italic_bold);
+                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, temp_font,  data_structure[index].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);        
                         lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
                         lv_obj_set_style_bg_opa(temp_focused_obj, LV_OPA_TRANSP, 0);
                         lv_obj_clear_flag(temp_focused_obj, LV_OBJ_FLAG_SCROLLABLE);
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
                         lv_obj_remove_style(label1, &data_structure[index].data.date_time.style, 0);
-
+                        lv_style_reset(&data_structure[index].data.date_time.style);
                         lv_style_init(&data_structure[index].data.date_time.style);
-                        lv_style_set_text_font(&data_structure[index].data.date_time.style, data_structure[index].data.date_time.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.date_time.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.date_time.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
@@ -5648,19 +6434,18 @@ static void button_reduce_event_cb(lv_event_t* e)
                     {
                         data_structure[index].data.date_time.size = 12;
 
-                        lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
-
-                        sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
-                        data_structure[index].data.date_time.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.date_time.info.font);
+                        //sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.date_time.typeface]);
+                        //data_structure[index].data.date_time.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.date_time.info.weight = data_structure[index].data.date_time.size;
                         data_structure[index].data.date_time.info.style = data_structure[index].data.date_time.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.date_time.info);
-
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
+                        //lv_ft_font_init(&data_structure[index].data.date_time.info);
+                        //lv_point_t text_size;
+                        //lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, data_structure[index].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        temp_font = font_list_get(data_structure[index].data.date_time.typeface, data_structure[index].data.date_time.size, data_structure[index].data.date_time.italic_bold);
+                        lv_txt_get_size(&text_size, data_structure[index].data.date_time.text, temp_font,  data_structure[index].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE); 
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
                         lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
@@ -5669,9 +6454,9 @@ static void button_reduce_event_cb(lv_event_t* e)
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
                         lv_obj_remove_style(label1, &data_structure[index].data.date_time.style, 0);
-
+                        lv_style_reset(&data_structure[index].data.date_time.style);
                         lv_style_init(&data_structure[index].data.date_time.style);
-                        lv_style_set_text_font(&data_structure[index].data.date_time.style, data_structure[index].data.date_time.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.date_time.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.date_time.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
@@ -5689,31 +6474,26 @@ static void button_reduce_event_cb(lv_event_t* e)
                             data_structure[index].data.count.size = 12;
                         }
 
-                        lv_ft_font_destroy(data_structure[index].data.count.info.font);
-
-
-                        sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
-                        data_structure[index].data.count.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.count.info.font);
+                        //sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
+                        //data_structure[index].data.count.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.count.info.weight = data_structure[index].data.count.size;
                         //data_structure[index].data.count.info.style = data_structure[index].data.count.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.count.info);
+                        //lv_ft_font_init(&data_structure[index].data.count.info);
+                        temp_font = font_list_get(data_structure[index].data.count.typeface, data_structure[index].data.count.size, 0);
 
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.count.text, data_structure[index].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
                         lv_obj_set_style_bg_opa(temp_focused_obj, LV_OPA_TRANSP, 0);
                         lv_obj_clear_flag(temp_focused_obj, LV_OBJ_FLAG_SCROLLABLE);
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
+                        lv_txt_get_size(&text_size, lv_label_get_text(label1), temp_font, data_structure[index].data.count.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
                         lv_obj_remove_style(label1, &data_structure[index].data.count.style, 0);
-
                         lv_style_init(&data_structure[index].data.count.style);
-                        lv_style_set_text_font(&data_structure[index].data.count.style, data_structure[index].data.count.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.count.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.count.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
@@ -5722,30 +6502,26 @@ static void button_reduce_event_cb(lv_event_t* e)
                     {
                         data_structure[index].data.count.size = 12;
 
-                        lv_ft_font_destroy(data_structure[index].data.count.info.font);
-
-                        sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
-                        data_structure[index].data.count.info.name = stringBuf;
-                        printf("%s\n\r", stringBuf);
+                        //lv_ft_font_destroy(data_structure[index].data.count.info.font);
+                        //sprintf(stringBuf, "/media/%s", typeface_buf[data_structure[index].data.count.typeface]);
+                        //data_structure[index].data.count.info.name = stringBuf;
+                        //printf("%s\n\r", stringBuf);
                         data_structure[index].data.count.info.weight = data_structure[index].data.count.size;
                         //data_structure[index].data.count.info.style = data_structure[index].data.count.italic_bold;
 
-                        lv_ft_font_init(&data_structure[index].data.count.info);
+                        //lv_ft_font_init(&data_structure[index].data.count.info);
+                        temp_font = font_list_get(data_structure[index].data.count.typeface, data_structure[index].data.count.size, 0);
 
-                        lv_point_t text_size;
-                        lv_txt_get_size(&text_size, data_structure[index].data.count.text, data_structure[index].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
                         lv_obj_set_style_bg_opa(temp_focused_obj, LV_OPA_TRANSP, 0);
                         lv_obj_clear_flag(temp_focused_obj, LV_OBJ_FLAG_SCROLLABLE);
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
                         lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
+                        lv_txt_get_size(&text_size, lv_label_get_text(label1), temp_font, data_structure[index].data.count.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+                        lv_obj_set_size(temp_focused_obj, text_size.x, text_size.y);
                         lv_obj_remove_style(label1, &data_structure[index].data.count.style, 0);
-
                         lv_style_init(&data_structure[index].data.count.style);
-                        lv_style_set_text_font(&data_structure[index].data.count.style, data_structure[index].data.count.info.font);
+                        lv_style_set_text_font(&data_structure[index].data.count.style, temp_font);
                         lv_obj_add_style(label1, &data_structure[index].data.count.style, 0);
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
@@ -5761,7 +6537,7 @@ static void button_reduce_event_cb(lv_event_t* e)
                     else
                     {
                         data_structure[index].data.icon.size -= 5;
-                        if(data_structure[index].data.icon.size >= 128)
+                        if(data_structure[index].data.icon.size <= 128)
                         {
                             data_structure[index].data.icon.size = 128;
                         }
@@ -5776,9 +6552,13 @@ static void button_reduce_event_cb(lv_event_t* e)
                         // 获取图片的源文件
                         lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img_1->src;
 
+                        uint16_t zoom = lv_img_get_zoom(img_obj);
+
+                        printf("header.w : %d, header.h: %d\n", img_dsc->header.w, img_dsc->header.h);
+
                         // 获取图片的宽和高
-                        int width = img_dsc->header.w;
-                        int height = img_dsc->header.h;
+                        int width = img_dsc->header.w * zoom / 256;
+                        int height = img_dsc->header.h * zoom / 256;
 
                         // 打印宽和高
                         printf("Image width: %d, height: %d\n", width, height);
@@ -5789,6 +6569,8 @@ static void button_reduce_event_cb(lv_event_t* e)
                 }
                 case TYPE_PITCTURE:
                 {
+                    printf("size=%u\n\r", data_structure[index].data.picture.size);
+
                     if( data_structure[index].data.picture.size <= 128)
                     {
 
@@ -5796,7 +6578,7 @@ static void button_reduce_event_cb(lv_event_t* e)
                     else
                     {
                         data_structure[index].data.picture.size -= 5;
-                        if(data_structure[index].data.picture.size >= 128)
+                        if(data_structure[index].data.picture.size <= 128)
                         {
                             data_structure[index].data.picture.size = 128;
                         }
@@ -5804,18 +6586,29 @@ static void button_reduce_event_cb(lv_event_t* e)
                         lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.picture.size);
 
-                        // 获取图片对象
-                        lv_img_t* img_1 = (lv_img_t*)img_obj;
+                        lv_img_cache_invalidate_src(lv_img_get_src(img_obj));  // 清除缓存
+                        lv_obj_invalidate(img_obj);     // 强制重绘
+                        lv_img_header_t header;
+                        lv_res_t res = lv_img_decoder_get_info(lv_img_get_src(img_obj), &header);  // 直接传入文件路径
 
-                        // 获取图片的源文件
-                        lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img_1->src;
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("error\n");
+                        }
 
-                        // 获取图片的宽和高
-                        int width = img_dsc->header.w;
-                        int height = img_dsc->header.h;
+                        uint16_t zoom = lv_img_get_zoom(img_obj);
+                        printf("zoom: %d\n", zoom);
+
+                        int width = header.w * zoom / 256;
+                        int height = header.h * zoom / 256;
 
                         // 打印宽和高
                         printf("Image width: %d, height: %d\n", width, height);
+
                         lv_obj_set_size(temp_focused_obj, width, height);
                         lv_obj_align(temp_focused_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[index].x, data_structure[index].y); 
                     }
@@ -5831,26 +6624,38 @@ static void button_reduce_event_cb(lv_event_t* e)
                     else
                     {
                         data_structure[index].data.qr_bar.size -= 5;
-                        if(data_structure[index].data.qr_bar.size >= 128)
+                        if(data_structure[index].data.qr_bar.size <= 128)
                         {
                             data_structure[index].data.qr_bar.size = 128;
                         }
 
                         lv_obj_t* img_obj = lv_obj_get_child(temp_focused_obj,0);
                         lv_img_set_zoom(img_obj, data_structure[index].data.qr_bar.size);
+                        lv_obj_center(img_obj);
 
-                        // 获取图片对象
-                        lv_img_t* img_1 = (lv_img_t*)img_obj;
+                        lv_img_cache_invalidate_src(lv_img_get_src(img_obj));  // 清除缓存
+                        lv_obj_invalidate(img_obj);     // 强制重绘
+                        lv_img_header_t header;
+                        lv_res_t res = lv_img_decoder_get_info(lv_img_get_src(img_obj), &header);  // 直接传入文件路径
 
-                        // 获取图片的源文件
-                        lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img_1->src;
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("error\n");
+                        }
 
-                        // 获取图片的宽和高
-                        int width = img_dsc->header.w;
-                        int height = img_dsc->header.h;
+                        uint16_t zoom = lv_img_get_zoom(img_obj);
+                        printf("zoom: %d\n", zoom);
+
+                        int width = header.w * zoom / 256;
+                        int height = header.h * zoom / 256;
 
                         // 打印宽和高
                         printf("Image width: %d, height: %d\n", width, height);
+
                         lv_obj_set_size(temp_focused_obj, width, height);
                         lv_obj_align(temp_focused_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[index].x, data_structure[index].y); 
                     }                  
@@ -5861,12 +6666,85 @@ static void button_reduce_event_cb(lv_event_t* e)
     }
 }
 
+
+static void button_ack_event_handler(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_ack_event_handler\n");
+        lv_obj_del(Ink_cartridge_error_content);
+        lv_obj_del(Ink_cartridge_error_win);
+        print_status = 0;
+    }
+}
+
+
+static void Ink_cartridge_error_prompt_window(void)
+{
+    print_status = 1;
+
+    Ink_cartridge_error_win = lv_obj_create(lv_scr_act());
+    lv_obj_align(Ink_cartridge_error_win, LV_ALIGN_TOP_LEFT, 90, 80);
+    lv_obj_set_size(Ink_cartridge_error_win, 300, 40);
+    lv_obj_set_style_bg_color(Ink_cartridge_error_win, lv_color_hex(0x1e90ff), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(Ink_cartridge_error_win, LV_OPA_COVER, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(Ink_cartridge_error_win, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+    lv_obj_set_style_border_color(Ink_cartridge_error_win, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+    lv_obj_clear_flag(Ink_cartridge_error_win, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(Ink_cartridge_error_win, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+
+    LV_FONT_DECLARE(heiFont16_1);
+    label_warning = lv_label_create(Ink_cartridge_error_win);
+    lv_obj_set_style_text_font(label_warning, &heiFont16_1, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(label_warning, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+    lv_label_set_text(label_warning, "警告");
+    lv_obj_align(label_warning, LV_ALIGN_TOP_LEFT, 120, 0);
+
+
+    Ink_cartridge_error_content = lv_obj_create(lv_scr_act());
+    lv_obj_align(Ink_cartridge_error_content, LV_ALIGN_TOP_LEFT, 90, 120);
+    lv_obj_set_size(Ink_cartridge_error_content, 300, 80);
+    lv_obj_set_style_bg_color(Ink_cartridge_error_content, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(Ink_cartridge_error_content, LV_OPA_COVER, LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(Ink_cartridge_error_content, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+    lv_obj_set_style_border_color(Ink_cartridge_error_content, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+    lv_obj_clear_flag(Ink_cartridge_error_content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(Ink_cartridge_error_content, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+
+
+    LV_FONT_DECLARE(heiFont16_1);
+    label_warning_content = lv_label_create(Ink_cartridge_error_content);
+    lv_obj_set_style_text_font(label_warning_content, &heiFont16_1, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(label_warning_content, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+    lv_label_set_text(label_warning_content, "墨盒识别失败，请更换墨盒再试！");
+    lv_obj_align(label_warning_content, LV_ALIGN_TOP_LEFT, 20, 0);
+
+
+    button_ack = lv_btn_create(Ink_cartridge_error_content);
+    lv_obj_add_event_cb(button_ack, button_ack_event_handler, LV_EVENT_ALL, NULL);
+    lv_obj_align(button_ack, LV_ALIGN_TOP_LEFT, 100, 20);
+
+    button_ack_label = lv_label_create(button_ack);
+    lv_obj_set_style_text_font(button_ack_label, &heiFont16_1, LV_STATE_DEFAULT);
+    lv_label_set_text(button_ack_label, "确定");
+    lv_obj_center(button_ack_label);
+
+}
+
+
 static void button_print_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    //int retvalue;
-    //unsigned char databuf[16]={0};
+    int retvalue;
+    unsigned char databuf[20]={0};
     code = lv_event_get_code(e);
+    int i;
+    unsigned char *p = NULL;
+    unsigned int total_output_error;
+    //int num;
+    unsigned char crc;
 
     //unsigned char* pdata = NULL;
     //unsigned char* pdata1 = NULL;
@@ -5883,25 +6761,154 @@ static void button_print_event_cb(lv_event_t* e)
             printf("\n****************************************\n");
             printf("printing\n");
             print_status = 1;
-            LV_IMG_DECLARE(print_2);
-            lv_imgbtn_set_src(imgbtn_print, LV_IMGBTN_STATE_RELEASED, NULL, &print_2, NULL);
-            lv_obj_set_size(imgbtn_print, print_2.header.w, print_2.header.h);
-            lv_obj_align(imgbtn_print, LV_ALIGN_TOP_LEFT, 425, 207);
+
+            if(read_card_info_result == 1)
+            {
+                total_output_last = system_data.total_output;
+            }
+
+            if(g_authorization.device_id == g_sd_serial)
+            {
+                if(g_authorization.locked_state == 1)
+                {
+                    read_writer_rtc_enable = 0;
+
+                    memset(databuf,0,sizeof(databuf));
+                    databuf[0] = 0x04;
+                    
+                    retvalue = read(fd_rc522, databuf, 16);
+                    if(retvalue < 0)
+                    {
+                        printf("fd_rc522 Failed!\r\n");
+                        //close(fd_bm8563);
+                        read_card_info_result = 0;
+                    }
+                    else
+                    {
+                        printf("读卡密文\n\r");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",databuf[i]);
+                        }
+                        printf("\n\r");
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+
+                        AES_convert_key(&context);
+                        memset((char *)&card_info_newest,0,sizeof(card_info_newest));
+                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
+
+                        p = (unsigned char *)&card_info_newest;
+                        printf("读卡明文\n\r");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",*(p+i));
+                        }
+                        printf("\n\r");
+
+                        crc =  CRC8(p,16);
+                        if(crc == card_info_newest.crc)
+                        {
+                            printf("databuf ok\n");
+                            read_card_info_result = 1;
+                        }
+                        else
+                        {
+                            read_card_info_result = 0;
+                        }
+                    }
+
+                    read_writer_rtc_enable = 1;
+
+                    if((card_info_newest.machine_model == g_authorization.machine_model)&&(read_card_info_result == 1))
+                    {
+                        LV_IMG_DECLARE(print_2);
+                        lv_imgbtn_set_src(imgbtn_print, LV_IMGBTN_STATE_RELEASED, NULL, &print_2, NULL);
+                        lv_obj_set_size(imgbtn_print, print_2.header.w, print_2.header.h);
+                        lv_obj_align(imgbtn_print, LV_ALIGN_TOP_LEFT, 425, 207);
+
+                        LV_FONT_DECLARE(heiFont16_1);
+                        lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
+                        lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            lv_label_set_text(label_print,  "打印中");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            lv_label_set_text(label_print, "Printing");
+                        }
+                        lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
+
+                        print_button_enable = 1;
+                    }
+                    else
+                    {
+                        printf("card_info.machine_model != authorization.machine_model\n");
+                        Ink_cartridge_error_prompt_window();
+                    }
+                }
+                else if(g_authorization.locked_state == 2)
+                {
+                    LV_IMG_DECLARE(print_2);
+                    lv_imgbtn_set_src(imgbtn_print, LV_IMGBTN_STATE_RELEASED, NULL, &print_2, NULL);
+                    lv_obj_set_size(imgbtn_print, print_2.header.w, print_2.header.h);
+                    lv_obj_align(imgbtn_print, LV_ALIGN_TOP_LEFT, 425, 207);
+
+                    LV_FONT_DECLARE(heiFont16_1);
+                    lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
+                    lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+                    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                    {
+                        lv_label_set_text(label_print,  "打印中");
+                    }
+                    else if(system_data.system.language == LANGUAGE_ENGLISH)
+                    {
+                        lv_label_set_text(label_print, "Printing");
+                    }
+                    lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
+
+                    print_button_enable = 1;
+                }
+            }
+            else
+            {
+                printf("id error\n");
+                printf("device_id=0x%08x\n\r",g_authorization.device_id);
+                printf("g_sd_serial=0x%08x\n\r",g_sd_serial);
+            }
 
 #if 0
-
-            AUTHORIZATION_INFORMATION  authorization;
 
             memset(msg, 0, MSG_SIZE);
             memset(&context, 0, sizeof(context));
             AES_set_key(&context, key, iv, AES_MODE_128);
 
             AES_convert_key(&context);
-            AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
+            memset((unsigned char *)&g_authorization,0,sizeof(g_authorization));
+            AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&g_authorization, MSG_SIZE);
 
-            if(authorization.device_id = g_sd_serial)
+            for(i=0;i<16;i++)
             {
-                if(authorization.locked_state == 1)
+                printf("0x%x ",g_authorization_buf[i]);
+            }
+
+            printf("\n\r");
+
+            p = (unsigned char *)&g_authorization;
+
+            for(i=0;i<16;i++)
+            {
+                printf("0x%x ",*(p+i));
+            }
+
+            printf("\n\r");
+
+            if(g_authorization.device_id == g_sd_serial)
+            {
+                if(g_authorization.locked_state == 1)
                 {
                     read_writer_rtc_enable = 0;
 
@@ -5915,21 +6922,35 @@ static void button_print_event_cb(lv_event_t* e)
                         close(fd_bm8563);
                     }
 
-                    //memset(msg, 0, MSG_SIZE);
-                    //memset(&context, 0, sizeof(context));
-                    //AES_set_key(&context, key, iv, AES_MODE_128);
+                    printf("读卡密文\n\r");
+                    for(i=0;i<16;i++)
+                    {
+                        printf("0x%x ",databuf[i]);
+                    }
+                    printf("\n\r");
 
-                    CARD_INFORMATION card_info;
+                    memset(msg, 0, MSG_SIZE);
+                    memset(&context, 0, sizeof(context));
+                    AES_set_key(&context, key, iv, AES_MODE_128);
 
-                    //AES_convert_key(&context);
-                    AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
+                    AES_convert_key(&context);
+                    memset((char *)&card_info_newest,0,sizeof(card_info_newest));
+                    AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
 
-                    unsigned char crc =  CRC8(databuf,15);
-                    if(crc == card_info.crc)
+                    p = (unsigned char *)&card_info_newest;
+                    printf("读卡明文\n\r");
+                    for(i=0;i<16;i++)
+                    {
+                        printf("0x%x ",*(p+i));
+                    }
+                    printf("\n\r");
+
+                    crc =  CRC8(p,16);
+                    if(crc == card_info_newest.crc)
                     {
                         printf("databuf ok\n");
 
-                        if(card_info.machine_model == authorization.machine_model)
+                        if(card_info_newest.machine_model == g_authorization.machine_model)
                         {
                             LV_FONT_DECLARE(heiFont16_1);
                             lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
@@ -5946,11 +6967,84 @@ static void button_print_event_cb(lv_event_t* e)
 
                             print_button_enable = 1;
                         }
+                        else
+                        {
+                             printf("card_info.machine_model != authorization.machine_model\n");
+                        }
+                    }
+                    else
+                    {
+                        printf("1 crc error crc=0x%x\n",crc);
+                        
+                        memset(databuf,0,sizeof(databuf));
+                        databuf[0] = 0x04;
+                        
+                        retvalue = read(fd_bm8563, databuf, 16);
+                        if(retvalue < 0)
+                        {
+                            printf("fd_bm8563 Failed!\r\n");
+                            close(fd_bm8563);
+                        }
+
+                        printf("读卡密文\n\r");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",databuf[i]);
+                        }
+                        printf("\n\r");
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+
+                        AES_convert_key(&context);
+                        memset((char *)&card_info_newest,0,sizeof(card_info_newest));
+                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
+
+                        p = (unsigned char *)&card_info_newest;
+                        printf("读卡明文\n\r");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",*(p+i));
+                        }
+                        printf("\n\r");
+
+                        crc =  CRC8(p,16);
+                        if(crc == card_info_newest.crc)
+                        {
+                            printf("databuf ok\n");
+
+                            if(card_info_newest.machine_model == g_authorization.machine_model)
+                            {
+                                LV_FONT_DECLARE(heiFont16_1);
+                                lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
+                                lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+                                if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                                {
+                                    lv_label_set_text(label_print,  "打印中");
+                                }
+                                else if(system_data.system.language == LANGUAGE_ENGLISH)
+                                {
+                                    lv_label_set_text(label_print, "Printing");
+                                }
+                                lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
+
+                                print_button_enable = 1;
+                            }
+                            else
+                            {
+                                printf("card_info.machine_model != authorization.machine_model\n");
+                            }
+                        }
+                        else
+                        {
+                            printf("2 crc error crc=0x%x\n",crc);
+                        }
                     }
 
                     read_writer_rtc_enable = 1;
                 }
-                else if(authorization.locked_state == 2)
+                else if(g_authorization.locked_state == 2)
                 {
                     LV_FONT_DECLARE(heiFont16_1);
                     lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
@@ -5967,13 +7061,18 @@ static void button_print_event_cb(lv_event_t* e)
 
                     print_button_enable = 1;
                 }
-
+            }
+            else
+            {
+                printf("id error\n");
+                printf("device_id=0x%08x\n\r",g_authorization.device_id);
+                printf("g_sd_serial=0x%08x\n\r",g_sd_serial);
             }
 #endif
-            print_button_enable = 1;
+           // print_button_enable = 1;
 
         }
-        else
+        else if(read_card_info_result == 1)
         {
             printf("print\n");
             print_status = 0;
@@ -5995,6 +7094,182 @@ static void button_print_event_cb(lv_event_t* e)
             }
             lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 428, 251);
 
+            total_output_error = system_data.total_output - total_output_last;
+
+            printf("total_output_error=%u\n\r",total_output_error);
+            printf("total_output=%u\n\r",system_data.total_output);
+            printf("total_output_last=%u\n\r",total_output_last);
+
+            if(total_output_error > 0)
+            {
+                set_system_data();
+
+                if(g_authorization.locked_state == 1)
+                {
+                    read_writer_rtc_enable = 0;
+
+                    memset(databuf,0,sizeof(databuf));
+                    databuf[0] = 0x04;
+                    
+                    retvalue = read(fd_rc522, databuf, 16);
+                    if(retvalue < 0)
+                    {
+                        printf("fd_rc522 Failed!\r\n");
+                        //close(fd_bm8563);
+                        read_card_info_result = 0;
+                    }
+                    else
+                    {
+                        printf("读卡密文\n\r");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",databuf[i]);
+                        }
+                        printf("\n\r");
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+
+                        AES_convert_key(&context);
+                        memset((char *)&card_info_newest,0,sizeof(card_info_newest));
+                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
+
+                        p = (unsigned char *)&card_info_newest;
+                        printf("读卡明文\n\r");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",*(p+i));
+                        }
+                        printf("\n\r");
+
+                        crc =  CRC8(p,16);
+                        if(crc == card_info_newest.crc)
+                        {
+                            printf("databuf ok\n");
+                            read_card_info_result = 1;
+                        }
+                        else
+                        {
+                            read_card_info_result = 0;
+                        }
+                    }
+
+                    read_writer_rtc_enable = 1;
+
+                    if((card_info_newest.machine_model == g_authorization.machine_model)&&(read_card_info_result == 1))
+                    {
+
+                        card_info_newest.count += total_output_error;
+
+                        printf("count=%u\n\r",card_info_newest.count);
+
+                        read_writer_rtc_enable = 0;
+        
+                        card_info_newest.rtc_time.year = g_system_time[0];
+                        card_info_newest.rtc_time.month = g_system_time[1];
+                        card_info_newest.rtc_time.day = g_system_time[2];
+                        card_info_newest.rtc_time.hour = g_system_time[3];
+                        card_info_newest.rtc_time.minute =  g_system_time[4];
+                        card_info_newest.rtc_time.second = g_system_time[5];
+                        card_info_newest.crc = CRC8((unsigned char *)&card_info_newest,16);
+
+                        memset(msg, 0, MSG_SIZE);
+                        memset(&context, 0, sizeof(context));
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+
+                        memcpy(msg, (unsigned char *)&card_info_newest, MSG_SIZE);
+
+                        printf("写卡明文:\r\n");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",msg[i]);
+                        }
+
+                        printf("\n\r");
+
+                        AES_set_key(&context, key, iv, AES_MODE_128);
+                        AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
+
+                        printf("写卡密文:\r\n");
+                        for(i=0;i<16;i++)
+                        {
+                            printf("0x%x ",out[i]);
+                        }
+
+                        printf("\n\r");
+
+                        databuf[0] = 0x03;
+                        memcpy(databuf+1,out,16);
+
+                        /* 向/dev/beep文件写入数据 */
+                        retvalue = write(fd_rc522, databuf, 17);
+                        if(retvalue < 0)
+                        {
+                            printf("write fd_rc522 Failed!\r\n");
+                            read_card_info_result = 0;
+                        }
+                        else
+                        {
+                            memset(databuf,0,sizeof(databuf));
+                            databuf[0] = 0x04;
+                            
+                            retvalue = read(fd_rc522, databuf, 16);
+                            if(retvalue < 0)
+                            {
+                                printf("fd_rc522 Failed!\r\n");
+                                //close(fd_bm8563);
+                                read_card_info_result = 0;
+                            }
+                            else
+                            {
+                                printf("读卡密文:\r\n");
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",databuf[i]);
+                                }
+                                printf("\n\r");
+
+                                memset(msg, 0, MSG_SIZE);
+                                memset(&context, 0, sizeof(context));
+                                AES_set_key(&context, key, iv, AES_MODE_128);
+
+                                CARD_INFORMATION card_info;
+
+                                AES_convert_key(&context);
+                                AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
+
+                                p = (unsigned char *)&card_info;
+
+                                printf("读卡明文:\r\n");
+                                for(i=0;i<16;i++)
+                                {
+                                    printf("0x%x ",*(p+i));
+                                }
+                                printf("\n\r");
+                                
+                                crc =  CRC8(p,16);
+                                if(card_info.crc == crc)
+                                {
+                                    printf("databuf ok\n");
+                                    read_card_info_result = 1;
+                                }
+                                else
+                                {
+                                    printf("crc error crc=0x%x\n\r",crc);             
+                                    read_card_info_result = 0;
+                                }
+                            }
+                        }
+                    }     
+                }
+                else if(g_authorization.locked_state == 2)
+                {
+    
+                }
+
+                read_writer_rtc_enable = 1;
+            }
 
             print_button_enable = 4;
 #if 0
@@ -6019,9 +7294,22 @@ static void button_right_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
+    if ((code == LV_EVENT_CLICKED)&& (print_status == 0))
     {
         printf("right\n");
+        buzzer_enable = 1;
+        if (temp_focused_obj != NULL)
+        {
+            lv_coord_t x = lv_obj_get_x(temp_focused_obj);
+            printf("x=%d\n",x);
+            if (x >= 1024)
+            {
+                x = 1024;
+            }
+            lv_obj_set_x(temp_focused_obj, x + 1);
+            lv_obj_t* label = lv_obj_get_child(temp_focused_obj, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(0xff0000), LV_PART_MAIN);
+        }
     }
 }
 
@@ -6032,6 +7320,19 @@ static void button_up_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
         printf("up\n");
+        buzzer_enable = 1;
+        if (temp_focused_obj != NULL)
+        {
+            lv_coord_t y = lv_obj_get_y(temp_focused_obj);
+            printf("y=%d\n", y);
+            if (y < 0)
+            {
+                y = 0;
+            }
+            lv_obj_set_y(temp_focused_obj, y - 1);
+            lv_obj_t* label = lv_obj_get_child(temp_focused_obj, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(0xff0000), LV_PART_MAIN);
+        }
     }
 }
 
@@ -6136,7 +7437,7 @@ static void btn_file_open_event_cb(lv_event_t* e)
     }
 }
 
-
+#if 0
 static void button_file_keyboard_return_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -6144,7 +7445,7 @@ static void button_file_keyboard_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         buzzer_enable = 1;
-        printf("button_keyboard_return_event_cb\n");
+        printf("button_file_keyboard_return_event_cb\n");
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
         lv_obj_del(textarea_text_keyboard);
@@ -6155,6 +7456,7 @@ static void button_file_keyboard_return_event_cb(lv_event_t* e)
         lv_obj_del(btn_keyboard_return);
     }
 }
+#endif
 
 static void imgbtn_file_return_event_cb(lv_event_t* e)
 {
@@ -6224,14 +7526,11 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
     int win_content_child_num = 0;
     int i;
     char file_name[128]={ 0 };
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int word_space = 0;
-    //int word_size = 0;
-    int x_size = 0;
-    //int y_size = 0;
+    //int x_size = 0;
     struct zint_symbol* my_symbol = NULL;
     int str_len;
-    //int width_len;
     int height_len;
     int width, height, channels;
     unsigned char* pdata = NULL; 
@@ -6247,6 +7546,12 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
     lv_obj_t* img_obj = NULL;
     lv_img_t* img_1 = NULL;
     lv_img_dsc_t* img_dsc = NULL;
+    int success;
+    unsigned char * data = NULL; 
+    lv_img_header_t header;
+    lv_res_t res;
+    lv_font_t* temp_font = NULL;
+
 
 
     code = lv_event_get_code(e);
@@ -6266,12 +7571,16 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                 {
                     //删除所有数据
                     lv_style_reset(&data_structure[i].data.word.style);
-                    lv_ft_font_destroy(data_structure[i].data.word.info.font);   
+                    //lv_ft_font_destroy(data_structure[i].data.word.info.font);   
+                    font_list_release(data_structure[i].data.word.typeface, data_structure[i].data.word.size, data_structure[i].data.word.italic_bold);
+         
                 }
                 else if(data_structure[i].type == TYPE_DATE)
                 {
                     lv_style_reset(&data_structure[i].data.date_time.style);
-                    lv_ft_font_destroy(data_structure[i].data.date_time.info.font);   
+                    //lv_ft_font_destroy(data_structure[i].data.date_time.info.font);   
+                    font_list_release(data_structure[i].data.date_time.typeface, data_structure[i].data.date_time.size, data_structure[i].data.date_time.italic_bold);
+         
                 }
                 else if(data_structure[i].type == TYPE_PITCTURE)
                 {
@@ -6292,7 +7601,8 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                 else if(data_structure[i].type == TYPE_COUNT)
                 {
                     lv_style_reset(&data_structure[i].data.count.style);
-                    lv_ft_font_destroy(data_structure[i].data.count.info.font);  
+                    //lv_ft_font_destroy(data_structure[i].data.count.info.font);  
+                    font_list_release(data_structure[i].data.count.typeface, data_structure[i].data.count.size, 0);
                 }
                 else if(data_structure[i].type == TYPE_BREAK)
                 {
@@ -6302,7 +7612,8 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                 {
                     //删除所有数据
                     lv_style_reset(&data_structure[i].data.word.style);
-                    lv_ft_font_destroy(data_structure[i].data.word.info.font);  
+                    //lv_ft_font_destroy(data_structure[i].data.word.info.font);  
+                    font_list_release(data_structure[i].data.word.typeface, data_structure[i].data.word.size, data_structure[i].data.word.italic_bold);
                 }
             }   
 
@@ -6354,16 +7665,16 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                             case TYPE_WORD:
                             {
                                 temp_obj = lv_obj_create(win_content);          
-                                sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.word.typeface]);
-                                data_structure[i].data.word.info.name = temp_typeface;
-                                printf("%s\n\r", temp_typeface);
+                                //sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.word.typeface]);
+                                //data_structure[i].data.word.info.name = temp_typeface;
+                                //printf("%s\n\r", temp_typeface);
                                 data_structure[i].data.word.info.weight = data_structure[i].data.word.size;
                                 data_structure[i].data.word.info.style = data_structure[i].data.word.italic_bold;
-                                lv_ft_font_init(&data_structure[i].data.word.info);
+                                //lv_ft_font_init(&data_structure[i].data.word.info);
+                                printf("typeface=%d\n\r", data_structure[i].data.word.typeface);
+                                temp_font = font_list_get(data_structure[i].data.word.typeface, data_structure[i].data.word.size, data_structure[i].data.word.info.style);
+                                lv_txt_get_size(&text_size, data_structure[i].data.word.text, temp_font, data_structure[i].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
-                                lv_txt_get_size(&text_size, data_structure[i].data.word.text, data_structure[i].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-                            
                                 lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                                 lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
 
@@ -6373,20 +7684,19 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                                 lv_style_init(&data_structure[i].data.word.style);
-                                lv_style_set_text_font(&data_structure[i].data.word.style, data_structure[i].data.word.info.font);
+                                lv_style_set_text_font(&data_structure[i].data.word.style, temp_font);
                                 word_space = data_structure[i].data.word.space;
                                 printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
-                                x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+                                //x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+                                //printf("x_size=%d\n\r", x_size);
 
-                                printf("x_size=%d\n\r", x_size);
-
-                                lv_obj_set_size(temp_obj, x_size, text_size.y);
+                                lv_obj_set_size(temp_obj,  text_size.x, text_size.y);
                                 lv_obj_set_style_transform_angle(temp_obj, data_structure[i].data.word.spin*10, 0);
 
                                 if (data_structure[i].data.word.spin != 0)
                                 {
-                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                                    lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, text_size.x, text_size.y);
                                 }
 
                                 lv_style_set_text_letter_space(&data_structure[i].data.word.style, word_space);
@@ -6400,14 +7710,16 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                             case TYPE_DATE:
                             {
                                 temp_obj = lv_obj_create(win_content);          
-                                sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.date_time.typeface]);
-                                data_structure[i].data.date_time.info.name = temp_typeface;
-                                printf("%s\n\r", temp_typeface);
+                                //sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.date_time.typeface]);
+                                //data_structure[i].data.date_time.info.name = temp_typeface;
+                                //printf("%s\n\r", temp_typeface);
                                 data_structure[i].data.date_time.info.weight = data_structure[i].data.date_time.size;
                                 data_structure[i].data.date_time.info.style = data_structure[i].data.date_time.italic_bold;
-                                lv_ft_font_init(&data_structure[i].data.date_time.info);
-
-                                lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, data_structure[i].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                                //lv_ft_font_init(&data_structure[i].data.date_time.info);
+                                //lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, data_structure[i].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                                temp_font = font_list_get(data_structure[i].data.date_time.typeface, data_structure[i].data.date_time.size, data_structure[i].data.date_time.italic_bold);
+                                //lv_point_t text_size;
+                                lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), temp_font, data_structure[i].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                                 lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                                 lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -6418,20 +7730,14 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                                 lv_style_init(&data_structure[i].data.date_time.style);
-                                lv_style_set_text_font(&data_structure[i].data.date_time.style, data_structure[i].data.date_time.info.font);
-                                word_space = data_structure[i].data.date_time.space;
-                                printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+                                lv_style_set_text_font(&data_structure[i].data.date_time.style, temp_font);
 
-                                x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-                                printf("x_size=%d\n\r", x_size);
-
-                                lv_obj_set_size(temp_obj, x_size, text_size.y);
+                                lv_obj_set_size(temp_obj, text_size.x, text_size.y);
                                 lv_obj_set_style_transform_angle(temp_obj, data_structure[i].data.date_time.spin*10, 0);
 
                                 if (data_structure[i].data.word.spin != 0)
                                 {
-                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                                    lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, text_size.x, text_size.y);
                                 }
 
                                 lv_style_set_text_letter_space(&data_structure[i].data.date_time.style, word_space);
@@ -6584,14 +7890,15 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         {
                                             my_symbol->option_2 = 5;
                                         }
-
+#if 0
                                         if( data_structure[i].data.qr_bar.figure== 1)
                                         {
                                             my_symbol->show_hrt = 1;
                                             memcpy(my_symbol->text,data_structure[i].data.qr_bar.text,str_len);
                                         }
+#endif
 
-                                        if (data_structure[win_content_child_num].data.qr_bar.borders == 1)
+                                        if (data_structure[i].data.qr_bar.borders == 1)
                                         {
                                             my_symbol->output_options = BARCODE_BOX;
                                             my_symbol->whitespace_width = 3;
@@ -6610,8 +7917,10 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
-                                        printf("scale=%f\n\r", (double)my_symbol->scale);
+                                        //my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                                        //   my_symbol->scale = (float)height_len/(float)height;
+                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -6663,17 +7972,6 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                                 }
                                             }
                                         }
-#if 0
-                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                                        // 使用data进行图像处理...
-                                        lv_mem_free(pnew_data);
-                                        stbi_image_free(pdata); // 释放内存
-
-                                        //显示图像
-                                        img = lv_img_create(temp_obj);
-                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                                        lv_obj_center(img);
-#endif
 
                                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -6681,57 +7979,69 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+
+                                        // 释放内存
+                                        stbi_image_free(data);
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
 
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
+
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
                                         break;
                                     case 1:
                             
-        #if 0
-                                width_len = atoi(lv_label_get_text(label_btn_addition_QR_code_width));
-
-                                if (width_len > 100)
-                                {
-                                    width_len = 100;
-                                }
-                                else if (width_len < 50)
-                                {
-                                    width_len = 50;
-                                }
-
-                                printf("width_len=%u\n\r",width_len);
-
-                                data_structure[win_content_child_num].data.qr_bar.width = width_len;
-        #endif
                                         my_symbol->symbology = BARCODE_PDF417;
                                         height_len =  data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
 
-                                        //figure_borders = 0;
-                #if 0
-                                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                        {
-                                            my_symbol->show_hrt = 1;
-                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                            //figure_borders |= 0x01;
-                                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                        }
-
-                                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+           
+                                         if (data_structure[i].data.qr_bar.borders == 1)
                                         {
                                             my_symbol->output_options = BARCODE_BOX;
                                             my_symbol->whitespace_width = 3;
                                             my_symbol-> whitespace_height = 3; 
                                             my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                            //figure_borders |= 0x02;
-                                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                         }
-                #endif
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -6745,7 +8055,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                       //  my_symbol->scale = (float)height_len/(float)height;
+                                          my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -6817,11 +8129,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+   
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -6831,27 +8181,13 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         height_len =  data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
 
-
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
-
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                        if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -6864,7 +8200,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                       //  my_symbol->scale = (float)height_len/(float)height;
+                                          my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -6936,11 +8274,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -6949,26 +8325,14 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         my_symbol->symbology = BARCODE_HANXIN;
                                         height_len = data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
-
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                       
+                                        if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -6981,7 +8345,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                     //   my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)height_len/(float)height;
+                                         my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7053,12 +8419,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
             
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -7086,27 +8489,25 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         my_symbol->symbology = BARCODE_CODE39;
                                         height_len =  data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
+        
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
-
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
+        
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
@@ -7118,7 +8519,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                       // my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        //  my_symbol->scale = (float)height_len/(float)height;
+                                           my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7190,11 +8593,50 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -7203,26 +8645,24 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         my_symbol->symbology = BARCODE_CODE128;
                                         height_len = data_structure[win_content_child_num].data.qr_bar.height;
                                         my_symbol->scale = 1;
-                                        //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
+
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -7235,7 +8675,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        // my_symbol->scale = (float)height_len/(float)height;
+                                          my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r",(double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7307,11 +8749,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
@@ -7323,26 +8803,23 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         height_len = data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -7355,7 +8832,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                     //   my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        //my_symbol->scale = (float)height_len/(float)height;
+                                         my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7427,11 +8906,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -7442,26 +8959,23 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         height_len =  data_structure[i].data.qr_bar.height ;
                                         my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
                                         strcpy(my_symbol->outfile, "out.bmp");
 
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -7475,7 +8989,7 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
+                                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r",(double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7547,11 +9061,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -7561,27 +9113,23 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         height_len = data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
 
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
-
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -7594,7 +9142,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                         //my_symbol->scale = (float)height_len/(float)height;
+                                          my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r",(double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7666,11 +9216,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -7680,26 +9268,23 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         height_len = data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
@@ -7711,7 +9296,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        // my_symbol->scale = (float)height_len/(float)height;
+                                          my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7783,11 +9370,49 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img); 
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -7797,26 +9422,23 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         height_len = data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -7829,7 +9451,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                         //my_symbol->scale = (float)height_len/(float)height;
+                                          my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -7901,11 +9525,50 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -7915,26 +9578,23 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         height_len = data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -7947,7 +9607,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                      //  my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                        // my_symbol->scale = (float)height_len/(float)height;
+                                          my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
                 
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -8019,11 +9681,50 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -8032,26 +9733,24 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         my_symbol->symbology = BARCODE_EAN14;
                                         height_len = data_structure[i].data.qr_bar.height;
                                         my_symbol->scale = 1;
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                                }
+                         
+                                        if (data_structure[i].data.qr_bar.figure == 1)
+                                        {
+                                            my_symbol->show_hrt = 1;
+                                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                        }
+                                        else
+                                        {
+                                            my_symbol->show_hrt = 0;
+                                        }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
-        #endif
+                                         if (data_structure[i].data.qr_bar.borders == 1)
+                                        {
+                                            my_symbol->output_options = BARCODE_BOX;
+                                            my_symbol->whitespace_width = 3;
+                                            my_symbol-> whitespace_height = 3; 
+                                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        }
 
                                         strcpy(my_symbol->outfile, "out.bmp");
                                         ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -8064,7 +9763,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         printf("height=%d\n\r", height);
                                         printf("channels=%d\n\r", channels);
                             
-                                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                       // my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                         // my_symbol->scale = (float)height_len/(float)height;
+                                           my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                         printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                         strcpy(my_symbol->outfile, "out.bmp");
@@ -8136,11 +9837,50 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                         lv_mem_free(pnew_data);
                                         stbi_image_free(pdata); // 释放内存
 
+
+                                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                        if (!data) 
+                                        {
+                                            printf("错误：无法加载图片 %s\n", bmp_name);
+                                        }
+                                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                     
+                                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                        if (!success) 
+                                        {
+                                            printf("错误：保存 PNG 失败\n");
+                                        } 
+                                        else
+                                        {
+                                            printf("PNG 保存成功：%s\n", bmp_name);
+                                        }
+                                        stbi_image_free(data); // 释放内存
+
                                         //显示图像
                                         img = lv_img_create(temp_obj);
                                         sprintf(bmp_name_1,"A:%s",bmp_name);
                                         lv_img_set_src(img, bmp_name_1);
                                         lv_obj_center(img);
+
+                                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                        if (res == LV_RES_OK)
+                                        {
+                                            printf("PNG: %dx%d\n", header.w, header.h);
+                                        }
+                                        else
+                                        {
+                                            printf("lv_img_decoder_get_info error\n");
+                                        }
+
+                                        lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                        width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                        height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                        lv_obj_set_size(temp_obj, width, height);
 
                                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -8159,26 +9899,61 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                                 lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
+                                char picture_name[128]={0};
+
                                 // 假设你有一个图片对象
                                 img_obj = lv_img_create(temp_obj);
-                                lv_img_set_src(img_obj, data_structure[i].data.picture.text);
 
-                                lv_obj_align(img_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+                                if(strcmp(data_structure[i].data.picture.text_1,"png") != 0)
+                                {
+                                    data = stbi_load(data_structure[i].data.picture.text_1, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", data_structure[i].data.picture.text_1);
+                                    }
 
-                                lv_img_set_zoom(img_obj, data_structure[i].data.picture.size);
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
 
-                                // 获取图片对象
-                                img_1 = (lv_img_t*)img_obj;
 
-                                // 获取图片的源文件
-                                img_dsc = (lv_img_dsc_t*)img_1->src;
+                                    // 步骤 2：将数据保存为 PNG
+                                    success = stbi_write_png(data_structure[i].data.picture.text_2, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else 
+                                    {
+                                        printf("PNG 保存成功：%s\n", data_structure[i].data.picture.text_2);
+                                    }
 
-                                // 获取图片的宽和高
-                                width = img_dsc->header.w;
-                                height = img_dsc->header.h;
+                                    sprintf(picture_name, "A:%s", data_structure[i].data.picture.text_2);
 
-                                // 打印宽和高
-                                printf("Image width: %d, height: %d\n", width, height);
+                                    stbi_image_free(data);
+                                }
+                                else
+                                {
+                                    sprintf(picture_name, "A:%s", data_structure[i].data.picture.text_1);
+                                }
+                                
+                                lv_img_set_src(img_obj, picture_name);
+                                lv_obj_center(img_obj);
+
+                                res = lv_img_decoder_get_info(picture_name, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img_obj,data_structure[i].data.picture.size);
+
+                                width = header.w * data_structure[i].data.picture.size / 256;
+                                height = header.h * data_structure[i].data.picture.size / 256;
+
                                 lv_obj_set_size(temp_obj, width, height);
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
                                 break;
@@ -8198,8 +9973,8 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 img_obj = lv_img_create(temp_obj);
                                 lv_img_set_src(img_obj,  &icon_buf[data_structure[i].data.icon.type]);
 
-                                lv_obj_align(img_obj, LV_ALIGN_CENTER, 0, 0);
-
+                                lv_obj_center(img_obj);
+                                
                                 lv_img_set_zoom(img_obj, data_structure[i].data.icon.size);
 
                                 // 获取图片对象
@@ -8209,8 +9984,8 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 img_dsc = (lv_img_dsc_t*)img_1->src;
 
                                 // 获取图片的宽和高
-                                width = img_dsc->header.w;
-                                height = img_dsc->header.h;
+                                width = img_dsc->header.w * data_structure[i].data.icon.size / 256;
+                                height = img_dsc->header.h * data_structure[i].data.icon.size / 256;
 
                                 // 打印宽和高
                                 printf("Image width: %d, height: %d\n", width, height);
@@ -8233,19 +10008,17 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
                                 break;
                             case TYPE_COUNT:
-                                //保存所有数据
-                                //data_structure[win_content_child_num].data.count.law = lv_dropdown_get_selected(dropdown_addition_count_law);
-                                //data_structure[win_content_child_num].data.count.repetition = atoi(lv_label_get_text(label_btn_addition_count_times_repetition));
-
                                 temp_obj = lv_obj_create(win_content);
-                                sprintf(temp_typeface, "/media/%s", typeface_buf[data_structure[win_content_child_num].data.count.typeface]);
-                                data_structure[win_content_child_num].data.count.typeface = i;
-                                printf("%s\n", temp_typeface);
-                                data_structure[win_content_child_num].data.count.info.name = temp_typeface;
+                                //sprintf(temp_typeface, "/media/%s", typeface_buf[data_structure[win_content_child_num].data.count.typeface]);
+                                //data_structure[win_content_child_num].data.count.typeface = i;
+                                //printf("%s\n", temp_typeface);
+                                //data_structure[win_content_child_num].data.count.info.name = temp_typeface;
                                 data_structure[win_content_child_num].data.count.info.weight = data_structure[win_content_child_num].data.count.size;
+                                word_space =  data_structure[win_content_child_num].data.count.space;
 
-                                lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
-
+                                //lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+                                temp_font = font_list_get(data_structure[win_content_child_num].data.count.typeface, data_structure[win_content_child_num].data.count.size, 0);
+                        
                                 printf("lead_zero=%d\n\r", data_structure[win_content_child_num].data.count.lead_zero);
                                 printf("law=%d\n\r", data_structure[win_content_child_num].data.count.law);
 
@@ -8293,9 +10066,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 }
 
                                 printf("tempString=%s\n\r", tempString);
-
-                            
-                                lv_txt_get_size(&text_size, tempString, data_structure[win_content_child_num].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+   
+                                //lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                                lv_txt_get_size(&text_size, tempString, temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                                 lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                                 lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -8306,17 +10079,10 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                                 lv_style_init(&data_structure[win_content_child_num].data.count.style);
-                                lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, data_structure[win_content_child_num].data.count.info.font);
-
-                                word_space =  data_structure[win_content_child_num].data.count.space;
-
+                                lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style,temp_font);
+         
                                 printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-                                x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-                                printf("x_size=%d\n\r", x_size);
-
-                                lv_obj_set_size(temp_obj, x_size, text_size.y);
+                                lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
                                 lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
                                 label1 = lv_label_create(temp_obj);
@@ -8330,24 +10096,21 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                             case TYPE_SYMBOL:
                                 temp_obj = lv_obj_create(win_content);
 
-                                sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
+                                //sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
                                 //data_structure[win_content_child_num].data.word.typeface = 0;
                                 //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
                                 //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
                                 //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-                                printf("%s\n", temp_typeface);
-
-                                data_structure[win_content_child_num].data.word.info.name = temp_typeface;
-
+                                //printf("%s\n", temp_typeface);
+                                //data_structure[win_content_child_num].data.word.info.name = temp_typeface;
                                 data_structure[win_content_child_num].data.word.info.weight = data_structure[win_content_child_num].data.word.size;
-
                                 data_structure[win_content_child_num].data.word.spin = 0;
-
                                 data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
 
-                                lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+                                //lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+                                temp_font = font_list_get(0, data_structure[win_content_child_num].data.word.size, 0);
 
-                                lv_txt_get_size(&text_size, typeface_buf[0], data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                                lv_txt_get_size(&text_size, data_structure[win_content_child_num].data.word.text, temp_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                                 lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                                 lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -8358,7 +10121,7 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                                 lv_style_init(&data_structure[win_content_child_num].data.word.style);
-                                lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+                                lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, temp_font);
 
                                 lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
@@ -8723,6 +10486,44 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
 
 
 
+static void button_file_search_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    //char file_name[100]={0};
+    //DIR *dir;
+    //struct dirent *entry;
+    //struct stat file_stat;
+    //char path[128];
+    //unsigned char picture_count = 0;
+    //int picture_type = 0;
+    //char created_time[20] ={0};
+    //char size_str[20]; // 存储转换后的字符串
+    //char image_name[50]; // 存储提取的图片名称
+    //char file_name_short[100]={0};
+
+    code = lv_event_get_code(e);
+    //int len = 0;
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_file_search_keyboard_return_event_cb\n");
+
+        buzzer_enable = 1;
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        lv_obj_del(table_addition_picture_1);
+    }
+}
+
+
+
+
 
 static void file_change_event_cb(lv_event_t* e)
 {
@@ -8734,6 +10535,8 @@ static void file_change_event_cb(lv_event_t* e)
 
     lv_table_get_selected_cell(obj, &row, &col);
     printf("row=%d\n\r", row);
+
+    buzzer_enable = 1;
 
     g_row = row;
     lv_obj_invalidate(obj);  // 刷新表格，触发重绘
@@ -8843,7 +10646,7 @@ static void btn_file_search_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_keyboard_return, button_file_search_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_IMG_DECLARE(confirm);
         btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
@@ -8869,10 +10672,35 @@ static void btn_file_search_event_cb(lv_event_t* e)
 }
 
 
+typedef struct {
+    char name[64];    // 文件名
+    time_t mtime;      // 修改时间
+} FileInfo;
+
+
+
+// 比较函数，用于qsort排序
+int compare_files(const void *a, const void *b) {
+    const FileInfo *fa = (const FileInfo *)a;
+    const FileInfo *fb = (const FileInfo *)b;
+    
+    // 按修改时间排序，最新的在前
+    if (fa->mtime > fb->mtime) return -1;
+    if (fa->mtime < fb->mtime) return 1;
+    return 0;
+}
+
+
+
 static void button_file_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     char file_name[100]={0};
+    FileInfo *files = NULL;
+    int count = 0;
+    char full_path[512];
+
+
     code = lv_event_get_code(e);
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
     {
@@ -8971,7 +10799,7 @@ static void button_file_event_cb(lv_event_t* e)
         DIR *dir;
         struct dirent *entry;
         struct stat file_stat;
-        char path[300];
+        //char path[300];
         //unsigned char picture_count = 0;
         //int picture_type = 0;
         char created_time[20] ={0};
@@ -8986,6 +10814,8 @@ static void button_file_event_cb(lv_event_t* e)
             perror("opendir");
             exit(EXIT_FAILURE);
         }
+
+#if 0
 
         while ((entry = readdir(dir)) != NULL) 
         {
@@ -9011,6 +10841,81 @@ static void button_file_event_cb(lv_event_t* e)
                 }
             }
         }
+#endif
+
+        // 第一次遍历，统计文件数量
+        while ((entry = readdir(dir)) != NULL) 
+        {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+            count++;
+        }
+        rewinddir(dir);
+
+        // 分配内存
+        files = (FileInfo *)malloc(count * sizeof(FileInfo));
+        if (files == NULL) {
+            perror("malloc");
+            closedir(dir);
+            //return -1;
+        }
+
+            // 第二次遍历，收集文件信息
+        int index = 0;
+        while ((entry = readdir(dir)) != NULL && index < count) 
+        {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+
+            // 构建完整路径
+            snprintf(full_path, sizeof(full_path), "%s/%s", "/media/file", entry->d_name);
+
+            // 获取文件状态
+            if (stat(full_path, &file_stat) == -1) {
+                perror("stat");
+                continue;
+            }
+
+            // 只处理普通文件
+            if (S_ISREG(file_stat.st_mode)) 
+            {
+                strncpy(files[index].name, entry->d_name, sizeof(files[index].name) - 1);
+                files[index].mtime = file_stat.st_mtime;
+                index++;
+            }
+        }
+
+
+        // 实际有效的文件数
+        count = index;
+
+        // 按修改时间排序
+        qsort(files, count, sizeof(FileInfo), compare_files);
+
+        // 输出结果
+        //printf("%-40s %-20s %s\n", "Filename", "Modification Time", "Size");
+        //printf("------------------------------------------------------------\n");
+        
+        for (int i = 0; i < count; i++) 
+        {
+            //char time_str[20];
+            //struct tm *tm_info = localtime(&files[i].mtime);
+            //strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);    
+            //printf("%-40s %-20s %ld bytes\n", files[i].name, time_str, (long)files[i].size);
+
+            //print_file_info(entry->d_name, &file_stat);
+            lv_table_set_cell_value(table_addition_picture_1, g_file_num, 0, files[i].name);
+            printf("Created: %s", ctime(&files[i].mtime));
+            format_time(ctime(&files[i].mtime), created_time);
+            printf("created_time=%s\n\r",created_time);
+            lv_table_set_cell_value(table_addition_picture_1, g_file_num, 1, created_time);
+            g_file_num++;
+        }
+
+        // 清理
+        free(files);
 
         closedir(dir);
 
@@ -9181,16 +11086,12 @@ static void button_save_keyboard_return_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    int len = 0;
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_save_keyboard_return_event_cb\n");
 
         buzzer_enable = 1;
-        //获取输入框数据给到文本显示框
-        lv_label_set_text(label_btn_addition_picture_search, lv_textarea_get_text(textarea_text_keyboard));
-        len = strlen(lv_label_get_text(label_btn_addition_picture_search));
-        printf("len=%d\n\r", len);
+
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
         lv_obj_del(textarea_text_keyboard);
@@ -9687,55 +11588,84 @@ static void button_file_management_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("get_back\n");
-        buzzer_enable = 1;
+
         lv_obj_del(file_management_win);
         lv_obj_del(file_management_head_bg);
-        lv_obj_del(label_file_management_total_output);
+        //lv_obj_del(label_file_management_total_output);
         lv_obj_del(label_file_management);
-        lv_obj_del(label_file_management_date);
-        lv_obj_del(label_file_management_time);
-        lv_obj_del(img_file_management_battery_level);
+        //lv_obj_del(label_file_management_date);
+        //lv_obj_del(label_file_management_time);
+        //lv_obj_del(img_file_management_battery_level);
         lv_obj_del(label_file_management_label);
         lv_obj_del(file_management_middle_bg);
         lv_obj_del(img_file_management_text);
         lv_obj_del(label_file_management_text);
         lv_obj_del(label_file_management_text_label);
-        lv_obj_del(btn_file_management_text);
-        //lv_obj_del(img_file_management_text_time);
-        //lv_obj_del(label_file_management_text_time);
-        //lv_obj_del(label_file_management_text_time_label);
+        lv_obj_del(label_file_management_text_label_1);
+
         lv_obj_del(img_file_management_typeface);
         lv_obj_del(label_file_management_typeface);
         lv_obj_del(label_file_management_typeface_label);
+
         lv_obj_del(img_file_management_word_space);
         lv_obj_del(label_file_management_word_space);
         lv_obj_del(label_file_management_word_space_label);
+
         lv_obj_del(img_file_management_word_size);
         lv_obj_del(label_file_management_word_size);
         lv_obj_del(label_file_management_word_size_label);
+
         lv_obj_del(img_file_management_spin);
         lv_obj_del(label_file_management_spin);
-        lv_obj_del(label_file_management_spin_label);
-        lv_obj_del(img_file_management_width);
-        lv_obj_del(label_file_management_width);
-        lv_obj_del(label_file_management_width_label);
+        lv_obj_del(label_btn_addition_text_spin);
+
+        //lv_obj_del(img_file_management_width);
+        //lv_obj_del(label_file_management_width);
+        //lv_obj_del(label_file_management_width_label);
+
         lv_obj_del(img_file_management_bold);
         lv_obj_del(label_file_management_bold);
         lv_obj_del(sw_file_management_bold);
-        //lv_obj_del(img_file_management_line_increment);
-        //lv_obj_del(label_file_management_line_increment);
-        //lv_obj_del(label_file_management_line_increment_label);
+
         lv_obj_del(img_management_line_italic);
         lv_obj_del(label_management_line_italic);
         lv_obj_del(sw_management_line_italic);
+
         lv_obj_del(file_management_bottom_bg);
         lv_obj_del(label_file_management_return);
         lv_obj_del(imgbtn_file_management_get_back);
         lv_obj_del(imgbtn_file_management_confirm);
         lv_obj_del(label_file_management_confirm);
+
+        lv_obj_del(btn_file_management_text);
         lv_obj_del(btn_file_management_typeface);
         lv_obj_del(btn_file_management_word_space_label);
         lv_obj_del(btn_file_management_word_size_label);
+        lv_obj_del(btn_addition_text_spin);
+
+        //删除添加界面
+        lv_obj_del(img_addition_bg);
+        lv_obj_del(btn_addition_text);
+        lv_obj_del(label_btn_addition_text);
+        lv_obj_del(btn_addition_date);
+        lv_obj_del(label_btn_addition_date);
+        lv_obj_del(btn_addition_picture);
+        lv_obj_del(label_btn_addition_picture);
+        lv_obj_del(btn_addition_QR_code);
+        lv_obj_del(label_btn_addition_QR_code);
+        lv_obj_del(btn_addition_bar_code);
+        lv_obj_del(label_btn_addition_bar_code);
+        lv_obj_del(btn_addition_count);
+        lv_obj_del(label_btn_addition_count);
+        lv_obj_del(btn_addition_subsection);
+        lv_obj_del(label_btn_addition_subsection);
+        lv_obj_del(btn_addition_symbol);
+        lv_obj_del(label_btn_addition_symbol);
+        lv_obj_del(btn_addition_icon);
+        lv_obj_del(label_btn_addition_icon);
+        lv_obj_del(btn_addition_more_functions);
+        lv_obj_del(label_btn_addition_more_functions);
+        lv_obj_del(btn_addition_return);
     }
 }
 
@@ -9750,6 +11680,8 @@ static void drag_event_handler(lv_event_t* e)
     {
         return;
     }
+
+    g_data_structure_count = 0;
 
     if (code == LV_EVENT_PRESSING)
     {
@@ -9866,7 +11798,7 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
 
     if (code == LV_EVENT_CLICKED)
     {
-        printf("\nbutton_file_management_confirm_event_cb\n");
+        printf("button_file_management_confirm_event_cb\n");
         buzzer_enable = 1;
 
         int len = strlen(lv_label_get_text(label_file_management_label)) + 1;
@@ -9895,9 +11827,9 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
             //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
             //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
             //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-            printf("%s\n", temp_typeface);
+            //printf("%s\n", temp_typeface);
 
-            data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+            //data_structure[win_content_child_num].data.word.info.name = temp_typeface;
 
 
             word_size = atoi(lv_label_get_text(label_file_management_word_size_label));
@@ -9912,6 +11844,8 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
                 word_size = 200;
             }
 
+            printf("word_size=%u\n\r", word_size);
+
             word_space = atoi(lv_label_get_text(label_file_management_word_space_label));
 
             if (word_space < 0)
@@ -9924,7 +11858,13 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
                 word_space = 100;
             }
 
+            printf("word_space=%u\n\r", word_space);
+
             data_structure[win_content_child_num].data.word.info.weight = word_size;
+
+            data_structure[win_content_child_num].data.word.spin = atoi(lv_label_get_text(label_btn_addition_text_spin));
+
+            printf("spin=%u\n\r", data_structure[win_content_child_num].data.word.spin);
 
             data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
 
@@ -9938,10 +11878,13 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
                 data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_BOLD;
             }
 
-            lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+            //lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+
+            lv_font_t* temp_font = font_list_get(i, word_size, data_structure[win_content_child_num].data.word.info.style);
+
 
             lv_point_t text_size;
-            lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), data_structure[win_content_child_num].data.word.info.font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
             //printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
@@ -9956,11 +11899,20 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
             lv_style_init(&data_structure[win_content_child_num].data.word.style);
-            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
-
-
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, temp_font);
   
             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+
+            lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.word.spin*10, 0);
+
+            if (data_structure[win_content_child_num].data.word.spin != 0)
+            {
+                lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, text_size.x, text_size.y);
+            }
+            else
+            {
+                 lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            }
 
             //x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
 
@@ -9995,6 +11947,7 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
         lv_obj_del(img_file_management_text);
         lv_obj_del(label_file_management_text);
         lv_obj_del(label_file_management_text_label);
+        lv_obj_del(label_file_management_text_label_1);
 
         lv_obj_del(img_file_management_typeface);
         lv_obj_del(label_file_management_typeface);
@@ -10069,6 +12022,8 @@ static void textarea_text_event_cb(lv_event_t* e)
     //lv_obj_t* target = lv_event_get_target(e);
 
     printf("code=%d\n",code);
+
+    buzzer_enable = 1;
 
     if (code == LV_EVENT_FOCUSED)
     {
@@ -10274,7 +12229,6 @@ static void button_typeface_return_event_cb(lv_event_t* e)
         lv_obj_del(btn_typeface_return);
         lv_obj_del(btn_typeface_confirm);
         lv_obj_del(label_typeface_confirm);
-        lv_obj_del(typeface_content_bg);
         lv_obj_del(label_typeface_head);
 
         for (i = 0; i < TYPEFACE_NUMBER; i++)
@@ -10570,9 +12524,9 @@ static void button_word_size_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > WORD_MAX_SIZE)
             {
-                i = 150;
+                i = WORD_MAX_SIZE;
             }
         }
 
@@ -11114,6 +13068,23 @@ static void sw_addition_bold_event_cb(lv_event_t* e)
     }
 }
 
+
+void addition_text_updata(void)
+{
+    int len = strlen(lv_label_get_text(label_file_management_label));
+    printf("len=%u\n\r", len);
+    if (len == 0)
+    {
+        lv_obj_set_style_bg_opa(label_file_management_text_label, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_clear_flag(label_file_management_text_label_1, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
+        lv_obj_set_style_bg_opa(label_file_management_text_label, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_add_flag(label_file_management_text_label_1, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void button_addition_text_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -11247,6 +13218,29 @@ static void button_addition_text_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_opa(label_file_management_text_label, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(label_file_management_text_label, lv_color_hex(0xffffff), LV_PART_MAIN);
         lv_obj_add_event_cb(btn_file_management_text, btn_file_management_text_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_set_style_text_opa(label_file_management_text_label, LV_OPA_60, LV_STATE_DEFAULT);
+
+
+        label_file_management_text_label_1 = lv_label_create(btn_file_management_text);
+        lv_obj_set_style_text_font(label_file_management_text_label_1, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_file_management_text_label_1, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
+        lv_label_set_text(label_file_management_text_label_1, "请输入文字");
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_file_management_text_label_1, "请输入文字");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_file_management_text_label_1, "Please enter the text.");
+        }
+        lv_obj_align(label_file_management_text_label_1, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_border_width(label_file_management_text_label_1, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(label_file_management_text_label_1, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(label_file_management_text_label_1, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(label_file_management_text_label_1, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_opa(label_file_management_text_label_1, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(label_file_management_text_label_1, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_set_style_text_opa(label_file_management_text_label_1, LV_OPA_60, LV_STATE_DEFAULT);
 
 
         LV_IMG_DECLARE(typeface);
@@ -11279,7 +13273,7 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_typeface_label = lv_label_create(btn_file_management_typeface);
         lv_obj_set_style_text_font(label_file_management_typeface_label, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_typeface_label, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_typeface_label, "");
+        lv_label_set_text(label_file_management_typeface_label, "常用宋体");
         lv_obj_align(label_file_management_typeface_label, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_file_management_typeface_label, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_file_management_typeface_label, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -11320,7 +13314,7 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_word_space_label = lv_label_create(btn_file_management_word_space_label);
         lv_obj_set_style_text_font(label_file_management_word_space_label, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_word_space_label, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_word_space_label, "");
+        lv_label_set_text(label_file_management_word_space_label, "000");
         lv_obj_align(label_file_management_word_space_label, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_file_management_word_space_label, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_file_management_word_space_label, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -11361,7 +13355,7 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_file_management_word_size_label = lv_label_create(btn_file_management_word_size_label);
         lv_obj_set_style_text_font(label_file_management_word_size_label, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_file_management_word_size_label, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_file_management_word_size_label, "");
+        lv_label_set_text(label_file_management_word_size_label, "48");
         lv_obj_align(label_file_management_word_size_label, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_file_management_word_size_label, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_file_management_word_size_label, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -11404,7 +13398,7 @@ static void button_addition_text_event_cb(lv_event_t* e)
         label_btn_addition_text_spin = lv_label_create(btn_addition_text_spin);
         lv_obj_set_style_text_font(label_btn_addition_text_spin, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_text_spin, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_text_spin, "");
+        lv_label_set_text(label_btn_addition_text_spin, "0°");
         lv_obj_align(label_btn_addition_text_spin, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_text_spin, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_text_spin, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -11550,6 +13544,44 @@ static void button_addition_text_event_cb(lv_event_t* e)
             lv_label_set_text(label_file_management_confirm, "Confirm");
         }
         lv_obj_align(label_file_management_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+
+        addition_text_updata();
+    }
+}
+
+
+static void btn_speed_print_mode_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i=0;
+    char temp_str[12] = { 0 };
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
+        if ((pwd_txt != NULL))
+        {
+            i = atoi(pwd_txt);
+            if (i > 250)
+            {
+                i = 250;
+            }
+        }
+
+        sprintf(temp_str, "%d", i);
+        lv_label_set_text(label_btn_label_speed_print_mode, temp_str);
+
+        printf("button_word_space_confirm_event_cb\n");
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
     }
 }
 
@@ -11565,7 +13597,7 @@ static void btn_label_speed_print_mode_event_cb(lv_event_t* e)
    // int line_num = 5;
    // int size_wide = 85;
    // int size_high = 24;
-    lv_obj_t* obj = lv_event_get_target(e);
+   // lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
     {
@@ -11695,7 +13727,7 @@ static void btn_label_speed_print_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
         lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(btn_typeface_confirm, button_word_space_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_confirm, btn_speed_print_mode_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
         label_typeface_confirm = lv_label_create(lv_scr_act());
@@ -11920,6 +13952,40 @@ static void btn_addition_count_times_repetition_mode_event_cb(lv_event_t* e)
 
 
 
+static void button_addition_count_typeface_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_addition_count_typeface_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+        lv_obj_del(label_typeface_head);
+
+        for (i = 0; i < TYPEFACE_NUMBER; i++)
+        {
+            lv_obj_del(typeface_obj[i].obj_typeface_label);
+            lv_obj_del(typeface_obj[i].obj_typeface_btn);
+        }
+
+        lv_obj_del(win_content_typeface);
+        lv_obj_del(win_obj_typeface);
+        lv_obj_del(left_stop_img_typeface);
+        lv_obj_del(right_stop_img_typeface);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(slider_typeface);
+    }
+}
+
+
+
 
 static void button_addition_count_typeface_confirm_event_cb(lv_event_t* e)
 {
@@ -12079,7 +14145,7 @@ static void btn_addition_count_typeface_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_typeface_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_addition_count_typeface_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -12122,9 +14188,9 @@ static void button_addition_count_size_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 200)
             {
-                i = 150;
+                i = 200;
             }
         }
 
@@ -12315,9 +14381,9 @@ static void btn_addition_count_space_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 100)
             {
-                i = 150;
+                i = 100;
             }
         }
 
@@ -12502,6 +14568,8 @@ static void dropdown_addition_count_lead_zero_event_handler(lv_event_t* e)
         buzzer_enable = 1;
         lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
         printf("Option: %s", buf);
+
+        btn_addition_count_updata();
     }
 }
 
@@ -12541,6 +14609,8 @@ static void button_count_current_value_confirm_event_cb(lv_event_t* e)
         lv_obj_del(btn_typeface_return);
         lv_obj_del(btn_typeface_confirm);
         lv_obj_del(label_typeface_confirm);
+
+        btn_addition_count_updata();
     }
 }
 
@@ -12919,6 +14989,8 @@ static void btn_addition_count_maximum_confirm_event_cb(lv_event_t* e)
         lv_obj_del(btn_typeface_return);
         lv_obj_del(btn_typeface_confirm);
         lv_obj_del(label_typeface_confirm);
+
+        btn_addition_count_updata();
     }
 }
 
@@ -13088,9 +15160,9 @@ static void  btn_addition_count_step_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 99999)
             {
-                i = 150;
+                i = 99999;
             }
         }
 
@@ -13112,7 +15184,41 @@ static void  btn_addition_count_step_confirm_event_cb(lv_event_t* e)
 }
 
 
+static void btn_addition_count_updata(void)
+{
+    //char temp_typeface[128] = { 0 };
+    //int i = 0;
+    //int word_space = 0;
+    //int word_size = 0;
+    //int x_size = 0;
+    //int y_size = 0;
+    //int win_content_child_num = 0;
+    char tempString[32] = { 0 };
+    unsigned int currentValue = 0;
+    unsigned char leadZero = 0;
+    unsigned int maxValue = 0;
 
+    printf("btn_addition_count_updata\n");
+   
+    currentValue = atoi(lv_label_get_text(label_btn_addition_count_current_value));
+    leadZero = lv_dropdown_get_selected(dropdown_addition_count_lead_zero);
+    maxValue = atoi(lv_label_get_text(label_btn_addition_count_maximum));
+
+    if (currentValue > maxValue)
+    {
+        currentValue = maxValue;
+    }
+
+    if (leadZero == 0)
+    {
+        formatNumberWithLeadingZeros(currentValue, maxValue, tempString);
+    }
+    else
+    {
+        sprintf(tempString, "%u", currentValue);
+    }
+    lv_label_set_text(label_addition_count_preview, tempString);
+}
 
 static void btn_addition_count_step_event_cb(lv_event_t* e)
 {
@@ -13170,7 +15276,7 @@ static void btn_addition_count_step_event_cb(lv_event_t* e)
         lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
         lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
         //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
-        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
+        lv_textarea_set_max_length(pwd_text_area, 5); // 设置可输入的文本的最大长度
         lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
         lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
         lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
@@ -13270,11 +15376,11 @@ static void btn_addition_count_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int i = 0;
     int word_space = 0;
     int word_size = 0;
-    int x_size = 0;
+    //int x_size = 0;
     //int y_size = 0;
     int win_content_child_num = 0;
     char tempString[32] = { 0 };
@@ -13291,6 +15397,11 @@ static void btn_addition_count_confirm_event_cb(lv_event_t* e)
             data_structure[win_content_child_num].data.count.law = lv_dropdown_get_selected(dropdown_addition_count_law);
             data_structure[win_content_child_num].data.count.repetition = atoi(lv_label_get_text(label_btn_addition_count_times_repetition));
 
+            if(data_structure[win_content_child_num].data.count.repetition == 0)
+            {
+                data_structure[win_content_child_num].data.count.repetition = 1;
+            }
+
             lv_obj_t* temp_obj = lv_obj_create(win_content);
 
             for (i = 0; i < TYPEFACE_NUMBER; i++)
@@ -13303,10 +15414,10 @@ static void btn_addition_count_confirm_event_cb(lv_event_t* e)
 
             printf("i=%d\n", i);
 
-            sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
+            //sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
             data_structure[win_content_child_num].data.count.typeface = i;
-            printf("%s\n", temp_typeface);
-            data_structure[win_content_child_num].data.count.info.name = temp_typeface;
+            //printf("%s\n", temp_typeface);
+            //data_structure[win_content_child_num].data.count.info.name = temp_typeface;
             word_size = atoi(lv_label_get_text(label_btn_addition_count_size));
 
             if (word_size < 12)
@@ -13314,16 +15425,18 @@ static void btn_addition_count_confirm_event_cb(lv_event_t* e)
                 word_size = 12;
             }
 
-            if (word_size > 200)
+            if (word_size > WORD_MAX_SIZE)
             {
-                word_size = 200;
+                word_size = WORD_MAX_SIZE;
             }
 
             data_structure[win_content_child_num].data.count.info.weight = word_size;
 
             data_structure[win_content_child_num].data.count.info.style = FT_FONT_STYLE_NORMAL;
 
-            lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+            //lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+
+            lv_font_t* temp_font = font_list_get(i, word_size, 0);
 
             //当前值
             data_structure[win_content_child_num].data.count.current_value = atoi(lv_label_get_text(label_btn_addition_count_current_value));
@@ -13384,20 +15497,6 @@ static void btn_addition_count_confirm_event_cb(lv_event_t* e)
 
             printf("tempString=%s\n\r", tempString);
 
-            lv_point_t text_size;
-            lv_txt_get_size(&text_size, tempString, data_structure[win_content_child_num].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
-            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-
-            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
-            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
-            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
-            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
-
-            lv_style_init(&data_structure[win_content_child_num].data.count.style);
-            lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, data_structure[win_content_child_num].data.count.info.font);
-
             word_space = atoi(lv_label_get_text(label_btn_addition_count_space));
 
             if (word_space < 0)
@@ -13409,13 +15508,26 @@ static void btn_addition_count_confirm_event_cb(lv_event_t* e)
             {
                 word_space = 100;
             }
+
+            lv_point_t text_size;
+            lv_txt_get_size(&text_size, tempString, temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_style_init(&data_structure[win_content_child_num].data.count.style);
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, temp_font);
+
             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
-            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+            lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
-            printf("x_size=%d\n\r", x_size);
-
-            lv_obj_set_size(temp_obj, x_size, text_size.y);
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
 
             lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
             lv_obj_t* label1 = lv_label_create(temp_obj);
@@ -13740,7 +15852,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_times_repetition = lv_label_create(btn_addition_count_times_repetition);
         lv_obj_set_style_text_font(label_btn_addition_count_times_repetition, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_times_repetition, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_times_repetition, "");
+        lv_label_set_text(label_btn_addition_count_times_repetition, "1");
         lv_obj_align(label_btn_addition_count_times_repetition, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_times_repetition, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_times_repetition, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -13782,7 +15894,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_typeface = lv_label_create(btn_addition_count_typeface);
         lv_obj_set_style_text_font(label_btn_addition_count_typeface, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_typeface, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_typeface, "");
+        lv_label_set_text(label_btn_addition_count_typeface, "常用宋体");
         lv_obj_align(label_btn_addition_count_typeface, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_typeface, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_typeface, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -13823,7 +15935,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_size = lv_label_create(btn_addition_count_size);
         lv_obj_set_style_text_font(label_btn_addition_count_size, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_size, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_size, "");
+        lv_label_set_text(label_btn_addition_count_size, "48");
         lv_obj_align(label_btn_addition_count_size, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_size, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_size, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -13866,7 +15978,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_space = lv_label_create(btn_addition_count_space);
         lv_obj_set_style_text_font(label_btn_addition_count_space, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_space, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_space, "");
+        lv_label_set_text(label_btn_addition_count_space, "000");
         lv_obj_align(label_btn_addition_count_space, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_space, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_space, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -13959,7 +16071,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_current_value = lv_label_create(btn_addition_count_current_value);
         lv_obj_set_style_text_font(label_btn_addition_count_current_value, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_current_value, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_current_value, "");
+        lv_label_set_text(label_btn_addition_count_current_value, "0");
         lv_obj_align(label_btn_addition_count_current_value, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_current_value, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_current_value, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -14000,7 +16112,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_minimum = lv_label_create(btn_addition_count_minimum);
         lv_obj_set_style_text_font(label_btn_addition_count_minimum, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_minimum, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_minimum, "");
+        lv_label_set_text(label_btn_addition_count_minimum, "0");
         lv_obj_align(label_btn_addition_count_minimum, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_minimum, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_minimum, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -14042,7 +16154,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_maximum = lv_label_create(btn_addition_count_maximum);
         lv_obj_set_style_text_font(label_btn_addition_count_maximum, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_maximum, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_maximum, "");
+        lv_label_set_text(label_btn_addition_count_maximum, "999999999");
         lv_obj_align(label_btn_addition_count_maximum, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_maximum, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_maximum, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -14083,7 +16195,7 @@ static void btn_addition_count_event_cb(lv_event_t* e)
         label_btn_addition_count_step = lv_label_create(btn_addition_count_step);
         lv_obj_set_style_text_font(label_btn_addition_count_step, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_count_step, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_count_step, "");
+        lv_label_set_text(label_btn_addition_count_step, "1");
         lv_obj_align(label_btn_addition_count_step, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_count_step, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_count_step, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -14146,6 +16258,8 @@ static void btn_addition_count_event_cb(lv_event_t* e)
             lv_label_set_text(label_addition_count_confirm, "Confirm");
         }
         lv_obj_align(label_addition_count_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+
+        btn_addition_count_updata();
     }
 }
 
@@ -14192,6 +16306,8 @@ static void btn_addition_subsection_event_cb(lv_event_t* e)
             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
             lv_obj_set_size(temp_obj, 5, 150);
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
         }
 
         //删除添加界面
@@ -14301,7 +16417,9 @@ static void btn_addition_symbol_confirm_event_cb(lv_event_t* e)
             lv_style_init(&data_structure[win_content_child_num].data.word.style);
             lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
 
-            lv_obj_set_size(temp_obj, text_size.x, text_size.y);      
+            lv_obj_set_size(temp_obj, text_size.x, text_size.y);     
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0); 
 
             lv_obj_t* label1 = lv_label_create(temp_obj);
             lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
@@ -14488,9 +16606,9 @@ static void btn_addition_symbol_event_cb(lv_event_t* e)
             lv_obj_set_style_shadow_width(typeface_obj[i].obj_typeface_btn, 0, LV_PART_MAIN);
             lv_obj_add_event_cb(typeface_obj[i].obj_typeface_btn, btn_addition_symbol_one_event_cb, LV_EVENT_ALL, NULL);
 
-            LV_FONT_DECLARE(heiFont16_1);
+            LV_FONT_DECLARE(heiFont8);
             typeface_obj[i].obj_typeface_label = lv_label_create(typeface_obj[i].obj_typeface_btn);
-            lv_obj_set_style_text_font(typeface_obj[i].obj_typeface_label, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_font(typeface_obj[i].obj_typeface_label, &heiFont8, LV_STATE_DEFAULT);
             lv_obj_set_style_text_color(typeface_obj[i].obj_typeface_label, lv_color_hex(0x000000), LV_STATE_DEFAULT);
             //sprintf(temp,"%s",g_addition_symbol[i]);
             lv_label_set_text(typeface_obj[i].obj_typeface_label, g_addition_symbol[i]);
@@ -14584,6 +16702,7 @@ static void button_icon_confirm_event_cb(lv_event_t* e)
             printf("w=%d\n\r", icon_buf[g_icon_type].header.w);
             printf("h=%d\n\r", icon_buf[g_icon_type].header.h);
             lv_obj_set_size(temp_obj, icon_buf[g_icon_type].header.w, icon_buf[g_icon_type].header.h);
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
             lv_obj_center(img);
             data_structure[win_content_child_num].data.icon.type = g_icon_type;
             data_structure[win_content_child_num].data.icon.size = 256;
@@ -15398,7 +17517,7 @@ static void button_time_keyboard_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_date_keyboard_confirm_event_cb\n");
+        printf("button_time_keyboard_confirm_event_cb\n");
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_label_addition_time, lv_textarea_get_text(textarea_text_keyboard));
         lv_label_set_text(label_addition_date_middle, lv_textarea_get_text(textarea_text_keyboard));
@@ -15429,6 +17548,42 @@ static void button_time_keyboard_confirm_event_cb(lv_event_t* e)
 
         date_or_time_flag = 1;
         g_time_type = 5;
+    }
+}
+
+
+static void button_time_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_time_keyboard_return_event_cb\n");
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        lv_obj_del(obj_addition_date_text_head_bg);
+        lv_obj_del(label_addition_date_text_head);
+
+        for (i = 0; i < TIME_TYPE_NUMBER; i++)
+        {
+            lv_obj_del(date_type_obj[i].obj_date_label);
+            lv_obj_del(date_type_obj[i].obj_date_btn);
+        }
+
+        lv_obj_del(obj_addition_date_text_middle_bg);
+
+        lv_obj_del(label_addition_date_text_return);
+        lv_obj_del(btn_addition_date_text_return);
+        lv_obj_del(btn_addition_date_confirm);
+        lv_obj_del(label_addition_date_confirm);
     }
 }
 
@@ -15477,6 +17632,45 @@ static void button_date_keyboard_confirm_event_cb(lv_event_t* e)
 }
 
 
+
+static void button_date_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_date_keyboard_return_event_cb\n");
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+
+        lv_obj_del(obj_addition_date_text_head_bg);
+        lv_obj_del(label_addition_date_text_head);
+
+        for (i = 0; i < DATA_TYPE_NUMBER; i++)
+        {
+            lv_obj_del(date_type_obj[i].obj_date_label);
+            lv_obj_del(date_type_obj[i].obj_date_btn);
+        }
+
+        lv_obj_del(obj_addition_date_text_middle_bg);
+
+        lv_obj_del(label_addition_date_text_return);
+        lv_obj_del(btn_addition_date_text_return);
+        lv_obj_del(btn_addition_date_confirm);
+        lv_obj_del(label_addition_date_confirm);
+    }
+}
+
+
+
 static void button_date_type_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -15500,7 +17694,6 @@ static void button_date_type_event_cb(lv_event_t* e)
         if (lv_obj_get_index(obj) == 14)
         {
             //键盘界面
-            printf("1111111111111111\n\r");
             textarea_bg_keyboard = lv_obj_create(lv_scr_act());
             /* 设置大小 */
 
@@ -15571,7 +17764,7 @@ static void button_date_type_event_cb(lv_event_t* e)
             lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
             lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
             lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
-            lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(btn_keyboard_return, button_date_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
 
             LV_IMG_DECLARE(confirm);
             btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
@@ -15605,6 +17798,35 @@ static void button_date_confirm_event_cb(lv_event_t* e)
         lv_label_set_text(label_addition_date_middle, lv_label_get_text(date_type_obj[g_date_type].obj_date_label));
         lv_label_set_text(label_btn_addition_date_text, lv_label_get_text(date_type_obj[g_date_type].obj_date_label));
         date_or_time_flag = 0;
+
+        lv_obj_del(obj_addition_date_text_head_bg);
+        lv_obj_del(label_addition_date_text_head);
+
+        for (i = 0; i < DATA_TYPE_NUMBER; i++)
+        {
+            lv_obj_del(date_type_obj[i].obj_date_label);
+            lv_obj_del(date_type_obj[i].obj_date_btn);
+        }
+
+        lv_obj_del(obj_addition_date_text_middle_bg);
+
+        lv_obj_del(label_addition_date_text_return);
+        lv_obj_del(btn_addition_date_text_return);
+        lv_obj_del(btn_addition_date_confirm);
+        lv_obj_del(label_addition_date_confirm);
+    }
+}
+
+
+static void button_date_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_date_return_event_cb\n");
+        buzzer_enable = 1;
 
         lv_obj_del(obj_addition_date_text_head_bg);
         lv_obj_del(label_addition_date_text_head);
@@ -15778,7 +18000,7 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_addition_date_text_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_addition_date_text_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_addition_date_text_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_addition_date_text_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_addition_date_text_return, button_date_return_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_IMG_DECLARE(confirm);
         btn_addition_date_confirm = lv_imgbtn_create(lv_scr_act());
@@ -15804,6 +18026,37 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
 }
 
 
+static void button_time_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_time_return_event_cb\n");
+
+        buzzer_enable = 1;
+
+        lv_obj_del(obj_addition_date_text_head_bg);
+        lv_obj_del(label_addition_date_text_head);
+
+        for (i = 0; i < TIME_TYPE_NUMBER; i++)
+        {
+            lv_obj_del(date_type_obj[i].obj_date_label);
+            lv_obj_del(date_type_obj[i].obj_date_btn);
+        }
+
+        lv_obj_del(obj_addition_date_text_middle_bg);
+
+        lv_obj_del(label_addition_date_text_return);
+        lv_obj_del(btn_addition_date_text_return);
+        lv_obj_del(btn_addition_date_confirm);
+        lv_obj_del(label_addition_date_confirm);
+    }
+}
+
+
+
 static void button_time_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -15812,6 +18065,9 @@ static void button_time_confirm_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("button_time_confirm_event_cb\n");
+
+        buzzer_enable = 1;
+
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_addition_date_middle, lv_label_get_text(date_type_obj[g_time_type].obj_date_label));
         lv_label_set_text(label_btn_label_addition_time, lv_label_get_text(date_type_obj[g_time_type].obj_date_label));
@@ -15930,7 +18186,7 @@ static void button_time_type_event_cb(lv_event_t* e)
             lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
             lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
             lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
-            lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(btn_keyboard_return, button_time_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
 
             LV_IMG_DECLARE(confirm);
             btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
@@ -16084,7 +18340,7 @@ static void btn_addition_time_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_addition_date_text_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_addition_date_text_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_addition_date_text_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_addition_date_text_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_addition_date_text_return, button_time_return_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_IMG_DECLARE(confirm);
         btn_addition_date_confirm = lv_imgbtn_create(lv_scr_act());
@@ -16504,9 +18760,9 @@ static void button_date_time_word_size_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 200)
             {
-                i = 150;
+                i = 200;
             }
         }
 
@@ -16878,11 +19134,11 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int i = 0;
     int word_space = 0;
     int word_size = 0;
-    int x_size = 0;
+    //int x_size = 0;
     //int y_size = 0;
     int win_content_child_num = 0;
     //char tempString[128] = { 0 };
@@ -16914,15 +19170,14 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
 
             printf("i=%d\n\r",i);
 
-            sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
+            //sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
             data_structure[win_content_child_num].data.date_time.typeface = i;
 
             //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
             //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
             //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-            printf("%s\n", temp_typeface);
-
-            data_structure[win_content_child_num].data.date_time.info.name = temp_typeface;
+            //printf("%s\n", temp_typeface);
+            //data_structure[win_content_child_num].data.date_time.info.name = temp_typeface;
 
             word_size = atoi(lv_label_get_text(label_btn_addition_date_word_size));
 
@@ -16931,9 +19186,9 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
                 word_size = 12;
             }
 
-            if (word_size > 200)
+            if (word_size > WORD_MAX_SIZE)
             {
-                word_size = 200;
+                word_size = WORD_MAX_SIZE;
             }
 
             data_structure[win_content_child_num].data.date_time.info.weight = word_size;
@@ -16952,23 +19207,6 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
                 data_structure[win_content_child_num].data.date_time.info.style |= FT_FONT_STYLE_BOLD;
             }
 
-            lv_ft_font_init(&data_structure[win_content_child_num].data.date_time.info);
-
-            lv_point_t text_size;
-            lv_txt_get_size(&text_size, lv_label_get_text(label_addition_date_middle), data_structure[win_content_child_num].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-
-            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
-            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-
-            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
-            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
-            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
-            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
-
-            lv_style_init(&data_structure[win_content_child_num].data.date_time.style);
-            lv_style_set_text_font(&data_structure[win_content_child_num].data.date_time.style, data_structure[win_content_child_num].data.date_time.info.font);
-
             word_space = atoi(lv_label_get_text(label_btn_addition_date_word_space));
 
             if (word_space < 0)
@@ -16980,18 +19218,37 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
             {
                 word_space = 100;
             }
+
+            //lv_ft_font_init(&data_structure[win_content_child_num].data.date_time.info);
+            //lv_point_t text_size;
+            //lv_txt_get_size(&text_size, lv_label_get_text(label_addition_date_middle), data_structure[win_content_child_num].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            lv_font_t* temp_font = font_list_get(i, word_size, data_structure[win_content_child_num].data.date_time.info.style);
+            lv_point_t text_size;
+            lv_txt_get_size(&text_size, lv_label_get_text(label_addition_date_middle), temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_style_init(&data_structure[win_content_child_num].data.date_time.style);
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.date_time.style, temp_font);
+
             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
-            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-            printf("x_size=%d\n\r", x_size);
-
-            lv_obj_set_size(temp_obj, x_size, text_size.y);
+            lv_obj_set_size(temp_obj, text_size.x, text_size.y);
             lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.date_time.spin * 10, 0);
 
             if (data_structure[win_content_child_num].data.date_time.spin != 0)
             {
-                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 200, 70);
+            }
+            else
+            {
+                lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
             }
 
             lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.date_time.style, word_space);
@@ -17186,6 +19443,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
     //int now_year = 2025;
     //int now_month = 1;
     //int now_day = 10;
+    char temp_str[20] = { 0 };
 
     code = lv_event_get_code(e);
 
@@ -17231,7 +19489,8 @@ static void button_addition_date_event_cb(lv_event_t* e)
         lv_obj_set_height(label_addition_date_middle, 108);
         lv_obj_set_style_text_font(label_addition_date_middle, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_addition_date_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_addition_date_middle, "");
+        sprintf(temp_str, "%04d/%02d/%02d", g_system_time[0] + 2000, g_system_time[1],  g_system_time[2]);
+        lv_label_set_text(label_addition_date_middle, temp_str);
         lv_obj_set_style_bg_color(label_addition_date_middle, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
         lv_obj_align(label_addition_date_middle, LV_ALIGN_TOP_LEFT, 0, 24);
 
@@ -17272,7 +19531,8 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_btn_addition_date_text = lv_label_create(btn_addition_date_text);
         lv_obj_set_style_text_font(label_btn_addition_date_text, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_date_text, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_date_text, "");
+        //sprintf(temp_str, "%04d/%02d/%02d", g_system_time[0] + 2000, g_system_time[1],  g_system_time[2]);
+        lv_label_set_text(label_btn_addition_date_text, temp_str);
         lv_obj_align(label_btn_addition_date_text, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_date_text, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_date_text, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17281,7 +19541,6 @@ static void button_addition_date_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_opa(label_btn_addition_date_text, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(label_btn_addition_date_text, lv_color_hex(0xffffff), LV_PART_MAIN);
         lv_obj_add_event_cb(btn_addition_date_text, btn_addition_date_text_event_cb, LV_EVENT_CLICKED, NULL);
-
 
 
         LV_IMG_DECLARE(typeface);
@@ -17316,7 +19575,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         //k = lv_obj_get_index(temp_focused_obj);
         //lv_label_set_text(label_file_management_typeface_label, typeface_name[new_text.text_content[k].typeface]);
         //printf("typeface=%d\n\r", new_text.text_content[k].typeface);
-        lv_label_set_text(label_btn_addition_date_typeface,"");
+        lv_label_set_text(label_btn_addition_date_typeface,"常用宋体");
         lv_obj_align(label_btn_addition_date_typeface, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_date_typeface, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_date_typeface, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17357,7 +19616,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_btn_addition_date_word_size = lv_label_create(btn_addition_date_word_size);
         lv_obj_set_style_text_font(label_btn_addition_date_word_size, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_date_word_size, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_date_word_size, "");
+        lv_label_set_text(label_btn_addition_date_word_size, "48");
         lv_obj_align(label_btn_addition_date_word_size, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_date_word_size, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_date_word_size, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17425,7 +19684,8 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_btn_label_addition_time = lv_label_create(btn_label_addition_time);
         lv_obj_set_style_text_font(label_btn_label_addition_time, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_label_addition_time, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_label_addition_time, "");
+        sprintf(temp_str, "%02d:%02d:%02d", g_system_time[3], g_system_time[4], g_system_time[5]);
+        lv_label_set_text(label_btn_label_addition_time, temp_str);
         lv_obj_align(label_btn_label_addition_time, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_label_addition_time, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_label_addition_time, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17467,7 +19727,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_btn_addition_date_word_space = lv_label_create(btn_addition_date_word_space);
         lv_obj_set_style_text_font(label_btn_addition_date_word_space, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_date_word_space, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_date_word_space, "");
+        lv_label_set_text(label_btn_addition_date_word_space, "000");
         lv_obj_align(label_btn_addition_date_word_space, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_date_word_space, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_date_word_space, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17509,7 +19769,7 @@ static void button_addition_date_event_cb(lv_event_t* e)
         label_btn_addition_date_spin = lv_label_create(btn_addition_date_spin);
         lv_obj_set_style_text_font(label_btn_addition_date_spin, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_date_spin, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_date_spin, "");
+        lv_label_set_text(label_btn_addition_date_spin, "0°");
         lv_obj_align(label_btn_addition_date_spin, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_date_spin, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_date_spin, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -17771,6 +20031,8 @@ static void picture_change_event_cb(lv_event_t* e)
 
     lv_table_get_selected_cell(obj, &row, &col);
     printf("row=%d\n\r", row);
+
+    buzzer_enable = 1;
 
     g_row = row;
     lv_obj_invalidate(obj);  // 刷新表格，触发重绘
@@ -18040,6 +20302,27 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
 }
 
 
+static void button_picture_search_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_picture_search_keyboard_return_event_cb\n");
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+        lv_obj_del(table_addition_picture_1);
+    }
+}
+
+
 static void btn_addition_picture_search_event_cb(lv_event_t* e)
 {
      lv_event_code_t code;
@@ -18134,7 +20417,7 @@ static void btn_addition_picture_search_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_keyboard_return, button_picture_search_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_IMG_DECLARE(confirm);
         btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
@@ -18229,8 +20512,9 @@ static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
     lv_event_code_t code;
     code = lv_event_get_code(e);
     int win_content_child_num = 0;
-    //char tempString[128] = { 0 };
-    char picture_name[100] = { 0 };
+    char tempString[100] = { 0 };
+    char picture_name[128] = { 0 };
+    char picture_name_1[100] = { 0 };
 
     if (code == LV_EVENT_CLICKED)
     {
@@ -18256,31 +20540,62 @@ static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
 
             // 假设你有一个图片对象
             lv_obj_t* img_obj = lv_img_create(temp_obj);
-            sprintf(picture_name, "A:/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+            sprintf(picture_name, "/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+            
+            memcpy(tempString,picture_name,sizeof(tempString));
+
+            if(strcmp(lv_table_get_cell_value(table_addition_picture_1, g_row, 1),"png") != 0)
+            {
+                int width, height, channels;
+                unsigned char *data = stbi_load(picture_name, &width, &height, &channels, 0);
+                if (!data) 
+                {
+                    printf("错误：无法加载图片 %s\n", picture_name);
+                }
+
+                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                sprintf(picture_name_1, "/media/qr_bar_bmp/%s.png", lv_table_get_cell_value(table_addition_picture_1, g_row, 0));
+            
+                // 步骤 2：将数据保存为 PNG
+                int success = stbi_write_png(picture_name_1, width, height, channels, data, width * channels);
+                if (!success) 
+                {
+                    printf("错误：保存 PNG 失败\n");
+                } 
+                else 
+                {
+                    printf("PNG 保存成功：%s\n", picture_name_1);
+                }
+
+                sprintf(picture_name, "A:%s", picture_name_1);
+
+                stbi_image_free(data);
+            }
+            else
+            {
+                sprintf(picture_name, "A:%s", picture_name_1);
+            }
+            
             lv_img_set_src(img_obj, picture_name);
+            lv_obj_center(img_obj);
+            lv_img_header_t header;
+            lv_res_t res = lv_img_decoder_get_info(picture_name, &header);  // 直接传入文件路径
 
-            lv_obj_align(img_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+            if (res == LV_RES_OK)
+            {
+                printf("PNG: %dx%d\n", header.w, header.h);
+            }
+            else
+            {
+                printf("lv_img_decoder_get_info error\n");
+            }
 
-            // 获取图片对象
-            lv_img_t* img = (lv_img_t*)img_obj;
+            lv_obj_set_size(temp_obj, header.w, header.h);
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
 
-            // 获取图片的源文件
-            lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img->src;
-
-            // 获取图片的宽和高
-            lv_coord_t width = img_dsc->header.w;
-            lv_coord_t height = img_dsc->header.h;
-
-            // 打印宽和高
-            printf("Image width: %d, height: %d\n", width, height);
-
-   
-            lv_obj_set_size(temp_obj, width, height);
-
-            sprintf(data_structure[win_content_child_num].data.picture.text,"%s", picture_name);
-
-            printf("text=%s\n\r", data_structure[win_content_child_num].data.picture.text);
-
+            sprintf(data_structure[win_content_child_num].data.picture.text_1,"%s", tempString);
+            sprintf(data_structure[win_content_child_num].data.picture.text_2,"%s", picture_name_1);
             data_structure[win_content_child_num].type = TYPE_PITCTURE;
 
             data_structure[win_content_child_num].data.picture.size = 256;
@@ -18458,7 +20773,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
 
 
         obj_addition_picture_btn_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_picture_btn_bg, 160, 98);
+        lv_obj_set_size(obj_addition_picture_btn_bg, 160, 97);
         lv_obj_align(obj_addition_picture_btn_bg, LV_ALIGN_TOP_LEFT, 0, 174);
         lv_obj_set_style_border_width(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
@@ -18494,13 +20809,13 @@ static void button_addition_picture_event_cb(lv_event_t* e)
 
         lv_table_set_col_width(table_addition_picture, 0, 115);
         lv_table_set_col_width(table_addition_picture, 1, 50);
-        lv_table_set_col_width(table_addition_picture, 2, 56);
-        lv_table_set_col_width(table_addition_picture, 3, 76);
+        lv_table_set_col_width(table_addition_picture, 2, 51);
+        lv_table_set_col_width(table_addition_picture, 3, 81);
 
 
         obj_addition_table_bg = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(obj_addition_table_bg, 300, 198);
-        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 160, 48);
+        lv_obj_set_size(obj_addition_table_bg, 300, 202);
+        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 160, 47);
         lv_obj_set_style_border_width(obj_addition_table_bg, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
         lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
@@ -18523,10 +20838,10 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
 
-        lv_table_set_col_width(table_addition_picture_1, 0, 120);
+        lv_table_set_col_width(table_addition_picture_1, 0, 115);
         lv_table_set_col_width(table_addition_picture_1, 1, 45);
-        lv_table_set_col_width(table_addition_picture_1, 2, 55);
-        lv_table_set_col_width(table_addition_picture_1, 3, 75);
+        lv_table_set_col_width(table_addition_picture_1, 2, 45);
+        lv_table_set_col_width(table_addition_picture_1, 3, 89);
 
 
 #if 0
@@ -18774,6 +21089,9 @@ static void update_preview_QR_bar_code(void)
      lv_obj_t* img = NULL;
      char bmp_name[64]={0};
     char bmp_name_1[100]={0};
+    uint32_t child_count;
+    unsigned char *data = NULL;
+    int success;
 
     str_len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
     if (str_len == 0)
@@ -18797,13 +21115,13 @@ static void update_preview_QR_bar_code(void)
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
@@ -18833,12 +21151,14 @@ static void update_preview_QR_bar_code(void)
                     my_symbol->option_2 = 5;
                 }
 
+#if 0
                 if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                 {
                     my_symbol->show_hrt = 1;
                     memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                     //figure_borders |= 0x01;
                 }
+#endif
 
                 if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                 {
@@ -18860,7 +21180,9 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                //my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                //my_symbol->scale = (float)height_len/2/(float)height;
+                my_symbol->scale = (float)((float)90.0/(float)height);
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -18911,23 +21233,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);
-#endif
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -18940,18 +21257,27 @@ static void update_preview_QR_bar_code(void)
                 my_symbol->symbology = BARCODE_PDF417;   
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                    //figure_borders |= 0x02;
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -18963,7 +21289,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                //my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                my_symbol->scale = (float)90.0/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19014,22 +21341,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
 
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);
-#endif
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19043,18 +21366,27 @@ static void update_preview_QR_bar_code(void)
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                    //figure_borders |= 0x02;
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19066,7 +21398,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                //my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                my_symbol->scale = (float)90.0/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19117,23 +21450,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);
-#endif
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+                
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19147,18 +21475,27 @@ static void update_preview_QR_bar_code(void)
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                    //figure_borders |= 0x02;
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19170,7 +21507,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                //my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                my_symbol->scale = (float)90.0/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19239,6 +21577,12 @@ static void update_preview_QR_bar_code(void)
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
 
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
+
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 sprintf(bmp_name_1,"A:%s",bmp_name);
@@ -19260,18 +21604,40 @@ static void update_preview_QR_bar_code(void)
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                    //figure_borders |= 0x01;
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                    //figure_borders |= 0x02;
+                }
+
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19283,7 +21649,9 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                //my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                //   my_symbol->scale = (float)height_len/2/(float)height;
+                my_symbol->scale = (float)((float)90.0/(float)height);
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19333,24 +21701,19 @@ static void update_preview_QR_bar_code(void)
                             pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
                         }
                     }
-                }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);  
-#endif     
+                } 
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19364,18 +21727,39 @@ static void update_preview_QR_bar_code(void)
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                    //figure_borders |= 0x01;
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                    //figure_borders |= 0x02;
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19387,7 +21771,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)90.0/(float)height);
+                 //   my_symbol->scale = (float)height_len/2/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19438,22 +21823,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
 
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);   
-#endif
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19468,18 +21849,36 @@ static void update_preview_QR_bar_code(void)
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19491,7 +21890,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)90.0/(float)height);
+                 //   my_symbol->scale = (float)height_len/2/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19542,23 +21942,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);    
-#endif
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19568,27 +21963,58 @@ static void update_preview_QR_bar_code(void)
 
                 break;
             case 4:
+                if(str_len != 40)
+                {
+                    ZBarcode_Delete(my_symbol);
+                    break;                
+                }
+
+                if(check_string_format(lv_label_get_text(label_btn_addition_QR_code_text)) != 0)
+                {
+                    ZBarcode_Delete(my_symbol);
+                    break;                  
+                }
+
                 my_symbol->symbology = BARCODE_EAN128;
                 my_symbol->input_mode |= GS1PARENS_MODE;
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
 
-                strcpy(my_symbol->outfile, "out.bmp");
-                //ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
-                ZBarcode_Encode(my_symbol, (unsigned char *)"(01)98898765432106(3202)012345(15)991231", 0);
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
 
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                }
+
+                printf("%s\n\r",lv_label_get_text(label_btn_addition_QR_code_text));
+
+                strcpy(my_symbol->outfile, "out.bmp");
+                ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
+                //ZBarcode_Encode(my_symbol, (unsigned char *)"(01)98898765432106(3202)012345(15)991231", 0);
 
                 ZBarcode_Print(my_symbol, 0);
 
@@ -19597,7 +22023,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)90.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)118.0/(float)height);
+
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19649,17 +22076,6 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);    
-#endif 
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -19667,30 +22083,83 @@ static void update_preview_QR_bar_code(void)
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
 
+                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                if (!data) 
+                {
+                    printf("错误：无法加载图片 %s\n", bmp_name);
+                }
+                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                
+                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                if (!success) 
+                {
+                    printf("错误：保存 PNG 失败\n");
+                } 
+                else
+                {
+                    printf("PNG 保存成功：%s\n", bmp_name);
+                }
+
+                // 释放内存
+                stbi_image_free(data);
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
+
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
                 sprintf(bmp_name_1,"A:%s",bmp_name);
                 lv_img_set_src(img, bmp_name_1);
-                lv_obj_center(img);          
+                lv_img_set_zoom(img,150);
+                lv_obj_center(img);      
+
 
                 break;
             case 5:
+                if(str_len != 11)
+                {
+                    ZBarcode_Delete(my_symbol);
+                    break;                
+                }
                 my_symbol->symbology = BARCODE_UPCA;
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19702,7 +22171,9 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)90.0/(float)height);
+
+                //    my_symbol->scale = (float)height_len/2/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19752,24 +22223,19 @@ static void update_preview_QR_bar_code(void)
                             pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
                         }
                     }
-                }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);    
-#endif    
+                }  
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19779,22 +22245,46 @@ static void update_preview_QR_bar_code(void)
 
                 break;
             case 6:
+                if(str_len != 7)
+                {
+                    ZBarcode_Delete(my_symbol);
+                    break;                
+                }
+
                 my_symbol->symbology = BARCODE_UPCE;
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19806,7 +22296,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)90.0/(float)height);
+                //    my_symbol->scale = (float)height_len/2/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19857,23 +22348,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);    
-#endif
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19883,22 +22369,47 @@ static void update_preview_QR_bar_code(void)
 
                 break;
             case 7:
+                if(str_len != 13)
+                {
+                    ZBarcode_Delete(my_symbol);
+                    break;                
+                }
+
                 my_symbol->symbology = BARCODE_ITF14;
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -19910,7 +22421,8 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)90.0/(float)height);
+               //     my_symbol->scale = (float)height_len/2/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -19961,23 +22473,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img); 
-#endif  
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -19987,22 +22494,48 @@ static void update_preview_QR_bar_code(void)
 
                 break;
             case 8:
+
+                if(str_len > 40)
+                {
+                    ZBarcode_Delete(my_symbol);
+                    break;                
+                }
+
                 my_symbol->symbology = BARCODE_C25INTER;
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -20014,7 +22547,9 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)90.0/(float)height);
+
+                 //   my_symbol->scale = (float)height_len/2/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -20064,24 +22599,19 @@ static void update_preview_QR_bar_code(void)
                             pnew_data[index * 4 + 3] = 255; // A (alpha channel, full opacity)
                         }
                     }
-                }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img);  
-#endif   
+                } 
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -20091,22 +22621,46 @@ static void update_preview_QR_bar_code(void)
 
                 break;
             case 9:
+
+                if(str_len != 13)
+                {
+                    ZBarcode_Delete(my_symbol);
+                    break;                
+                }
                 my_symbol->symbology = BARCODE_EAN14;
 
                 height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                if (height_len > 100)
+                if (height_len > QR_BAR_MAX_HIGHT)
                 {
-                    height_len = 100;
+                    height_len = QR_BAR_MAX_HIGHT;
                 }
-                else if (height_len < 50)
+                else if (height_len < QR_BAR_MIN_HIGHT)
                 {
-                    height_len = 50;
+                    height_len = QR_BAR_MIN_HIGHT;
                 }
 
                 printf("height_len=%u\n\r",height_len);
 
                 my_symbol->scale = 1;
+
+                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->show_hrt = 1;
+                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                }
+                else
+                {
+                    my_symbol->show_hrt = 0;
+                }
+
+                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                {
+                    my_symbol->output_options = BARCODE_BOX;
+                    my_symbol->whitespace_width = 3;
+                    my_symbol-> whitespace_height = 3; 
+                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                }
 
                 strcpy(my_symbol->outfile, "out.bmp");
                 ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -20118,7 +22672,9 @@ static void update_preview_QR_bar_code(void)
                 printf("height=%d\n\r", height);
                 printf("channels=%d\n\r", channels);
     
-                my_symbol->scale = (float)((float)100.0*(float)height_len/(float)100.0/(float)height);
+                my_symbol->scale = (float)((float)90.0/(float)height);
+
+                 //   my_symbol->scale = (float)height_len/2/(float)height;
                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                 strcpy(my_symbol->outfile, "out.bmp");
@@ -20169,23 +22725,18 @@ static void update_preview_QR_bar_code(void)
                         }
                     }
                 }
-#if 0
-                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                // 使用data进行图像处理...
-                lv_mem_free(pnew_data);
-                stbi_image_free(pdata); // 释放内存
-
-                //显示图像
-                img = lv_img_create(addition_QR_code_middle_bg);
-                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                lv_obj_center(img); 
-#endif  
 
                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                 // 使用data进行图像处理...
                 lv_mem_free(pnew_data);
                 stbi_image_free(pdata); // 释放内存
+
+                child_count = lv_obj_get_child_cnt(addition_QR_code_middle_bg);
+                if(child_count > 0)
+                {
+                    lv_obj_del(lv_obj_get_child(addition_QR_code_middle_bg,0));
+                }
 
                 //显示图像
                 img = lv_img_create(addition_QR_code_middle_bg);
@@ -20208,6 +22759,7 @@ static void button_keyboard_confirm_QR_code_text_event_cb(lv_event_t* e)
         buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_addition_QR_code_text, lv_textarea_get_text(textarea_text_keyboard));
+        lv_obj_set_style_text_opa(label_btn_addition_QR_code_text, LV_OPA_COVER, LV_STATE_DEFAULT);
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
         lv_obj_del(textarea_text_keyboard);
@@ -20216,8 +22768,31 @@ static void button_keyboard_confirm_QR_code_text_event_cb(lv_event_t* e)
         lv_obj_del(btn_keyboard_confirm);
         lv_obj_del(label_keyboard_return);
         lv_obj_del(btn_keyboard_return);
-        QR_or_bar_code_flag = 0;
         update_preview_QR_bar_code();
+        addition_QR_bar_updata();
+    }
+}
+
+
+static void button_keyboard_return_QR_code_text_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_keyboard_return_QR_code_text_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        addition_QR_bar_updata();
     }
 }
 
@@ -20314,7 +22889,7 @@ static void btn_addition_QR_code_text_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_QR_code_text_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_IMG_DECLARE(confirm);
         btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
@@ -20371,6 +22946,35 @@ static void button_qr_code_event_cb(lv_event_t* e)
 }
 
 
+static void button_QR_code_type_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_QR_code_type_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+        lv_obj_del(label_typeface_head);
+
+        for (i = 0; i < QR_CODE_NUMBER; i++)
+        {
+            lv_obj_del(typeface_obj[i].obj_typeface_label);
+            lv_obj_del(typeface_obj[i].obj_typeface_btn);
+        }
+
+        lv_obj_del(win_content_typeface);
+        lv_obj_del(win_obj_typeface);
+    }
+}
+
+
 static void button_QR_code_type_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -20396,6 +23000,8 @@ static void button_QR_code_type_confirm_event_cb(lv_event_t* e)
 
         lv_obj_del(win_content_typeface);
         lv_obj_del(win_obj_typeface);
+        QR_or_bar_code_flag = 0;
+
         update_preview_QR_bar_code();
     }
 }
@@ -20495,7 +23101,7 @@ static void btn_addition_QR_code_QR_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_QR_code_type_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -20537,13 +23143,13 @@ static void button_QR_code_height_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 100)
+            if (i > QR_BAR_MAX_HIGHT)
             {
-                i = 100;
+                i = QR_BAR_MAX_HIGHT;
             }
-            else if (i < 50)
+            else if (i < QR_BAR_MIN_HIGHT)
             {
-                i = 50;
+                i = QR_BAR_MIN_HIGHT;
             }
         }
 
@@ -20763,6 +23369,34 @@ static void button_bar_code_event_cb(lv_event_t* e)
 }
 
 
+static void button_bar_code_type_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_bar_code_type_return_event_cb\n");
+
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+        lv_obj_del(label_typeface_head);
+
+        for (i = 0; i < QR_CODE_NUMBER; i++)
+        {
+            lv_obj_del(typeface_obj[i].obj_typeface_label);
+            lv_obj_del(typeface_obj[i].obj_typeface_btn);
+        }
+
+        lv_obj_del(win_content_typeface);
+        lv_obj_del(win_obj_typeface);
+    }
+}
 
 
 static void button_bar_code_type_confirm_event_cb(lv_event_t* e)
@@ -20893,7 +23527,7 @@ static void btn_addition_QR_code_bar_code_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_bar_code_type_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -21153,6 +23787,7 @@ static void btn_addition_QR_code_return_event_cb(lv_event_t* e)
         lv_obj_del(label_addition_QR_code_QR);
         lv_obj_del(img_addition_QR_code);
         lv_obj_del(label_btn_addition_QR_code_text);
+        lv_obj_del(label_btn_addition_QR_code_text_1);
         lv_obj_del(btn_addition_QR_code_text);
         lv_obj_del(label_addition_QR_code_text);
         lv_obj_del(img_addition_QR_code_text);
@@ -21188,6 +23823,45 @@ static void btn_addition_QR_code_return_event_cb(lv_event_t* e)
 }
 
 
+
+
+int check_string_format(const char *str) {
+    // 定义正则表达式：
+    // ^\\(01\\)[0-9]{14}\\([0-9]{4}\\)[0-9]{6}\\([0-9]{2}\\)[0-9]{6}$
+    // 解释：
+    // ^ 开头
+    // \\(01\\) 固定匹配 (01)
+    // [0-9]{14} 匹配 14 位数字，如 98898765432106
+    // \\([0-9]{4}\\) 匹配 4 位数字的括号部分，如 (3202)
+    // [0-9]{6} 匹配 6 位数字，如 012345
+    // \\([0-9]{2}\\) 匹配 2 位数字的括号部分，如 (15)
+    // [0-9]{6} 匹配 6 位数字，如 991231
+    // $ 结尾
+    const char *pattern = "^\\(01\\)[0-9]{14}\\([0-9]{4}\\)[0-9]{6}\\([0-9]{2}\\)[0-9]{6}$";
+    
+    regex_t regex;
+    int ret;
+    
+    // 编译正则表达式
+    if (regcomp(&regex, pattern, REG_EXTENDED) != 0) {
+        fprintf(stderr, "无法编译正则表达式\n");
+        return -1;
+    }
+    
+    // 执行匹配
+    ret = regexec(&regex, str, 0, NULL, 0);
+    regfree(&regex); // 释放正则表达式
+    
+    if (ret == 0) {
+        return 0; // 匹配成功
+    } else {
+        return -1; // 匹配失败
+    }
+}
+
+
+
+
 static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -21202,6 +23876,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
     lv_obj_t* img = NULL;
     char bmp_name[100] = {0};
     char bmp_name_1[128] = {0};
+    unsigned char *data = NULL;
+    int success;
 
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
@@ -21249,13 +23925,13 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -21288,9 +23964,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         }
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
-
+#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
@@ -21298,6 +23972,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
+#endif
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
@@ -21320,7 +23995,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)width);
+                         //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -21379,11 +24055,35 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
 
                         break;
                     case 1:
@@ -21408,13 +24108,13 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -21424,8 +24124,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         my_symbol->scale = 1;
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
 #if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
@@ -21435,6 +24133,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
 
+#endif
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->output_options = BARCODE_BOX;
@@ -21444,21 +24143,18 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
                         ZBarcode_Print(my_symbol, 0);
-                        //ZBarcode_Delete(my_symbol);
-
             
                         pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                         printf("width=%d\n\r", width);
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -21511,18 +24207,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        lv_obj_t* img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
 
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -21530,11 +24214,35 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
 
                         break;
                     case 2:
@@ -21542,13 +24250,13 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -21559,7 +24267,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
 #if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
@@ -21568,6 +24275,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
+#endif
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
@@ -21578,20 +24286,18 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
                         ZBarcode_Print(my_symbol, 0);
-                        //ZBarcode_Delete(my_symbol);
 
                         pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                         printf("width=%d\n\r", width);
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -21645,24 +24351,33 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
 
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
-
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
+
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
@@ -21670,19 +24385,21 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
+
                         break;
                     case 3:
                         my_symbol->symbology = BARCODE_HANXIN;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -21692,8 +24409,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         my_symbol->scale = 1;
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
 #if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
@@ -21702,6 +24417,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
+#endif
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
@@ -21712,20 +24428,19 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
                         ZBarcode_Print(my_symbol, 0);
-                        //ZBarcode_Delete(my_symbol);
 
                         pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                         printf("width=%d\n\r", width);
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                         //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -21779,23 +24494,33 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
                         
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
+
+                        data = stbi_load(bmp_name, &width, &height, &channels, 1);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
@@ -21803,12 +24528,13 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
+
                         break;
                 }
             }
             else
-            {
-                
+            {               
                 data_structure[win_content_child_num].data.qr_bar.type = QR_or_bar_code_flag;
                 data_structure[win_content_child_num].data.qr_bar.symbology = bar_code_type;
                 data_structure[win_content_child_num].type = TYPE_BAR;
@@ -21817,17 +24543,24 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                 {
                     case 0:
                     default:
+                    {
+                        if(str_len > 80)
+                        {
+                             ZBarcode_Delete(my_symbol);
+                             break;
+                        }
+
                         my_symbol->symbology = BARCODE_CODE39;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -21836,16 +24569,21 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         my_symbol->scale = 1;
 
-                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len + 1);
 
                         //figure_borders = 0;
-#if 0
+
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
-                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),str_len + 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
+                             data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -21854,10 +24592,12 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             my_symbol->whitespace_width = 3;
                             my_symbol-> whitespace_height = 3; 
                             my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                            //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
+                        else
+                        {
+                            data_structure[win_content_child_num].data.qr_bar.borders = 0;
+                        }
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -21870,7 +24610,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                        //   my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -21923,17 +24664,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
 
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -21941,24 +24671,55 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
+
                         break;
+                    }
                     case 1:
+                    {
+                        if(str_len > 80)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;
+                        }
                         my_symbol->symbology = BARCODE_CODE128;
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -21967,16 +24728,17 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         my_symbol->scale = 1;
 
-                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
-                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),str_len + 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -21988,7 +24750,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
+
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len+1);
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -22001,7 +24764,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                      //     my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22055,23 +24819,33 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
 
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
+
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
@@ -22079,22 +24853,27 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
-
-
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
                         break;
+                    }
                     case 2:
                     case 3:
+                        if(str_len > 13)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;
+                        }
                         my_symbol->symbology = BARCODE_EANX;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -22102,17 +24881,20 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         data_structure[win_content_child_num].data.qr_bar.height = height_len;
 
                         my_symbol->scale = 1;
+                                                
+                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len + 1);
 
-                        memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
-                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),str_len + 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -22124,20 +24906,19 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
+
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
                         ZBarcode_Print(my_symbol, 0);
-                        //ZBarcode_Delete(my_symbol);
 
                         pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                         printf("width=%d\n\r", width);
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22190,17 +24971,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
 
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -22208,25 +24978,62 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
+
                         break;
                     case 4:
+
+                        if(str_len != 40)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;                
+                        }
+
+                        if(check_string_format(lv_label_get_text(label_btn_addition_QR_code_text)) != 0)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;                  
+                        }
+                        
                         my_symbol->symbology = BARCODE_EAN128;
                         my_symbol->input_mode |= GS1PARENS_MODE;
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -22235,18 +25042,19 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         my_symbol->scale = 1;
 
-                        //memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -22258,8 +25066,10 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
+
                         strcpy(my_symbol->outfile, "out.bmp");
+
+                        printf("%s\n\r",lv_label_get_text(label_btn_addition_QR_code_text));
 
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
                         //ZBarcode_Encode(my_symbol, (unsigned char *)"(01)98898765432106(3202)012345(15)991231", 0);
@@ -22272,7 +25082,10 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+
+                        //my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                        
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22325,17 +25138,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
 
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -22343,25 +25145,55 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
+
                         break;
                     case 5:
+
+                        if(str_len != 11)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;                
+                        }
                         my_symbol->symbology = BARCODE_UPCA;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -22372,14 +25204,17 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -22391,7 +25226,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -22404,7 +25238,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                        //   my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22458,23 +25293,33 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
 
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
+
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
@@ -22482,20 +25327,28 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
 
                         break;
                     case 6:
+
+                        if(str_len != 7)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;                
+                        }
+
                         my_symbol->symbology = BARCODE_UPCE;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -22506,14 +25359,17 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -22525,20 +25381,19 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
 
                         ZBarcode_Print(my_symbol, 0);
-                        //ZBarcode_Delete(my_symbol);
 
                         pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                         printf("width=%d\n\r", width);
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+        
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22592,42 +25447,59 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
 
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);        
-#endif
-
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
                         break;
                     case 7:
+                        if(str_len != 13)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;                
+                        }
                         my_symbol->symbology = BARCODE_ITF14;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -22638,14 +25510,17 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -22657,7 +25532,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -22670,7 +25544,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                         //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22724,22 +25599,33 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
 
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
+
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
@@ -22747,19 +25633,26 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
+
                         break;
                     case 8:
+                        if(str_len > 40)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;                
+                        }
                         my_symbol->symbology = BARCODE_C25INTER;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -22770,14 +25663,17 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -22789,7 +25685,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -22802,7 +25697,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                        //   my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22855,41 +25751,60 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
 
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
                         break;
                     case 9:
+                        if(str_len != 13)
+                        {
+                            ZBarcode_Delete(my_symbol);
+                            break;                
+                        }
                         my_symbol->symbology = BARCODE_EAN14;
 
-                                                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -22900,14 +25815,18 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
+
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                            my_symbol->show_hrt = 0;
+                            data_structure[win_content_child_num].data.qr_bar.figure = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -22919,7 +25838,6 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -22932,7 +25850,8 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                        //   my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double) my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -22986,23 +25905,33 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
 
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
+
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
@@ -23010,9 +25939,13 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        data_structure[win_content_child_num].data.qr_bar.size  = 256;
+
                         break;
                 }
             }
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
         }
 
         lv_obj_del(btn_addition_QR_code_confirm);
@@ -23043,6 +25976,7 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
         lv_obj_del(label_addition_QR_code_QR);
         lv_obj_del(img_addition_QR_code);
         lv_obj_del(label_btn_addition_QR_code_text);
+        lv_obj_del(label_btn_addition_QR_code_text_1);
         lv_obj_del(btn_addition_QR_code_text);
         lv_obj_del(label_addition_QR_code_text);
         lv_obj_del(img_addition_QR_code_text);
@@ -23074,6 +26008,22 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
         lv_obj_del(btn_addition_more_functions);
         lv_obj_del(label_btn_addition_more_functions);
         lv_obj_del(btn_addition_return);
+    }
+}
+
+void addition_QR_bar_updata(void)
+{
+    int len = strlen(lv_label_get_text(label_btn_addition_QR_code_text));
+    printf("len=%u\n\r", len);
+    if (len == 0)
+    {
+        lv_obj_set_style_bg_opa(label_btn_addition_QR_code_text, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_clear_flag(label_btn_addition_QR_code_text_1, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
+        lv_obj_set_style_bg_opa(label_btn_addition_QR_code_text, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_add_flag(label_btn_addition_QR_code_text_1, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -23159,14 +26109,39 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_set_style_text_font(label_btn_addition_QR_code_text, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_QR_code_text, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_label_set_text(label_btn_addition_QR_code_text, "");
+        lv_obj_set_style_text_opa(label_btn_addition_QR_code_text, LV_OPA_COVER, LV_STATE_DEFAULT);
         lv_obj_align(label_btn_addition_QR_code_text, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_style_border_width(btn_addition_QR_code_text, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
-        lv_obj_set_style_border_color(btn_addition_QR_code_text, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
-        lv_obj_set_style_border_opa(label_btn_addition_QR_code_text, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_border_width(label_btn_addition_QR_code_text, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(label_btn_addition_QR_code_text, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(label_btn_addition_QR_code_text, LV_OPA_TRANSP, LV_STATE_DEFAULT); /* 设置边框透明度 */
         lv_obj_set_style_radius(label_btn_addition_QR_code_text, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-        lv_obj_set_style_bg_opa(label_btn_addition_QR_code_text, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(label_btn_addition_QR_code_text, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_bg_color(label_btn_addition_QR_code_text, lv_color_hex(0xffffff), LV_PART_MAIN);
         lv_obj_add_event_cb(btn_addition_QR_code_text, btn_addition_QR_code_text_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+        label_btn_addition_QR_code_text_1 = lv_label_create(btn_addition_QR_code_text);
+        lv_obj_set_style_text_font(label_btn_addition_QR_code_text_1, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_btn_addition_QR_code_text_1, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_btn_addition_QR_code_text_1, "请输入文字");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_btn_addition_QR_code_text_1, "Please enter the text.");
+        }
+        lv_obj_set_style_text_opa(label_btn_addition_QR_code_text_1, LV_OPA_60, LV_STATE_DEFAULT);
+        lv_obj_align(label_btn_addition_QR_code_text_1, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_border_width(label_btn_addition_QR_code_text_1, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(label_btn_addition_QR_code_text_1, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(label_btn_addition_QR_code_text_1, LV_OPA_TRANSP, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(label_btn_addition_QR_code_text_1, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_opa(label_btn_addition_QR_code_text_1, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(label_btn_addition_QR_code_text_1, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_set_style_text_opa(label_btn_addition_QR_code_text_1, LV_OPA_60, LV_STATE_DEFAULT);
+
 
         LV_IMG_DECLARE(qr_code);
         img_addition_QR_code = lv_img_create(lv_scr_act());
@@ -23198,7 +26173,7 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_btn_addition_QR_code_QR = lv_label_create(btn_addition_QR_code_QR);
         lv_obj_set_style_text_font(label_btn_addition_QR_code_QR, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_QR_code_QR, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_QR_code_QR, "");
+        lv_label_set_text(label_btn_addition_QR_code_QR, "QR");
         lv_obj_align(label_btn_addition_QR_code_QR, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_QR_code_QR, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_QR_code_QR, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -23208,6 +26183,7 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_color(label_btn_addition_QR_code_QR, lv_color_hex(0xffffff), LV_PART_MAIN);
         lv_obj_add_event_cb(btn_addition_QR_code_QR, btn_addition_QR_code_QR_event_cb, LV_EVENT_CLICKED, NULL);
 
+        QR_code_type = 0;
 
         LV_IMG_DECLARE(word_size);
         img_addition_QR_code_height = lv_img_create(lv_scr_act());
@@ -23239,7 +26215,7 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_btn_addition_QR_code_height = lv_label_create(btn_addition_QR_code_height);
         lv_obj_set_style_text_font(label_btn_addition_QR_code_height, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_QR_code_height, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_QR_code_height, "");
+        lv_label_set_text(label_btn_addition_QR_code_height, "200");
         lv_obj_align(label_btn_addition_QR_code_height, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_QR_code_height, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_QR_code_height, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -23310,7 +26286,7 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         label_btn_addition_QR_code_bar_code = lv_label_create(btn_addition_QR_code_bar_code);
         lv_obj_set_style_text_font(label_btn_addition_QR_code_bar_code, &heiFont16_1, LV_STATE_DEFAULT);
         lv_obj_set_style_text_color(label_btn_addition_QR_code_bar_code, lv_color_hex(0x000000), LV_STATE_DEFAULT);
-        lv_label_set_text(label_btn_addition_QR_code_bar_code, "");
+        lv_label_set_text(label_btn_addition_QR_code_bar_code, "CODE128");
         lv_obj_align(label_btn_addition_QR_code_bar_code, LV_ALIGN_CENTER, 0, 0);
         lv_obj_set_style_border_width(label_btn_addition_QR_code_bar_code, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(label_btn_addition_QR_code_bar_code, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
@@ -23320,6 +26296,7 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_color(label_btn_addition_QR_code_bar_code, lv_color_hex(0xffffff), LV_PART_MAIN);
         lv_obj_add_event_cb(btn_addition_QR_code_bar_code, btn_addition_QR_code_bar_code_event_cb, LV_EVENT_CLICKED, NULL);
 
+        bar_code_type = 1;
 
         LV_IMG_DECLARE(width);
         img_addition_QR_code_width = lv_img_create(lv_scr_act());
@@ -23440,6 +26417,8 @@ static void btn_addition_QR_code_event_cb(lv_event_t* e)
             lv_label_set_text(label_addition_QR_code_confirm, "Confirm");
         }
         lv_obj_align(label_addition_QR_code_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+
+        addition_QR_bar_updata();
         
     }
 }
@@ -23540,7 +26519,7 @@ static void button_addition_event_cb(lv_event_t* e)
         {
             lv_label_set_text(label_btn_addition_picture, "Picture");
         }
-        lv_obj_align(label_btn_addition_picture, LV_ALIGN_TOP_LEFT, 220, 85);
+        lv_obj_align(label_btn_addition_picture, LV_ALIGN_TOP_LEFT, 225, 85);
         lv_obj_set_style_text_color(label_btn_addition_picture, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
         LV_IMG_DECLARE(img_QR_40);
@@ -23721,10 +26700,10 @@ static void button_delete_event_cb(lv_event_t* e)
     char date_time_str[64] ={0};
     int win_content_child_num = 0;
     //char file_name[128]={ 0 };
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int word_space = 0;
     //int word_size = 0;
-    int x_size = 0;
+    //int x_size = 0;
     //int y_size = 0;
     struct zint_symbol* my_symbol = NULL;
     int str_len;
@@ -23740,6 +26719,12 @@ static void button_delete_event_cb(lv_event_t* e)
     lv_obj_t* label1; 
     char bmp_name[64]={0};
     char bmp_name_1[80]={0};  
+    int success;
+    unsigned char * data = NULL;
+    lv_obj_t* img_obj = NULL;
+    lv_img_t* img_1 = NULL;
+    lv_img_dsc_t* img_dsc = NULL;
+    lv_font_t* temp_font = NULL;
 
     code = lv_event_get_code(e);
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
@@ -23750,26 +26735,15 @@ static void button_delete_event_cb(lv_event_t* e)
             k = lv_obj_get_index(temp_focused_obj);
             win_content_child_num = lv_obj_get_child_cnt(win_content);
 
-            //lv_style_reset(&new_text.text_content[k].style);
-            //lv_ft_font_destroy(&new_text.text_content[k].info.font);
-            // lv_obj_add_flag(temp_focused_obj, LV_OBJ_FLAG_HIDDEN);
-
             printf("k=%d child_num=%d\n", k, win_content_child_num);
-
 
             for (i = 0; i < win_content_child_num; i++)
             {
                 printf("\n\r###############################\n");
                 printf("i=%d\n", i);
-                //printf("text=%s\n", data_structure[i].data.word.text);
-                //printf("typeface=%d\n", data_structure[i].data.word.typeface);
-                //printf("italic_bold=%d\n", data_structure[i].data.word.italic_bold);
-                //printf("space=%d\n", data_structure[i].data.word.space);
-                //printf("size=%d\n", data_structure[i].data.word.size);
                 printf("x=%d\n", data_structure[i].x);
                 printf("y=%d\n", data_structure[i].y);
                 printf("type=%d\n", data_structure[i].type);
-                //printf("spin=%d\n", data_structure[i].data.word.spin);
             }
             
             //删除所有数据
@@ -23779,12 +26753,12 @@ static void button_delete_event_cb(lv_event_t* e)
                 {
                     //删除所有数据
                     lv_style_reset(&data_structure[i].data.word.style);
-                    lv_ft_font_destroy(data_structure[i].data.word.info.font);   
+                    //lv_ft_font_destroy(data_structure[i].data.word.info.font);   
                 }
                 else if(data_structure[i].type == TYPE_DATE)
                 {
                     lv_style_reset(&data_structure[i].data.date_time.style);
-                    lv_ft_font_destroy(data_structure[i].data.date_time.info.font);   
+                    //lv_ft_font_destroy(data_structure[i].data.date_time.info.font);   
                 }
                 else if(data_structure[i].type == TYPE_PITCTURE)
                 {
@@ -23801,7 +26775,7 @@ static void button_delete_event_cb(lv_event_t* e)
                 else if(data_structure[i].type == TYPE_COUNT)
                 {
                     lv_style_reset(&data_structure[i].data.count.style);
-                    lv_ft_font_destroy(data_structure[i].data.count.info.font);  
+                    //lv_ft_font_destroy(data_structure[i].data.count.info.font);  
                 }
                 else if(data_structure[i].type == TYPE_BREAK)
                 {
@@ -23811,7 +26785,7 @@ static void button_delete_event_cb(lv_event_t* e)
                 {
                     //删除所有数据
                     lv_style_reset(&data_structure[i].data.word.style);
-                    lv_ft_font_destroy(data_structure[i].data.word.info.font);  
+                    //lv_ft_font_destroy(data_structure[i].data.word.info.font);  
                 }
             }   
 
@@ -23830,24 +26804,27 @@ static void button_delete_event_cb(lv_event_t* e)
 
             win_content_child_num--;
 
+             printf("win_content_child_num=%d\n\r",win_content_child_num);
+
             //重新新建数据
             for(i=0;i< win_content_child_num;i++)
             { 
+                printf("type=%d\n\r",data_structure[i].type);
                 switch(data_structure[i].type)
                 {
                     case TYPE_WORD:
                     {
                         temp_obj = lv_obj_create(win_content);          
-                        sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.word.typeface]);
-                        data_structure[i].data.word.info.name = temp_typeface;
-                        printf("%s\n\r", temp_typeface);
+                        //sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.word.typeface]);
+                        //data_structure[i].data.word.info.name = temp_typeface;
+                        //printf("%s\n\r", temp_typeface);
                         data_structure[i].data.word.info.weight = data_structure[i].data.word.size;
                         data_structure[i].data.word.info.style = data_structure[i].data.word.italic_bold;
-                        lv_ft_font_init(&data_structure[i].data.word.info);
-
-                        lv_txt_get_size(&text_size, data_structure[i].data.word.text, data_structure[i].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-                    
+                        //lv_ft_font_init(&data_structure[i].data.word.info);
+                        printf("typeface=%d\n\r", data_structure[i].data.word.typeface);
+                        temp_font = font_list_get(data_structure[i].data.word.typeface, data_structure[i].data.word.size, data_structure[i].data.word.info.style);
+                        lv_txt_get_size(&text_size, data_structure[i].data.word.text, temp_font, data_structure[i].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
+                 
                         lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                         lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
 
@@ -23855,22 +26832,21 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
                         lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                         lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
-
                         lv_style_init(&data_structure[i].data.word.style);
-                        lv_style_set_text_font(&data_structure[i].data.word.style, data_structure[i].data.word.info.font);
+                        lv_style_set_text_font(&data_structure[i].data.word.style,temp_font);
                         word_space = data_structure[i].data.word.space;
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
-                        x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+                        //x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
 
-                        printf("x_size=%d\n\r", x_size);
+                        //printf("x_size=%d\n\r", x_size);
 
-                        lv_obj_set_size(temp_obj, x_size, text_size.y);
+                        lv_obj_set_size(temp_obj, text_size.x, text_size.y);
                         lv_obj_set_style_transform_angle(temp_obj, data_structure[i].data.word.spin*10, 0);
 
                         if (data_structure[i].data.word.spin != 0)
                         {
-                            lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT,  text_size.x, text_size.y);
                         }
 
                         lv_style_set_text_letter_space(&data_structure[i].data.word.style, word_space);
@@ -23881,17 +26857,56 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
                         break;
                     }
+                    
+                    case TYPE_ICON:
+                    {
+
+                        temp_obj = lv_obj_create(win_content);
+
+                        lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                        lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                        lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                        lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                        lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                        lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                        // 假设你有一个图片对象
+                        img_obj = lv_img_create(temp_obj);
+                        lv_img_set_src(img_obj,  &icon_buf[data_structure[i].data.icon.type]);
+
+                        lv_obj_center(img_obj);
+                        
+                        lv_img_set_zoom(img_obj, data_structure[i].data.icon.size);
+
+                        // 获取图片对象
+                        img_1 = (lv_img_t*)img_obj;
+
+                        // 获取图片的源文件
+                        img_dsc = (lv_img_dsc_t*)img_1->src;
+
+                        // 获取图片的宽和高
+                        width = img_dsc->header.w * data_structure[i].data.icon.size / 256;
+                        height = img_dsc->header.h * data_structure[i].data.icon.size / 256;
+
+                        // 打印宽和高
+                        printf("Image width: %d, height: %d\n", width, height);
+                        lv_obj_set_size(temp_obj, width, height);
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                        break;
+                    }
                     case TYPE_DATE:
                     {
                         temp_obj = lv_obj_create(win_content);          
-                        sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.date_time.typeface]);
-                        data_structure[i].data.date_time.info.name = temp_typeface;
-                        printf("%s\n\r", temp_typeface);
+                        //sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.date_time.typeface]);
+                        //data_structure[i].data.date_time.info.name = temp_typeface;
+                        //printf("%s\n\r", temp_typeface);
                         data_structure[i].data.date_time.info.weight = data_structure[i].data.date_time.size;
                         data_structure[i].data.date_time.info.style = data_structure[i].data.date_time.italic_bold;
-                        lv_ft_font_init(&data_structure[i].data.date_time.info);
-
-                        lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, data_structure[i].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        //lv_ft_font_init(&data_structure[i].data.date_time.info);
+                        //lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, data_structure[i].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        temp_font = font_list_get(data_structure[i].data.date_time.typeface, data_structure[i].data.date_time.size, data_structure[i].data.date_time.italic_bold);
+                        lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, temp_font, data_structure[i].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                         lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                         lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -23902,20 +26917,14 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                         lv_style_init(&data_structure[i].data.date_time.style);
-                        lv_style_set_text_font(&data_structure[i].data.date_time.style, data_structure[i].data.date_time.info.font);
-                        word_space = data_structure[i].data.date_time.space;
+                        lv_style_set_text_font(&data_structure[i].data.date_time.style, temp_font);
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-                        x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-                        printf("x_size=%d\n\r", x_size);
-
-                        lv_obj_set_size(temp_obj, x_size, text_size.y);
+                        lv_obj_set_size(temp_obj, text_size.x, text_size.y);
                         lv_obj_set_style_transform_angle(temp_obj, data_structure[i].data.date_time.spin*10, 0);
 
                         if (data_structure[i].data.word.spin != 0)
                         {
-                            lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, text_size.x, text_size.y);
                         }
 
                         lv_style_set_text_letter_space(&data_structure[i].data.date_time.style, word_space);
@@ -24025,9 +27034,9 @@ static void button_delete_event_cb(lv_event_t* e)
                     }
                     case TYPE_QR:
                     {
-                        str_len = strlen(data_structure[i].data.qr_bar.text) + 1;
+                        str_len = strlen(data_structure[i].data.qr_bar.text);
 
-                        data_structure[i].data.qr_bar.size = 256;
+                        //data_structure[i].data.qr_bar.size = 256;
                         
                         temp_obj = lv_obj_create(win_content);
                         lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
@@ -24070,14 +27079,15 @@ static void button_delete_event_cb(lv_event_t* e)
                                 {
                                     my_symbol->option_2 = 5;
                                 }
-
+#if 0
                                 if( data_structure[i].data.qr_bar.figure== 1)
                                 {
                                     my_symbol->show_hrt = 1;
                                     memcpy(my_symbol->text,data_structure[i].data.qr_bar.text,str_len);
                                 }
+#endif
 
-                                if (data_structure[win_content_child_num].data.qr_bar.borders == 1)
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
@@ -24089,14 +27099,14 @@ static void button_delete_event_cb(lv_event_t* e)
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
                                 ZBarcode_Print(my_symbol, 0);
-                                //ZBarcode_Delete(my_symbol);
 
                                 pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                                 printf("width=%d\n\r", width);
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)width);
+                                 //  my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -24149,17 +27159,6 @@ static void button_delete_event_cb(lv_event_t* e)
                                         }
                                     }
                                 }
-#if 0
-                                stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                                // 使用data进行图像处理...
-                                lv_mem_free(pnew_data);
-                                stbi_image_free(pdata); // 释放内存
-
-                                //显示图像
-                                img = lv_img_create(temp_obj);
-                                lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                                lv_obj_center(img);
-#endif
 
                                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -24167,11 +27166,53 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -24201,7 +27242,7 @@ static void button_delete_event_cb(lv_event_t* e)
                                 my_symbol->scale = 1;
 
                                         //figure_borders = 0;
-                #if 0
+#if 0
                                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                                         {
                                             my_symbol->show_hrt = 1;
@@ -24209,31 +27250,29 @@ static void button_delete_event_cb(lv_event_t* e)
                                             //figure_borders |= 0x01;
                                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                                         }
-
-                                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+#endif
+                                        if (data_structure[i].data.qr_bar.borders == 1)
                                         {
                                             my_symbol->output_options = BARCODE_BOX;
                                             my_symbol->whitespace_width = 3;
                                             my_symbol-> whitespace_height = 3; 
                                             my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
                                             //figure_borders |= 0x02;
-                                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                         }
-                #endif
+                
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
                                 ZBarcode_Print(my_symbol, 0);
-                                //ZBarcode_Delete(my_symbol);
-
                     
                                 pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                                 printf("width=%d\n\r", width);
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                               my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                //   my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -24287,29 +27326,60 @@ static void button_delete_event_cb(lv_event_t* e)
                                     }
                                 }
 
-#if 0
-                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                                        // 使用data进行图像处理...
-                                        lv_mem_free(pnew_data);
-                                        stbi_image_free(pdata); // 释放内存
-
-                                        //显示图像
-                                        lv_obj_t* img = lv_img_create(temp_obj);
-                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                                        lv_obj_center(img);
-#endif
-
                                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                                 // 使用data进行图像处理...
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -24321,8 +27391,6 @@ static void button_delete_event_cb(lv_event_t* e)
                                 height_len =  data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
 
-
-                                //figure_borders = 0;
         #if 0
                                 if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                                 {
@@ -24331,17 +27399,15 @@ static void button_delete_event_cb(lv_event_t* e)
                                     //figure_borders |= 0x01;
                                     data_structure[win_content_child_num].data.qr_bar.figure = 1;
                                 }
-
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+        #endif
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
                                     //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-        #endif
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -24354,7 +27420,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                 //  my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -24408,29 +27475,59 @@ static void button_delete_event_cb(lv_event_t* e)
                                     }
                                 }
 
-#if 0
-                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                                        // 使用data进行图像处理...
-                                        lv_mem_free(pnew_data);
-                                        stbi_image_free(pdata); // 释放内存
-
-                                        //显示图像
-                                        img = lv_img_create(temp_obj);
-                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                                        lv_obj_center(img);
-#endif
-
                                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                                 // 使用data进行图像处理...
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -24441,7 +27538,6 @@ static void button_delete_event_cb(lv_event_t* e)
                                 my_symbol->symbology = BARCODE_HANXIN;
                                 height_len = data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
-                                //figure_borders = 0;
         #if 0
                                 if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                                 {
@@ -24450,17 +27546,16 @@ static void button_delete_event_cb(lv_event_t* e)
                                     //figure_borders |= 0x01;
                                     data_structure[win_content_child_num].data.qr_bar.figure = 1;
                                 }
-
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+        #endif
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
                                     //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-        #endif
+    
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -24473,7 +27568,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -24527,29 +27623,58 @@ static void button_delete_event_cb(lv_event_t* e)
                                     }
                                 }
 
-#if 0
-                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                                        // 使用data进行图像处理...
-                                        lv_mem_free(pnew_data);
-                                        stbi_image_free(pdata); // 释放内存
-
-                                        //显示图像
-                                        img = lv_img_create(temp_obj);
-                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                                        lv_obj_center(img);
-#endif
-
                                 sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                                 stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                                 // 使用data进行图像处理...
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
     
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
@@ -24561,9 +27686,8 @@ static void button_delete_event_cb(lv_event_t* e)
                     }
                     case TYPE_BAR:
                     {
-                        str_len = strlen(data_structure[i].data.qr_bar.text) + 1;
-
-                        data_structure[i].data.qr_bar.size = 256;
+                        //str_len = strlen(data_structure[i].data.qr_bar.text) + 1;
+                        //data_structure[i].data.qr_bar.size = 256;
                         
                         temp_obj = lv_obj_create(win_content);
                         lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
@@ -24575,36 +27699,36 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                         my_symbol = ZBarcode_Create();
-                        switch (data_structure[i].data.qr_bar.symbology )
+                        switch (data_structure[i].data.qr_bar.symbology)
                         {
                             case 0:
                             default:
                             {
                                 my_symbol->symbology = BARCODE_CODE39;
                                 height_len =  data_structure[i].data.qr_bar.height;
+                                printf("height_len=%d\n\r",height_len);
                                 my_symbol->scale = 1;
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+
+                                if (data_structure[i].data.qr_bar.figure == 1)
                                 {
                                     my_symbol->show_hrt = 1;
-                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                    memcpy(my_symbol->text,data_structure[i].data.qr_bar.text,strlen(data_structure[i].data.qr_bar.text)+ 1);
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
                                 }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-        #endif
 
                                 strcpy(my_symbol->outfile, "out.bmp");
+                                printf("%s\n\r",data_structure[i].data.qr_bar.text);
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
                                 ZBarcode_Print(my_symbol, 0);
@@ -24615,7 +27739,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                               //    my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -24630,7 +27755,7 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
 
-                                lv_obj_set_size(temp_obj, width, height);
+                                //lv_obj_set_size(temp_obj, width, height);
 
                                 pnew_data = (unsigned char*)lv_mem_alloc(width * height * 4); // 为32位数据分配内存
                                 if (!pnew_data) 
@@ -24687,11 +27812,55 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                printf("width1=%d\n\r", width);
+                                printf("height1=%d\n\r", height);
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -24702,26 +27871,24 @@ static void button_delete_event_cb(lv_event_t* e)
                                 my_symbol->symbology = BARCODE_CODE128;
                                 height_len = data_structure[win_content_child_num].data.qr_bar.height;
                                 my_symbol->scale = 1;
-                                //figure_borders = 0;
-#if 0
-                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                        {
-                            my_symbol->show_hrt = 1;
-                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                            //figure_borders |= 0x01;
-                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                        }
 
-                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                        {
-                            my_symbol->output_options = BARCODE_BOX;
-                            my_symbol->whitespace_width = 3;
-                            my_symbol-> whitespace_height = 3; 
-                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                            //figure_borders |= 0x02;
-                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                        }
-#endif
+                                if (data_structure[i].data.qr_bar.figure == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
+                                }
+
+                                if (data_structure[i].data.qr_bar.borders == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                }
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -24734,7 +27901,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                //   my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -24804,12 +27972,54 @@ static void button_delete_event_cb(lv_event_t* e)
                                 // 使用data进行图像处理...
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
+                                                                
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
 
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -24822,26 +28032,23 @@ static void button_delete_event_cb(lv_event_t* e)
                                 height_len = data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.figure == 1)
                                 {
                                     my_symbol->show_hrt = 1;
                                     memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
                                 }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-        #endif
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -24854,7 +28061,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                 //  my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r",(double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -24926,11 +28134,53 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -24943,26 +28193,24 @@ static void button_delete_event_cb(lv_event_t* e)
                                 height_len =  data_structure[i].data.qr_bar.height ;
                                 my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.figure == 1)
                                 {
                                     my_symbol->show_hrt = 1;
                                     memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
                                 }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-        #endif
+
                                 strcpy(my_symbol->outfile, "out.bmp");
 
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -24976,7 +28224,7 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)118.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -25048,11 +28296,53 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -25064,26 +28354,23 @@ static void button_delete_event_cb(lv_event_t* e)
                                 height_len = data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
 
-                        //figure_borders = 0;
-#if 0
-                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                        {
-                            my_symbol->show_hrt = 1;
-                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                            //figure_borders |= 0x01;
-                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                        }
+                                if (data_structure[i].data.qr_bar.figure == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
+                                }
 
-                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                        {
-                            my_symbol->output_options = BARCODE_BOX;
-                            my_symbol->whitespace_width = 3;
-                            my_symbol-> whitespace_height = 3; 
-                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                            //figure_borders |= 0x02;
-                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                        }
-#endif
+                                if (data_structure[i].data.qr_bar.borders == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                }
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -25096,7 +28383,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                 //  my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -25168,11 +28456,54 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -25184,26 +28515,24 @@ static void button_delete_event_cb(lv_event_t* e)
                                 height_len = data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
 
-                        //figure_borders = 0;
-#if 0
-                        if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                        {
-                            my_symbol->show_hrt = 1;
-                            memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                            //figure_borders |= 0x01;
-                            data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                        }
+                                if (data_structure[i].data.qr_bar.figure == 1)
+                                {
+                                    my_symbol->show_hrt = 1;
+                                    memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
+                                }
 
-                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                        {
-                            my_symbol->output_options = BARCODE_BOX;
-                            my_symbol->whitespace_width = 3;
-                            my_symbol-> whitespace_height = 3; 
-                            my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                            //figure_borders |= 0x02;
-                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                        }
-#endif
+                                if (data_structure[i].data.qr_bar.borders == 1)
+                                {
+                                    my_symbol->output_options = BARCODE_BOX;
+                                    my_symbol->whitespace_width = 3;
+                                    my_symbol-> whitespace_height = 3; 
+                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                }
+
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
@@ -25215,7 +28544,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                //   my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -25287,11 +28617,54 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img); 
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -25303,26 +28676,23 @@ static void button_delete_event_cb(lv_event_t* e)
                                 height_len = data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.figure == 1)
                                 {
                                     my_symbol->show_hrt = 1;
                                     memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
                                 }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-#endif
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -25335,7 +28705,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                 //  my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -25407,11 +28778,54 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -25423,26 +28837,23 @@ static void button_delete_event_cb(lv_event_t* e)
                                 height_len = data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
 
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.figure == 1)
                                 {
                                     my_symbol->show_hrt = 1;
                                     memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
                                 }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                        }
-#endif
+                                }
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -25455,7 +28866,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                 //  my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
         
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -25527,11 +28939,53 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -25542,26 +28996,24 @@ static void button_delete_event_cb(lv_event_t* e)
                                 my_symbol->symbology = BARCODE_EAN14;
                                 height_len = data_structure[i].data.qr_bar.height;
                                 my_symbol->scale = 1;
-                                //figure_borders = 0;
-        #if 0
-                                if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
+
+                                if (data_structure[i].data.qr_bar.figure == 1)
                                 {
                                     my_symbol->show_hrt = 1;
                                     memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                    //figure_borders |= 0x01;
-                                    data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                                }
+                                else
+                                {
+                                    my_symbol->show_hrt = 0;
                                 }
 
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-        #endif
 
                                 strcpy(my_symbol->outfile, "out.bmp");
                                 ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -25574,7 +29026,8 @@ static void button_delete_event_cb(lv_event_t* e)
                                 printf("height=%d\n\r", height);
                                 printf("channels=%d\n\r", channels);
                     
-                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                //   my_symbol->scale = (float)height_len/(float)height;
                                 printf("scale=%f\n\r", (double)my_symbol->scale);
 
                                 strcpy(my_symbol->outfile, "out.bmp");
@@ -25646,11 +29099,53 @@ static void button_delete_event_cb(lv_event_t* e)
                                 lv_mem_free(pnew_data);
                                 stbi_image_free(pdata); // 释放内存
 
+                                data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", bmp_name);
+                                }
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                
+                                success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else
+                                {
+                                    printf("PNG 保存成功：%s\n", bmp_name);
+                                }
+
+                                // 释放内存
+                                stbi_image_free(data);
+
                                 //显示图像
                                 img = lv_img_create(temp_obj);
                                 sprintf(bmp_name_1,"A:%s",bmp_name);
                                 lv_img_set_src(img, bmp_name_1);
                                 lv_obj_center(img);
+
+
+                                lv_img_header_t header;
+                                lv_res_t res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                if (res == LV_RES_OK)
+                                {
+                                    printf("PNG: %dx%d\n", header.w, header.h);
+                                }
+                                else
+                                {
+                                    printf("lv_img_decoder_get_info error\n");
+                                }
+
+                                lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                lv_obj_set_size(temp_obj, width, height);
 
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
 
@@ -25671,24 +29166,61 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                         lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
+                        char picture_name[128]={0};
+
                         // 假设你有一个图片对象
-                        lv_obj_t* img_obj = lv_img_create(temp_obj);
-                        lv_img_set_src(img_obj, data_structure[i].data.picture.text);
+                        img_obj = lv_img_create(temp_obj);
 
-                        lv_obj_align(img_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+                        if(strcmp(data_structure[i].data.picture.text_1,"png") != 0)
+                        {
+                            data = stbi_load(data_structure[i].data.picture.text_1, &width, &height, &channels, 0);
+                            if (!data) 
+                            {
+                                printf("错误：无法加载图片 %s\n", data_structure[i].data.picture.text_1);
+                            }
 
-                        // 获取图片对象
-                        lv_img_t* img_1 = (lv_img_t*)img_obj;
+                            printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
 
-                        // 获取图片的源文件
-                        lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img_1->src;
 
-                        // 获取图片的宽和高
-                        width = img_dsc->header.w;
-                        height = img_dsc->header.h;
+                            // 步骤 2：将数据保存为 PNG
+                            success = stbi_write_png(data_structure[i].data.picture.text_2, width, height, channels, data, width * channels);
+                            if (!success) 
+                            {
+                                printf("错误：保存 PNG 失败\n");
+                            } 
+                            else 
+                            {
+                                printf("PNG 保存成功：%s\n", data_structure[i].data.picture.text_2);
+                            }
 
-                        // 打印宽和高
-                        printf("Image width: %d, height: %d\n", width, height);
+                            sprintf(picture_name, "A:%s", data_structure[i].data.picture.text_2);
+
+                            stbi_image_free(data);
+                        }
+                        else
+                        {
+                            sprintf(picture_name, "A:%s", data_structure[i].data.picture.text_1);
+                        }
+                        
+                        lv_img_set_src(img_obj, picture_name);
+                        lv_obj_center(img_obj);
+                        lv_img_header_t header;
+                        lv_res_t res = lv_img_decoder_get_info(picture_name, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img_obj,data_structure[i].data.picture.size);
+
+                        width = header.w * data_structure[i].data.picture.size / 256;
+                        height = header.h * data_structure[i].data.picture.size / 256;
+
                         lv_obj_set_size(temp_obj, width, height);
                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
                         break;
@@ -25717,64 +29249,64 @@ static void button_delete_event_cb(lv_event_t* e)
                         //data_structure[win_content_child_num].data.count.repetition = atoi(lv_label_get_text(label_btn_addition_count_times_repetition));
 
                         temp_obj = lv_obj_create(win_content);
-                        sprintf(temp_typeface, "/media/%s", typeface_buf[data_structure[win_content_child_num].data.count.typeface]);
-                        data_structure[win_content_child_num].data.count.typeface = i;
-                        printf("%s\n", temp_typeface);
-                        data_structure[win_content_child_num].data.count.info.name = temp_typeface;
-                        data_structure[win_content_child_num].data.count.info.weight = data_structure[win_content_child_num].data.count.size;
+                        //sprintf(temp_typeface, "/media/%s", typeface_buf[data_structure[win_content_child_num].data.count.typeface]);
+                        //data_structure[win_content_child_num].data.count.typeface = i;
+                        //printf("%s\n", temp_typeface);
+                        //data_structure[win_content_child_num].data.count.info.name = temp_typeface;
+                        data_structure[i].data.count.info.weight = data_structure[i].data.count.size;
 
-                        lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+                        //lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
 
-                        printf("lead_zero=%d\n\r", data_structure[win_content_child_num].data.count.lead_zero);
-                        printf("law=%d\n\r", data_structure[win_content_child_num].data.count.law);
+                        temp_font = font_list_get(data_structure[i].data.count.typeface, data_structure[i].data.count.size,0);
+
+                        printf("lead_zero=%d\n\r", data_structure[i].data.count.lead_zero);
+                        printf("law=%d\n\r", data_structure[i].data.count.law);
 
                         //确定显示值的位数
                         //递增
-                        if (data_structure[win_content_child_num].data.count.law == 0)
+                        if (data_structure[i].data.count.law == 0)
                         {
-                            if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                            if (data_structure[i].data.count.current_value < data_structure[i].data.count.minimum)
                             {
-                                data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                                data_structure[i].data.count.current_value = data_structure[i].data.count.minimum;
                             }
-                            else if(data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                            else if(data_structure[i].data.count.current_value > data_structure[i].data.count.maximum)
                             {
-                                data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                                data_structure[i].data.count.current_value = data_structure[i].data.count.maximum;
                             }
 
-                            if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                            if (data_structure[i].data.count.lead_zero == 0)
                             {
-                                formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                                formatNumberWithLeadingZeros(data_structure[i].data.count.current_value, data_structure[i].data.count.maximum, tempString);
                             }
                             else
                             {
-                                sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                                sprintf(tempString, "%d", data_structure[i].data.count.current_value);
                             }
                         }
                         else
                         {
-                            if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                            if (data_structure[i].data.count.current_value < data_structure[i].data.count.minimum)
                             {
-                                data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                                data_structure[i].data.count.current_value = data_structure[i].data.count.minimum;
                             }
-                            else if (data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                            else if (data_structure[i].data.count.current_value > data_structure[i].data.count.maximum)
                             {
-                                data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                                data_structure[i].data.count.current_value = data_structure[i].data.count.maximum;
                             }
 
-                            if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                            if (data_structure[i].data.count.lead_zero == 0)
                             {
-                                formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                                formatNumberWithLeadingZeros(data_structure[i].data.count.current_value, data_structure[i].data.count.maximum, tempString);
                             }
                             else
                             {
-                                sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                                sprintf(tempString, "%d", data_structure[i].data.count.current_value);
                             }       
                         }
 
                         printf("tempString=%s\n\r", tempString);
-
-                    
-                        lv_txt_get_size(&text_size, tempString, data_structure[win_content_child_num].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        lv_txt_get_size(&text_size, tempString, temp_font, data_structure[i].data.count.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                         lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                         lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -25784,22 +29316,16 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                         lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
-                        lv_style_init(&data_structure[win_content_child_num].data.count.style);
-                        lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, data_structure[win_content_child_num].data.count.info.font);
+                        lv_style_init(&data_structure[i].data.count.style);
+                        lv_style_set_text_font(&data_structure[i].data.count.style, temp_font);
 
-                        word_space =  data_structure[win_content_child_num].data.count.space;
-
+                        word_space =  data_structure[i].data.count.space;
                         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
+                        lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
-                        x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-                        printf("x_size=%d\n\r", x_size);
-
-                        lv_obj_set_size(temp_obj, x_size, text_size.y);
-
-                        lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
+                        lv_style_set_text_letter_space(&data_structure[i].data.count.style, word_space);
                         label1 = lv_label_create(temp_obj);
-                        lv_obj_add_style(label1, &data_structure[win_content_child_num].data.count.style, 0);
+                        lv_obj_add_style(label1, &data_structure[i].data.count.style, 0);
                         lv_label_set_text(label1, tempString);
                         lv_obj_center(label1);
 
@@ -25811,24 +29337,26 @@ static void button_delete_event_cb(lv_event_t* e)
                     {
                         temp_obj = lv_obj_create(win_content);
 
-                        sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
+                        //sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
                         //data_structure[win_content_child_num].data.word.typeface = 0;
                         //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
                         //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
                         //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-                        printf("%s\n", temp_typeface);
+                        //printf("%s\n", temp_typeface);
 
-                        data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+                        //data_structure[win_content_child_num].data.word.info.name = temp_typeface;
 
-                        data_structure[win_content_child_num].data.word.info.weight = data_structure[win_content_child_num].data.word.size;
+                        data_structure[i].data.word.info.weight = data_structure[i].data.word.size;
 
-                        data_structure[win_content_child_num].data.word.spin = 0;
+                        data_structure[i].data.word.spin = 0;
 
-                        data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
+                        data_structure[i].data.word.info.style = FT_FONT_STYLE_NORMAL;
 
-                        lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+                        //lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
 
-                        lv_txt_get_size(&text_size, typeface_buf[0], data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                        temp_font = font_list_get(0, data_structure[i].data.word.size, 0);
+
+                        lv_txt_get_size(&text_size,  data_structure[i].data.word.text, temp_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                         lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                         lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -25838,14 +29366,14 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                         lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
-                        lv_style_init(&data_structure[win_content_child_num].data.word.style);
-                        lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+                        lv_style_init(&data_structure[i].data.word.style);
+                        lv_style_set_text_font(&data_structure[i].data.word.style, temp_font);
 
                         lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
                         label1 = lv_label_create(temp_obj);
-                        lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
-                        lv_label_set_text(label1, data_structure[win_content_child_num].data.word.text);
+                        lv_obj_add_style(label1, &data_structure[i].data.word.style, 0);
+                        lv_label_set_text(label1, data_structure[i].data.word.text);
                         lv_obj_center(label1);
                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
                         break;
@@ -25856,6 +29384,7 @@ static void button_delete_event_cb(lv_event_t* e)
     }
 }
 
+#if 0
 //sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
 static void button_modification_confirm_event_cb(lv_event_t* e)
 {
@@ -25874,8 +29403,7 @@ static void button_modification_confirm_event_cb(lv_event_t* e)
     char temp_typeface[128] = { 0 };
     if (code == LV_EVENT_CLICKED)
     {
-        printf("\n****************************************\n");
-        printf("button_file_management_confirm_event_cb\n");
+        printf("button_modification_confirm_event_cb\n");
 
         int len = strlen(lv_label_get_text(label_file_management_label)) + 1;
         printf("len=%u\n\r", len);
@@ -26032,8 +29560,9 @@ static void button_modification_confirm_event_cb(lv_event_t* e)
        
     }
 }
+#endif
 
-
+#if 0
 static void label_btn_modification_text_spin_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -26179,6 +29708,7 @@ static void label_btn_modification_text_spin_event_cb(lv_event_t* e)
         lv_obj_align(label_typeface_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
+#endif
 
 #if 0
 static void button_modification_text_event_cb(void)
@@ -26474,7 +30004,7 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int i = 0;
     int word_space = 0;
     int word_size = 0;
@@ -26491,8 +30021,8 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
 
         if (len > 0)
         {
-            lv_style_reset(&data_structure[g_modification_id].data.word.style);
-            lv_ft_font_destroy(data_structure[g_modification_id].data.word.info.font);
+            //lv_style_reset(&data_structure[g_modification_id].data.word.style);
+            //lv_ft_font_destroy(data_structure[g_modification_id].data.word.info.font);
 
             win_content_child_num = g_modification_id;
 
@@ -26506,15 +30036,14 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
                 }
             }
 
-            sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
+            //sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
             data_structure[win_content_child_num].data.word.typeface = i;
 
             //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
             //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
             //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-            printf("%s\n", temp_typeface);
-
-            data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+            //printf("%s\n", temp_typeface);
+            //data_structure[win_content_child_num].data.word.info.name = temp_typeface;
 
 
             word_size = atoi(lv_label_get_text(label_file_management_word_size_label));
@@ -26541,6 +30070,10 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
                 word_space = 100;
             }
 
+            data_structure[win_content_child_num].data.word.spin = atoi(lv_label_get_text(label_btn_addition_text_spin));
+
+            printf("spin=%u\n\r", data_structure[win_content_child_num].data.word.spin);
+
             data_structure[win_content_child_num].data.word.info.weight = word_size;
 
             data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
@@ -26555,11 +30088,12 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
                 data_structure[win_content_child_num].data.word.info.style |= FT_FONT_STYLE_BOLD;
             }
 
-            lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
-
-            lv_point_t text_size;
-            lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), data_structure[win_content_child_num].data.word.info.font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
+            //lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+             printf("typeface=%d\n\r", data_structure[win_content_child_num].data.word.typeface);
+             lv_font_t* temp_font = font_list_get(data_structure[win_content_child_num].data.word.typeface, data_structure[win_content_child_num].data.word.size, data_structure[win_content_child_num].data.word.info.style);
+             lv_point_t text_size;
+             lv_txt_get_size(&text_size, data_structure[win_content_child_num].data.word.text, temp_font, data_structure[win_content_child_num].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
+    
             //printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
             //lv_obj_set_size(temp_obj, text_size.x, text_size.y);
@@ -26573,9 +30107,7 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
             //lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
             lv_style_init(&data_structure[win_content_child_num].data.word.style);
-            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
-
-
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, temp_font);
   
             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
@@ -26593,6 +30125,14 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
             lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
             lv_label_set_text(label1, lv_label_get_text(label_file_management_label));
             lv_obj_center(label1);
+
+            lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.word.spin*10, 0);
+
+            if (data_structure[win_content_child_num].data.word.spin != 0)
+            {
+                lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 200, 70);
+            }
+
             strncpy(data_structure[win_content_child_num].data.word.text, lv_label_get_text(label_file_management_label),len);
             data_structure[win_content_child_num].data.word.size = word_size;
             data_structure[win_content_child_num].data.word.space = word_space;
@@ -26603,11 +30143,7 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
 
         lv_obj_del(file_management_win);
         lv_obj_del(file_management_head_bg);
-        //lv_obj_del(label_file_management_total_output);
         lv_obj_del(label_file_management);
-        //lv_obj_del(label_file_management_date);
-        //lv_obj_del(label_file_management_time);
-        //lv_obj_del(img_file_management_battery_level);
         lv_obj_del(label_file_management_label);
         lv_obj_del(file_management_middle_bg);
         lv_obj_del(img_file_management_text);
@@ -27063,12 +30599,27 @@ static void modification_text(void)
     lv_obj_remove_style(file_management_bottom_bg, 0, LV_PART_SCROLLBAR);
 
 
-    LV_IMG_DECLARE(img_return);
+    LV_IMG_DECLARE(get_back);
     imgbtn_file_management_get_back = lv_imgbtn_create(lv_scr_act());
-    lv_imgbtn_set_src(imgbtn_file_management_get_back, LV_IMGBTN_STATE_RELEASED, NULL, &img_return, NULL);
-    lv_obj_set_size(imgbtn_file_management_get_back, img_return.header.w, img_return.header.h);
-    lv_obj_align(imgbtn_file_management_get_back, LV_ALIGN_TOP_LEFT, 160, 247);
+    lv_imgbtn_set_src(imgbtn_file_management_get_back, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+    lv_obj_set_size(imgbtn_file_management_get_back, get_back.header.w, get_back.header.h);
+    lv_obj_align(imgbtn_file_management_get_back, LV_ALIGN_TOP_LEFT, 180, 250);
     lv_obj_add_event_cb(imgbtn_file_management_get_back, modification_text_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+    LV_FONT_DECLARE(heiFont16_1);
+    label_file_management_return = lv_label_create(lv_scr_act());
+    lv_obj_set_style_text_font(label_file_management_return, &heiFont16_1, LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(label_file_management_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+    {
+        lv_label_set_text(label_file_management_return,  "返回");
+    }
+    else if(system_data.system.language == LANGUAGE_ENGLISH)
+    {
+        lv_label_set_text(label_file_management_return, "Return");
+    }
+    lv_obj_align(label_file_management_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
     LV_IMG_DECLARE(confirm);
     imgbtn_file_management_confirm = lv_imgbtn_create(lv_scr_act());
@@ -27157,6 +30708,10 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
     lv_obj_t* img = NULL;
     char bmp_name[100] = {0};
     char bmp_name_1[128] = {0};
+    unsigned char *data = NULL;
+    int success;
+    lv_img_header_t header;
+    lv_res_t res;
 
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
@@ -27202,13 +30757,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -27243,7 +30798,7 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
                         //figure_borders = 0;
-
+#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
@@ -27251,6 +30806,7 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
+#endif
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
@@ -27273,7 +30829,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)width);
+                         //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -27334,11 +30891,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                     case 1:
@@ -27363,13 +30962,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -27379,8 +30978,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         my_symbol->scale = 1;
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
 #if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
@@ -27389,7 +30986,7 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
-
+#endif
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->output_options = BARCODE_BOX;
@@ -27399,7 +30996,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -27413,7 +31009,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                         //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -27466,18 +31063,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        lv_obj_t* img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
 
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -27488,11 +31073,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                     case 2:
@@ -27500,13 +31127,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -27516,8 +31143,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         my_symbol->scale = 1;
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
 #if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
@@ -27526,7 +31151,7 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
-
+#endif
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->output_options = BARCODE_BOX;
@@ -27536,7 +31161,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -27549,7 +31173,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                         //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -27603,19 +31228,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             }
                         }
 
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
-
-
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                         // 使用data进行图像处理...
@@ -27625,11 +31237,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                     case 3:
@@ -27637,13 +31291,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -27663,7 +31317,7 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
-
+#endif
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->output_options = BARCODE_BOX;
@@ -27673,7 +31327,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -27686,7 +31339,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                      // my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -27739,18 +31393,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                                 }
                             }
                         }
-                        
-#if 0
-                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                        // 使用data进行图像处理...
-                        lv_mem_free(pnew_data);
-                        stbi_image_free(pdata); // 释放内存
-
-                        //显示图像
-                        img = lv_img_create(temp_obj);
-                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                        lv_obj_center(img);
-#endif
 
                         sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                         stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
@@ -27760,11 +31402,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                 }
@@ -27784,13 +31468,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -27801,8 +31485,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
@@ -27810,6 +31492,12 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                         }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
+                        }
+
+
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
                         {
@@ -27820,7 +31508,7 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
+
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -27833,7 +31521,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                       //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -27906,6 +31595,27 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
@@ -27913,18 +31623,38 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
+
                         break;
                     case 1:
                         my_symbol->symbology = BARCODE_CODE128;
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -27934,15 +31664,17 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         my_symbol->scale = 1;
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
-#if 0
+                
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -27954,7 +31686,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -27967,7 +31698,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                     //   my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28042,13 +31774,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
 
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
 
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                     case 2:
@@ -28057,13 +31829,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -28074,14 +31846,16 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -28093,7 +31867,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -28106,7 +31879,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                       //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28180,11 +31954,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                     case 4:
@@ -28192,13 +32008,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         my_symbol->input_mode |= GS1PARENS_MODE;
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -28210,15 +32026,17 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         //memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
-
-                        //figure_borders = 0;
-#if 0
+                 
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -28230,7 +32048,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
                         strcpy(my_symbol->outfile, "out.bmp");
 
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -28244,7 +32061,10 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
+                       // my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
+
+                        my_symbol->scale = (float)((float)118.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                       
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28318,11 +32138,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                     case 5:
@@ -28330,13 +32192,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -28347,14 +32209,16 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -28366,7 +32230,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -28379,7 +32242,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                        // my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28454,11 +32318,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
 
                         break;
@@ -28467,13 +32373,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -28484,14 +32390,16 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -28503,7 +32411,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -28516,7 +32423,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                       //   my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28588,27 +32496,69 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         lv_mem_free(pnew_data);
                         stbi_image_free(pdata); // 释放内存
 
-
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
+
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
 
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
+
                         break;
                     case 7:
                         my_symbol->symbology = BARCODE_ITF14;
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -28619,14 +32569,16 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -28638,7 +32590,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -28651,7 +32602,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                       //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28725,11 +32677,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                     case 8:
@@ -28737,13 +32731,13 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -28754,14 +32748,16 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -28773,7 +32769,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -28786,7 +32781,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                      //  my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r", (double)my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28859,24 +32855,67 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
+
                         break;
                     case 9:
                         my_symbol->symbology = BARCODE_EAN14;
 
-                                                height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
+                        height_len = atoi(lv_label_get_text(label_btn_addition_QR_code_height));
 
-                        if (height_len > 100)
+                        if (height_len > QR_BAR_MAX_HIGHT)
                         {
-                            height_len = 100;
+                            height_len = QR_BAR_MAX_HIGHT;
                         }
-                        else if (height_len < 50)
+                        else if (height_len < QR_BAR_MIN_HIGHT)
                         {
-                            height_len = 50;
+                            height_len = QR_BAR_MIN_HIGHT;
                         }
 
                         printf("height_len=%u\n\r",height_len);
@@ -28887,14 +32926,16 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         memcpy(data_structure[win_content_child_num].data.qr_bar.text,lv_label_get_text(label_btn_addition_QR_code_text),str_len);
 
-                        //figure_borders = 0;
-#if 0
                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                         {
                             my_symbol->show_hrt = 1;
                             memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
                             //figure_borders |= 0x01;
                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
+                        }
+                        else
+                        {
+                             my_symbol->show_hrt = 0;
                         }
 
                         if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
@@ -28906,7 +32947,6 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                             //figure_borders |= 0x02;
                             data_structure[win_content_child_num].data.qr_bar.borders = 1;
                         }
-#endif
 
                         strcpy(my_symbol->outfile, "out.bmp");
                         ZBarcode_Encode(my_symbol, (unsigned char *)lv_label_get_text(label_btn_addition_QR_code_text), 0);
@@ -28919,7 +32959,8 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
                         printf("height=%d\n\r", height);
                         printf("channels=%d\n\r", channels);
             
-                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                        my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                        // my_symbol->scale = (float)height_len/(float)height;
                         printf("scale=%f\n\r",(double) my_symbol->scale);
    
                         strcpy(my_symbol->outfile, "out.bmp");
@@ -28994,11 +33035,53 @@ static void btn_modification_QR_code_confirm_event_cb(lv_event_t* e)
 
                         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
+                        data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                        if (!data) 
+                        {
+                            printf("错误：无法加载图片 %s\n", bmp_name);
+                        }
+                        printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                        sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                        
+                        success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                        if (!success) 
+                        {
+                            printf("错误：保存 PNG 失败\n");
+                        } 
+                        else
+                        {
+                            printf("PNG 保存成功：%s\n", bmp_name);
+                        }
+
+                        // 释放内存
+                        stbi_image_free(data);
+
                         //显示图像
                         img = lv_img_create(temp_obj);
                         sprintf(bmp_name_1,"A:%s",bmp_name);
                         lv_img_set_src(img, bmp_name_1);
                         lv_obj_center(img);
+
+                        res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                        if (res == LV_RES_OK)
+                        {
+                            printf("PNG: %dx%d\n", header.w, header.h);
+                        }
+                        else
+                        {
+                            printf("lv_img_decoder_get_info error\n");
+                        }
+
+                        lv_img_set_zoom(img,data_structure[win_content_child_num].data.qr_bar.size);
+
+                        width = header.w * data_structure[win_content_child_num].data.qr_bar.size / 256;
+                        height = header.h * data_structure[win_content_child_num].data.qr_bar.size / 256;
+
+                        lv_obj_set_size(temp_obj, width, height);
+
+                        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);
 
                         break;
                 }
@@ -29125,8 +33208,6 @@ static void modification_QR_code(void)
     lv_obj_set_style_text_color(label_btn_addition_QR_code_text, lv_color_hex(0x000000), LV_STATE_DEFAULT);
     lv_label_set_text(label_btn_addition_QR_code_text, data_structure[g_modification_id].data.qr_bar.text);
     lv_obj_align(label_btn_addition_QR_code_text, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_border_width(btn_addition_QR_code_text, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
-    lv_obj_set_style_border_color(btn_addition_QR_code_text, lv_color_hex(0x000000), LV_STATE_DEFAULT); /* 设置边框颜色 */
     lv_obj_set_style_border_opa(label_btn_addition_QR_code_text, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
     lv_obj_set_style_radius(label_btn_addition_QR_code_text, 0, LV_STATE_DEFAULT); /* 设置圆角 */
     lv_obj_set_style_bg_opa(label_btn_addition_QR_code_text, LV_OPA_COVER, LV_PART_MAIN);
@@ -29443,11 +33524,11 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int i = 0;
     int word_space = 0;
     int word_size = 0;
-    int x_size = 0;
+    //int x_size = 0;
     //int y_size = 0;
     int win_content_child_num = 0;
     //char tempString[128] = { 0 };
@@ -29457,8 +33538,8 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
         printf("button_date_time_confirm_event_cb\n");
         buzzer_enable = 1;
 
-        lv_style_reset(&data_structure[g_modification_id].data.date_time.style);
-        lv_ft_font_destroy(data_structure[g_modification_id].data.date_time.info.font);
+        //lv_style_reset(&data_structure[g_modification_id].data.date_time.style);
+        //lv_ft_font_destroy(data_structure[g_modification_id].data.date_time.info.font);
 
         int len = strlen(lv_label_get_text(label_addition_date_middle));
         printf("len=%u\n\r", len);
@@ -29479,15 +33560,15 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
 
             printf("i=%d\n\r",i);
 
-            sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
+            //sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
             data_structure[win_content_child_num].data.date_time.typeface = i;
 
             //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
             //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
             //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-            printf("%s\n", temp_typeface);
+            //printf("%s\n", temp_typeface);
 
-            data_structure[win_content_child_num].data.date_time.info.name = temp_typeface;
+            //data_structure[win_content_child_num].data.date_time.info.name = temp_typeface;
 
             word_size = atoi(lv_label_get_text(label_btn_addition_date_word_size));
 
@@ -29496,14 +33577,18 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
                 word_size = 12;
             }
 
-            if (word_size > 200)
+            if (word_size > WORD_MAX_SIZE)
             {
-                word_size = 200;
+                word_size = WORD_MAX_SIZE;
             }
+
+            printf("word_size=%u\n\r",word_size);
 
             data_structure[win_content_child_num].data.date_time.info.weight = word_size;
 
             data_structure[win_content_child_num].data.date_time.spin = atoi(lv_label_get_text(label_btn_addition_date_spin));
+
+            printf("spin=%u\n\r", data_structure[win_content_child_num].data.date_time.spin);
 
             data_structure[win_content_child_num].data.date_time.info.style = FT_FONT_STYLE_NORMAL;
 
@@ -29517,11 +33602,29 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
                 data_structure[win_content_child_num].data.date_time.info.style |= FT_FONT_STYLE_BOLD;
             }
 
-            lv_ft_font_init(&data_structure[win_content_child_num].data.date_time.info);
+            printf("style=%u\n\r", data_structure[win_content_child_num].data.date_time.info.style);
 
+            word_space = atoi(lv_label_get_text(label_btn_addition_date_word_space));
+
+            if (word_space < 0)
+            {
+                word_space = 0;
+            }
+
+            if (word_space > WORD_MAX_SIZE)
+            {
+                word_space = WORD_MAX_SIZE;
+            }
+
+            printf("word_space=%u\n\r", word_space);
+
+            //lv_ft_font_init(&data_structure[win_content_child_num].data.date_time.info);
+            //lv_point_t text_size;
+            //lv_txt_get_size(&text_size, lv_label_get_text(label_addition_date_middle), data_structure[win_content_child_num].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+            lv_font_t* temp_font = font_list_get(i, word_size, data_structure[win_content_child_num].data.date_time.info.style);
             lv_point_t text_size;
-            lv_txt_get_size(&text_size, lv_label_get_text(label_addition_date_middle), data_structure[win_content_child_num].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
+            lv_txt_get_size(&text_size, lv_label_get_text(label_addition_date_middle), temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
             //lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
             //lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -29532,31 +33635,16 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
             //lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
             lv_style_init(&data_structure[win_content_child_num].data.date_time.style);
-            lv_style_set_text_font(&data_structure[win_content_child_num].data.date_time.style, data_structure[win_content_child_num].data.date_time.info.font);
+            lv_style_set_text_font(&data_structure[win_content_child_num].data.date_time.style, temp_font);
 
-            word_space = atoi(lv_label_get_text(label_btn_addition_date_word_space));
-
-            if (word_space < 0)
-            {
-                word_space = 0;
-            }
-
-            if (word_space > 100)
-            {
-                word_space = 100;
-            }
             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
-            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-            printf("x_size=%d\n\r", x_size);
-
-            lv_obj_set_size(temp_obj, x_size, text_size.y);
+            lv_obj_set_size(temp_obj, text_size.x, text_size.y);
             lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.date_time.spin * 10, 0);
 
             if (data_structure[win_content_child_num].data.date_time.spin != 0)
             {
-                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 200, 70);
             }
 
             lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.date_time.style, word_space);
@@ -29584,10 +33672,6 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
             }
                       
             data_structure[win_content_child_num].type = TYPE_DATE;
-        }
-        else
-        {
-
         }
         
         lv_obj_del(label_addition_date_time_confirm);
@@ -29842,6 +33926,7 @@ static void modification_date(void)
         }
 
         lv_label_set_text(label_addition_date_middle, date_time_str);
+        lv_label_set_text(label_btn_addition_date_text, date_time_str);
     }
     else
     {
@@ -30055,6 +34140,7 @@ static void modification_date(void)
                 break;
         }  
         lv_label_set_text(label_addition_date_middle, date_time_str);
+        lv_label_set_text(label_btn_label_addition_time, date_time_str);
     }  
 
     lv_obj_align(label_btn_label_addition_time, LV_ALIGN_CENTER, 0, 0);
@@ -30250,6 +34336,7 @@ static void imgbtn_modification_picture_confirm_event_cb(lv_event_t* e)
     int win_content_child_num = 0;
     //char tempString[128] = { 0 };
     char picture_name[100] = { 0 };
+    int width, height, channels;
 
     if (code == LV_EVENT_CLICKED)
     {
@@ -30261,45 +34348,68 @@ static void imgbtn_modification_picture_confirm_event_cb(lv_event_t* e)
 
         lv_obj_t* temp_obj = lv_obj_get_child(win_content,g_modification_id);
 
-        //lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
-        //lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-
-        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
-        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
-        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
-        //lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
-
         lv_obj_del(lv_obj_get_child(temp_obj,0));
 
         // 假设你有一个图片对象
         lv_obj_t* img_obj = lv_img_create(temp_obj);
-        sprintf(picture_name, "A:/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+        sprintf(data_structure[win_content_child_num].data.picture.text_1, "/mnt/%s.%s", lv_table_get_cell_value(table_addition_picture_1, g_row, 0), lv_table_get_cell_value(table_addition_picture_1, g_row, 1));
+       
+        if(strcmp(data_structure[win_content_child_num].data.picture.text_1,"png") != 0)
+        {
+
+            unsigned char *data = stbi_load(data_structure[win_content_child_num].data.picture.text_1, &width, &height, &channels, 0);
+            if (!data) 
+            {
+                printf("错误：无法加载图片 %s\n", data_structure[win_content_child_num].data.picture.text_1);
+            }
+
+            printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+
+            sprintf(data_structure[win_content_child_num].data.picture.text_2,"%s.png",lv_table_get_cell_value(table_addition_picture_1, g_row, 0));
+
+            // 步骤 2：将数据保存为 PNG
+            int success = stbi_write_png(data_structure[win_content_child_num].data.picture.text_2, width, height, channels, data, width * channels);
+            if (!success) 
+            {
+                printf("错误：保存 PNG 失败\n");
+            } 
+            else 
+            {
+                printf("PNG 保存成功：%s\n", data_structure[win_content_child_num].data.picture.text_2);
+            }
+
+            sprintf(picture_name, "A:%s", data_structure[win_content_child_num].data.picture.text_2);
+
+            stbi_image_free(data);
+        }
+        else
+        {
+            sprintf(picture_name, "A:%s", data_structure[win_content_child_num].data.picture.text_1);
+        }
+        
         lv_img_set_src(img_obj, picture_name);
+        lv_obj_center(img_obj);
+        lv_img_header_t header;
+        lv_res_t res = lv_img_decoder_get_info(picture_name, &header);  // 直接传入文件路径
 
-        lv_obj_align(img_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+        if (res == LV_RES_OK)
+        {
+            printf("PNG: %dx%d\n", header.w, header.h);
+        }
+        else
+        {
+            printf("lv_img_decoder_get_info error\n");
+        }
 
-        // 获取图片对象
-        lv_img_t* img = (lv_img_t*)img_obj;
+        lv_img_set_zoom(img_obj,data_structure[win_content_child_num].data.picture.size);
 
-        // 获取图片的源文件
-        lv_img_dsc_t* img_dsc = (lv_img_dsc_t*)img->src;
-
-        // 获取图片的宽和高
-        lv_coord_t width = img_dsc->header.w;
-        lv_coord_t height = img_dsc->header.h;
-
-        // 打印宽和高
-        printf("Image width: %d, height: %d\n", width, height);
-
+        width = header.w * data_structure[win_content_child_num].data.picture.size / 256;
+        height = header.h * data_structure[win_content_child_num].data.picture.size / 256;
 
         lv_obj_set_size(temp_obj, width, height);
-
-        sprintf(data_structure[win_content_child_num].data.picture.text,"%s", picture_name);
-
-        printf("text=%s\n\r", data_structure[win_content_child_num].data.picture.text);
-
-        data_structure[win_content_child_num].type = TYPE_PITCTURE;
-        
+        lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[win_content_child_num].x, data_structure[win_content_child_num].y);      
+    
 
         lv_obj_del(obj_addition_picture_head_bg);
         lv_obj_del(label_addition_picture_head);
@@ -30581,7 +34691,7 @@ static void modification_picture(void)
                 lv_table_set_cell_value(table_addition_picture_1, picture_count, 3, created_time);
                 //memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
 
-                if(isSubstring(data_structure[g_modification_id].data.picture.text,entry->d_name))
+                if(isSubstring(data_structure[g_modification_id].data.picture.text_1,entry->d_name))
                 {
                     g_row = picture_count;
                 }
@@ -30597,7 +34707,7 @@ static void modification_picture(void)
 
     //显示图片
     picture_img = lv_img_create(obj_addition_picture_preview_bg);
-    lv_img_set_src(picture_img, data_structure[g_modification_id].data.picture.text);
+    lv_img_set_src(picture_img, data_structure[g_modification_id].data.picture.text_1);
 
     lv_obj_add_event_cb(table_addition_picture_1, picture_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
     lv_obj_add_event_cb(table_addition_picture_1, picture_change_event_cb, LV_EVENT_PRESSED, NULL);
@@ -30743,7 +34853,7 @@ static void button_modification_icon_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_icon_confirm_event_cb\n\r");
+        printf("button_modification_icon_confirm_event_cb\n\r");
 
         buzzer_enable = 1;
 
@@ -30804,7 +34914,7 @@ static void button_modification_icon_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_icon_confirm_event_cb\n\r");
+        printf("button_modification_icon_return_event_cb\n\r");
         buzzer_enable = 1;
         lv_obj_del(file_management_head_bg);
         lv_obj_del(label_file_management);
@@ -31277,11 +35387,11 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int i = 0;
     int word_space = 0;
     int word_size = 0;
-    int x_size = 0;
+    //int x_size = 0;
     //int y_size = 0;
     int win_content_child_num = 0;
     char tempString[32] = { 0 };
@@ -31294,7 +35404,7 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
         win_content_child_num = g_modification_id;
 
         lv_style_reset(&data_structure[g_modification_id].data.count.style);
-        lv_ft_font_destroy(data_structure[g_modification_id].data.count.info.font);
+        //lv_ft_font_destroy(data_structure[g_modification_id].data.count.info.font);
 
         //保存所有数据
         data_structure[win_content_child_num].data.count.law = lv_dropdown_get_selected(dropdown_addition_count_law);
@@ -31312,10 +35422,10 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
 
         printf("i=%d\n", i);
 
-        sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
+        //sprintf(temp_typeface, "/media/%s", typeface_buf[i]);
         data_structure[win_content_child_num].data.count.typeface = i;
-        printf("%s\n", temp_typeface);
-        data_structure[win_content_child_num].data.count.info.name = temp_typeface;
+        //printf("%s\n", temp_typeface);
+        //data_structure[win_content_child_num].data.count.info.name = temp_typeface;
         word_size = atoi(lv_label_get_text(label_btn_addition_count_size));
 
         if (word_size < 12)
@@ -31332,7 +35442,8 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
 
         data_structure[win_content_child_num].data.count.info.style = FT_FONT_STYLE_NORMAL;
 
-        lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+        //lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+        lv_font_t* temp_font = font_list_get(i, word_size, 0);
 
         //当前值
         data_structure[win_content_child_num].data.count.current_value = atoi(lv_label_get_text(label_btn_addition_count_current_value));
@@ -31393,20 +35504,6 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
 
         printf("tempString=%s\n\r", tempString);
 
-        lv_point_t text_size;
-        lv_txt_get_size(&text_size, tempString, data_structure[win_content_child_num].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-        //lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
-        //lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-
-        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
-        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
-        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
-        //lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
-
-        lv_style_init(&data_structure[win_content_child_num].data.count.style);
-        lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, data_structure[win_content_child_num].data.count.info.font);
-
         word_space = atoi(lv_label_get_text(label_btn_addition_count_space));
 
         if (word_space < 0)
@@ -31418,13 +35515,23 @@ static void btn_modification_count_confirm_event_cb(lv_event_t* e)
         {
             word_space = 100;
         }
+
+        lv_point_t text_size;
+        lv_txt_get_size(&text_size, tempString, temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+        //lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+        //lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+        //lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+        //lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_style_init(&data_structure[win_content_child_num].data.count.style);
+        lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, temp_font);
+
         printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-        x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-        printf("x_size=%d\n\r", x_size);
-
-        lv_obj_set_size(temp_obj, x_size, text_size.y);
+        lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
         lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
 
@@ -32083,7 +36190,7 @@ static void btn_modification_symbol_confirm_event_cb(lv_event_t* e)
     lv_event_code_t code;
     int i;
     int win_content_child_num;
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
@@ -32097,20 +36204,21 @@ static void btn_modification_symbol_confirm_event_cb(lv_event_t* e)
 
         lv_obj_t* temp_obj =  lv_obj_get_child(win_content,g_modification_id);
 
-        sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
+        //sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
         data_structure[win_content_child_num].data.word.typeface = 0;
         //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
         //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
         //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-        printf("%s\n", temp_typeface);
+        //printf("%s\n", temp_typeface);
 
-        data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+        //data_structure[win_content_child_num].data.word.info.name = temp_typeface;
         data_structure[win_content_child_num].data.word.info.weight = 20;
         data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
-        lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+        //lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+        lv_font_t* temp_font = font_list_get(0, 20, 0);
 
         lv_point_t text_size;
-        lv_txt_get_size(&text_size, g_addition_symbol[g_symbol_flag], data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        lv_txt_get_size(&text_size, g_addition_symbol[g_symbol_flag], temp_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
         
         //lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
         //lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -32121,7 +36229,7 @@ static void btn_modification_symbol_confirm_event_cb(lv_event_t* e)
         //lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);     
 
         lv_style_init(&data_structure[win_content_child_num].data.word.style);
-        lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+        lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, temp_font);
 
         lv_obj_set_size(temp_obj, text_size.x, text_size.y);   
 
@@ -32542,7 +36650,7 @@ static void btn_system_date_confirm_event_cb(lv_event_t* e)
         if(retvalue < 0)
         {
             printf("write Control Failed!\r\n");
-            close(fd_bm8563);
+            //close(fd_bm8563);
             //return -1;
         }
 
@@ -32716,9 +36824,9 @@ static void  btn_interval_continuous_print_mode_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 150)
+            if (i > 250)
             {
-                i = 150;
+                i = 250;
             }
         }
 
@@ -32751,7 +36859,7 @@ static void btn_interval_continuous_print_mode_event_cb(lv_event_t* e)
     //int line_num = 5;
     //int size_wide = 85;
     //int size_high = 24;
-    lv_obj_t* obj = lv_event_get_target(e);
+    //lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
     {
@@ -32914,9 +37022,9 @@ static void btn_trigger_delay_mode_confirm_event_cb(lv_event_t* e)
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
-            if (i > 1000)
+            if (i > 250)
             {
-                i = 1000;
+                i = 250;
             }
         }
 
@@ -32950,7 +37058,7 @@ static void btn_trigger_delay_mode_event_cb(lv_event_t* e)
     //int line_num = 5;
    // int size_wide = 85;
     //int size_high = 24;
-    lv_obj_t* obj = lv_event_get_target(e);
+    //lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
     {
@@ -33098,7 +37206,40 @@ static void btn_trigger_delay_mode_event_cb(lv_event_t* e)
     }
 }
 
+static void btn_set_print_mode_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int i=0;
+    char temp_str[12] = { 0 };
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_set_print_mode_confirm_event_cb\n");
+        buzzer_enable = 1;
+        const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
+        if ((pwd_txt != NULL))
+        {
+            i = atoi(pwd_txt);
+            if (i > 150)
+            {
+                i = 150;
+            }
+        }
 
+        sprintf(temp_str, "%d", i);
+        lv_label_set_text(label_btn_label_set_print_mode, temp_str);
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
 
 static void btn_label_set_print_mode_event_cb(lv_event_t* e)
 {
@@ -33112,7 +37253,7 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
    // int line_num = 5;
     //int size_wide = 85;
   //  int size_high = 24;
-    lv_obj_t* obj = lv_event_get_target(e);
+    //lv_obj_t* obj = lv_event_get_target(e);
 
     if (code == LV_EVENT_CLICKED)
     {
@@ -33242,7 +37383,7 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
         lv_obj_set_size(btn_typeface_confirm, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-        lv_obj_add_event_cb(btn_typeface_confirm, button_word_space_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_confirm, btn_set_print_mode_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
         LV_FONT_DECLARE(heiFont16_1);
         label_typeface_confirm = lv_label_create(lv_scr_act());
@@ -34605,14 +38746,16 @@ static void button_unencrypt_confirm_event_cb(lv_event_t* e)
         //解密
         sprintf(tempBuf,"%s",lv_label_get_text(label_btn_yield_reset));
 
+        printf("tempBuf=%s\n\r",tempBuf);
+
         for(i=0;i<16;i++)
         {
-            out[i]  = stringToHex(tempBuf[i*2])*16 + stringToHex(tempBuf[i*2+1]);
+            msg[i]  = stringToHex(tempBuf[i*2])*16 + stringToHex(tempBuf[i*2+1]);
             printf("%x ",msg[i]);
         }
         printf("\n\r");
 
-        memset(msg, 0, MSG_SIZE);
+        //memset(msg, 0, MSG_SIZE);
         memset(&context, 0, sizeof(context));
         AES_set_key(&context, key, iv, AES_MODE_128);
 
@@ -34625,7 +38768,7 @@ static void button_unencrypt_confirm_event_cb(lv_event_t* e)
         }
         printf("\r\n");
 
-        unsigned char crc =  CRC8(out,15);
+        unsigned char crc =  CRC8(out,16);
 
         if(crc == out[15])
         {
@@ -34653,7 +38796,7 @@ static void button_unencrypt_confirm_event_cb(lv_event_t* e)
                     }
 
                     // 将结构体写入文件
-                    size_t written = fwrite(out, 16, 1, file);
+                    size_t written = fwrite(msg, 16, 1, file);
                     if (written != 1) {
                         perror("Failed to write data to file");
                         fclose(file);
@@ -34696,7 +38839,7 @@ static void button_unencrypt_return_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_set_developer_confirm_event_cb\r\n");
+        printf("button_unencrypt_return_event_cb\r\n");
         buzzer_enable = 1;
         //解密
 
@@ -34736,6 +38879,31 @@ static void button_unencrypt_keyboard_confirm_event_cb(lv_event_t* e)
         buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_yield_reset, lv_textarea_get_text(textarea_text_keyboard));
+
+        printf("label_btn_yield_reset=%s\n\r",lv_label_get_text(label_btn_yield_reset));
+
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+    }
+}
+
+
+static void button_unencrypt_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_unencrypt_keyboard_return_event_cb\n");
+        buzzer_enable = 1;
+
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
         lv_obj_del(textarea_text_keyboard);
@@ -34830,7 +38998,7 @@ static void btn_unencrypt_event_cb(lv_event_t* e)
     lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
     lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
     lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
-    lv_obj_add_event_cb(btn_keyboard_return, button_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(btn_keyboard_return, button_unencrypt_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
 
     LV_IMG_DECLARE(confirm);
     btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
@@ -34932,7 +39100,7 @@ static void btn_check_updates_event_cb(lv_event_t* e)
         device_info.rtc_time.hour = g_system_time[3];
         device_info.rtc_time.minute =  g_system_time[4];
         device_info.rtc_time.second = g_system_time[5];
-        device_info.crc = CRC8((unsigned char *)&device_info,15);
+        device_info.crc = CRC8((unsigned char *)&device_info,16);
 
         memset(msg, 0, MSG_SIZE);
         memset(&context, 0, sizeof(context));
@@ -35359,8 +39527,12 @@ static void button_set_developer_return_event_cb(lv_event_t* e)
 static void developer_confirm_btn_event_callback(lv_event_t* event)
 {
     char tempbuf[64] = { 0 };
-    unsigned char databuf[20]={0};
     int retvalue;
+    unsigned char databuf[20]={0};
+    int i;
+    unsigned char *p = NULL;
+    //int num;
+    unsigned char crc;
 
     if (event == NULL)
     {
@@ -35469,72 +39641,107 @@ static void developer_confirm_btn_event_callback(lv_event_t* event)
                         lv_obj_align(label_surrogate_information_label, LV_ALIGN_TOP_LEFT, 390, 39);
 
 
-                        AUTHORIZATION_INFORMATION  authorization;
+                        printf("device_id=0x%x\n\r",g_authorization.device_id);
+                        printf("g_sd_serial=0x%x\n\r",g_sd_serial);
+                        printf("machine_model=0x%x\n\r",g_authorization.machine_model);
+                        printf("locked_state=0x%x\n\r",g_authorization.locked_state);
+                        printf("year=%d\n\r",g_authorization.rtc_time.year);
+                        printf("month=%d\n\r",g_authorization.rtc_time.month);
+                        printf("hour=%d\n\r",g_authorization.rtc_time.hour);
+                        printf("minute=%d\n\r",g_authorization.rtc_time.minute);
+                        printf("second=%d\n\r",g_authorization.rtc_time.second);
 
-                        memset(msg, 0, MSG_SIZE);
-                        memset(&context, 0, sizeof(context));
-                        AES_set_key(&context, key, iv, AES_MODE_128);
-
-                        AES_convert_key(&context);
-                        AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
-
-                        if(authorization.device_id == g_sd_serial)
+                        if(g_authorization.device_id == g_sd_serial)
                         {
-                            if(authorization.locked_state == 1)
+                            if(g_authorization.locked_state == 1)
                             {
+
+                                read_writer_rtc_enable = 0;
+
                                 memset(databuf,0,sizeof(databuf));
                                 databuf[0] = 0x04;
                                 
-                                retvalue = read(fd_bm8563, databuf, 16);
+                                retvalue = read(fd_rc522, databuf, 16);
                                 if(retvalue < 0)
                                 {
-                                    printf("fd_bm8563 Failed!\r\n");
-                                    close(fd_bm8563);
+                                    printf("fd_rc522 Failed!\r\n");
+                                    //close(fd_bm8563);
+                                    read_card_info_result = 0;
+                                }
+                                else
+                                {
+                                    printf("读卡密文\n\r");
+                                    for(i=0;i<16;i++)
+                                    {
+                                        printf("0x%x ",databuf[i]);
+                                    }
+                                    printf("\n\r");
+
+                                    memset(msg, 0, MSG_SIZE);
+                                    memset(&context, 0, sizeof(context));
+                                    AES_set_key(&context, key, iv, AES_MODE_128);
+
+                                    AES_convert_key(&context);
+                                    memset((char *)&card_info_newest,0,sizeof(card_info_newest));
+                                    AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
+
+                                    p = (unsigned char *)&card_info_newest;
+                                    printf("读卡明文\n\r");
+                                    for(i=0;i<16;i++)
+                                    {
+                                        printf("0x%x ",*(p+i));
+                                    }
+                                    printf("\n\r");
+
+                                    crc =  CRC8(p,16);
+                                    if(crc == card_info_newest.crc)
+                                    {
+                                        printf("databuf ok\n");
+                                        read_card_info_result = 1;
+                                    }
+                                    else
+                                    {
+                                        read_card_info_result = 0;
+                                    }
+
+                                    read_writer_rtc_enable = 1;
                                 }
 
-                                //memset(msg, 0, MSG_SIZE);
-                                //memset(&context, 0, sizeof(context));
-                                //AES_set_key(&context, key, iv, AES_MODE_128);
-
-                                CARD_INFORMATION card_info;
-
-                                //AES_convert_key(&context);
-                                AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
-
-                                unsigned char crc =  CRC8(databuf,15);
-                                if(card_info.crc == crc)
+                                if(read_card_info_result == 1)
                                 {
-                                    printf("databuf ok\n");
-
-                                    if(card_info.machine_model == authorization.machine_model)
+                                    if(card_info_newest.machine_model == g_authorization.machine_model)
                                     {
-                                        sprintf(tempbuf,"%d",card_info.count);
+                                        sprintf(tempbuf,"%u",card_info_newest.count);
                                         lv_label_set_text(label_Rf_frequency_label, tempbuf);
-                                        sprintf(tempbuf,"%d",card_info.machine_model);
+                                        sprintf(tempbuf,"%d",card_info_newest.machine_model);
                                         lv_label_set_text(label_surrogate_information_label, tempbuf);
                                     }
                                     else
                                     {
                                         lv_label_set_text(label_Rf_frequency_label, "");
                                         lv_label_set_text(label_surrogate_information_label, "");
+                                        printf("machine_model error\n");
                                     }
                                 }
                                 else
                                 {
                                     lv_label_set_text(label_Rf_frequency_label, "");
                                     lv_label_set_text(label_surrogate_information_label, ""); 
+                                    printf("crc error\n");
                                 }
                             }
                             else
                             {
                                 lv_label_set_text(label_Rf_frequency_label, "");
                                 lv_label_set_text(label_surrogate_information_label, "");
+                                printf("locked_state error\n");
                             }
                         }
                         else
                         {
                             lv_label_set_text(label_Rf_frequency_label, "");
                             lv_label_set_text(label_surrogate_information_label, "");
+                            printf("id error\n");
                         }
 
                         LV_IMG_DECLARE(print_pulse_width);
@@ -36345,6 +40552,7 @@ static void set_tv_system_create(lv_obj_t* parent)
 */
 static void set_tv_about_create(lv_obj_t* parent)
 {
+    char tempBuf[64]={0};
     printf("set_tv_about_create\n");
     buzzer_enable = 1;
     lv_obj_set_style_pad_all(parent, 0, LV_STATE_DEFAULT);
@@ -36413,11 +40621,13 @@ static void set_tv_about_create(lv_obj_t* parent)
     lv_obj_set_style_text_color(label_software_version, lv_color_hex(0x000000), LV_STATE_DEFAULT);
     if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
     {
-        lv_label_set_text(label_software_version, "软件版本：V1.0_20250107");
+        sprintf(tempBuf,"软件版本：%s",SOFTWARE_VERSION);
+        lv_label_set_text(label_software_version, tempBuf);
     }
     else if(system_data.system.language == LANGUAGE_ENGLISH)
     {
-        lv_label_set_text(label_software_version, "Software version：V1.0_20250502");
+        sprintf(tempBuf,"Software version%s",SOFTWARE_VERSION);
+        lv_label_set_text(label_software_version, tempBuf);
     }
     lv_obj_align(label_software_version, LV_ALIGN_TOP_LEFT, 240, 20);
 
@@ -36650,6 +40860,12 @@ void get_config_data(void)
     lv_fs_file_t lv_file;
     lv_fs_res_t  lv_res;
     uint32_t bw;
+    int retvalue;
+    unsigned char databuf[20]={0};
+    int i;
+    unsigned char *p = NULL;
+    //int num;
+    unsigned char crc;
 
     lv_res = lv_fs_open(&lv_file, "A:/media/system_file/config.dat", LV_FS_MODE_RD);
     if (lv_res != LV_FS_RES_OK)
@@ -36667,6 +40883,7 @@ void get_config_data(void)
         }
         else
         {
+#if 0
             unsigned char crc =  CRC8(g_authorization_buf,15);
             if(crc == g_authorization_buf[15])
             {
@@ -36676,9 +40893,148 @@ void get_config_data(void)
             {
                 memset(g_authorization_buf,0,sizeof(g_authorization_buf));
             }
+#endif
             lv_fs_close(&lv_file);
         }
     }
+
+    memset(msg, 0, MSG_SIZE);
+    memset(&context, 0, sizeof(context));
+    AES_set_key(&context, key, iv, AES_MODE_128);
+
+    AES_convert_key(&context);
+    memset((unsigned char *)&g_authorization,0,sizeof(g_authorization));
+    AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&g_authorization, MSG_SIZE);
+
+    for(i=0;i<16;i++)
+    {
+        printf("0x%x ",g_authorization_buf[i]);
+    }
+
+    printf("\n\r");
+
+    p = (unsigned char *)&g_authorization;
+
+    for(i=0;i<16;i++)
+    {
+        printf("0x%x ",*(p+i));
+    }
+
+    printf("\n\r");
+
+    read_writer_rtc_enable = 0;
+
+    memset(databuf,0,sizeof(databuf));
+    databuf[0] = 0x04;
+    
+    retvalue = read(fd_rc522, databuf, 16);
+    if(retvalue < 0)
+    {
+        printf("fd_rc522 Failed!\r\n");
+        //close(fd_bm8563);
+        read_card_info_result = 0;
+    }
+    else
+    {
+        printf("读卡密文\n\r");
+        for(i=0;i<16;i++)
+        {
+            printf("0x%x ",databuf[i]);
+        }
+        printf("\n\r");
+
+        memset(msg, 0, MSG_SIZE);
+        memset(&context, 0, sizeof(context));
+        AES_set_key(&context, key, iv, AES_MODE_128);
+
+        AES_convert_key(&context);
+        memset((char *)&card_info_newest,0,sizeof(card_info_newest));
+        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
+
+        p = (unsigned char *)&card_info_newest;
+        printf("读卡明文\n\r");
+        for(i=0;i<16;i++)
+        {
+            printf("0x%x ",*(p+i));
+        }
+        printf("\n\r");
+
+        crc =  CRC8(p,16);
+        if(crc == card_info_newest.crc)
+        {
+            printf("databuf ok\n");
+            read_card_info_result = 1;
+        }
+        else
+        {
+            read_card_info_result = 0;
+        }
+    }
+
+    read_writer_rtc_enable = 1;
+}
+
+
+
+void check_hp45(void)
+{
+    int retvalue;
+    unsigned char databuf[20]={0};
+    int i;
+    unsigned char *p = NULL;
+    //int num;
+    unsigned char crc;
+
+    read_writer_rtc_enable = 0;
+
+    memset(databuf,0,sizeof(databuf));
+    databuf[0] = 0x04;
+    
+    retvalue = read(fd_rc522, databuf, 16);
+    if(retvalue < 0)
+    {
+        printf("fd_rc522 Failed!\r\n");
+        //close(fd_bm8563);
+        read_card_info_result = 0;
+    }
+    else
+    {
+        printf("读卡密文\n\r");
+        for(i=0;i<16;i++)
+        {
+            printf("0x%x ",databuf[i]);
+        }
+        printf("\n\r");
+
+        memset(msg, 0, MSG_SIZE);
+        memset(&context, 0, sizeof(context));
+        AES_set_key(&context, key, iv, AES_MODE_128);
+
+        AES_convert_key(&context);
+        memset((char *)&card_info_newest,0,sizeof(card_info_newest));
+        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
+
+        p = (unsigned char *)&card_info_newest;
+        printf("读卡明文\n\r");
+        for(i=0;i<16;i++)
+        {
+            printf("0x%x ",*(p+i));
+        }
+        printf("\n\r");
+
+        crc =  CRC8(p,16);
+        if(crc == card_info_newest.crc)
+        {
+            printf("databuf ok\n");
+            read_card_info_result = 1;
+        }
+        else
+        {
+            read_card_info_result = 0;
+        }
+    }
+
+    read_writer_rtc_enable = 1;
 }
 
 
@@ -36736,12 +41092,25 @@ void set_system_data(void)
 
 
 // 检查文件扩展名是否为.bmp（不区分大小写）
-int is_bmp_file(const char *filename) {
+int is_bmp_png_file(const char *filename) {
     const char *dot = strrchr(filename, '.');
-    if (!dot || dot == filename) {
+    if (!dot || dot == filename) 
+    {
         return 0;
     }
-    return strcasecmp(dot, ".bmp") == 0;
+
+    if(strcasecmp(dot, ".bmp") == 0)
+    {
+        return 1;
+    }
+    else if(strcasecmp(dot, ".png") == 0)
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
 }
 
 // 递归删除目录中的所有BMP文件
@@ -36777,7 +41146,7 @@ void delete_bmp_files(void)
          if (S_ISREG(statbuf.st_mode)) 
          {
             // 如果是普通文件，检查是否为BMP文件
-            if (is_bmp_file(entry->d_name)) 
+            if (is_bmp_png_file(entry->d_name)) 
             {
                 printf("正在删除: %s\n", path);
                 if (unlink(path) == -1) 
@@ -36813,10 +41182,10 @@ void recovery_data(void)
     int win_content_child_num = 0;
     int i;
     //char file_name[128]={ 0 };
-    char temp_typeface[128] = { 0 };
+    //char temp_typeface[128] = { 0 };
     int word_space = 0;
     //int word_size = 0;
-    int x_size = 0;
+    //int x_size = 0;
     //int y_size = 0;
     struct zint_symbol* my_symbol = NULL;
     int str_len;
@@ -36832,10 +41201,14 @@ void recovery_data(void)
     lv_obj_t* label1; 
     char bmp_name[64]={0};
     char bmp_name_1[100]={0};  
-    char date_time_str[64]={ 0 };
+    //char date_time_str[64]={ 0 };
     lv_obj_t* img_obj = NULL;
     lv_img_t* img_1 = NULL;
     lv_img_dsc_t* img_dsc = NULL;
+    unsigned char * data = NULL;
+    int success;
+    lv_img_header_t header;
+    lv_res_t res;
 
 
     memset(&data_structure, 0, sizeof(data_structure));
@@ -36874,16 +41247,19 @@ void recovery_data(void)
                         case TYPE_WORD:
                         {
                             temp_obj = lv_obj_create(win_content);          
-                            sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.word.typeface]);
-                            data_structure[i].data.word.info.name = temp_typeface;
-                            printf("%s\n\r", temp_typeface);
+                            //sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.word.typeface]);
+                            //data_structure[i].data.word.info.name = temp_typeface;
+                            //printf("%s\n\r", temp_typeface);
                             data_structure[i].data.word.info.weight = data_structure[i].data.word.size;
                             data_structure[i].data.word.info.style = data_structure[i].data.word.italic_bold;
-                            lv_ft_font_init(&data_structure[i].data.word.info);
+                            //lv_ft_font_init(&data_structure[i].data.word.info);
 
-                            lv_txt_get_size(&text_size, data_structure[i].data.word.text, data_structure[i].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                            printf("typeface=%d\n\r", data_structure[i].data.word.typeface);
+                            lv_font_t* temp_font = font_list_get(data_structure[i].data.word.typeface, data_structure[i].data.word.size, data_structure[i].data.word.info.style);
+                            lv_txt_get_size(&text_size, data_structure[i].data.word.text, temp_font, data_structure[i].data.word.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
-                        
+                            //lv_txt_get_size(&text_size, data_structure[i].data.word.text, data_structure[i].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+ 
                             lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                             lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
 
@@ -36893,20 +41269,19 @@ void recovery_data(void)
                             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                             lv_style_init(&data_structure[i].data.word.style);
-                            lv_style_set_text_font(&data_structure[i].data.word.style, data_structure[i].data.word.info.font);
+                            lv_style_set_text_font(&data_structure[i].data.word.style, temp_font);
                             word_space = data_structure[i].data.word.space;
                             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
-                            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+                            //x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+                            //printf("x_size=%d\n\r", x_size);
 
-                            printf("x_size=%d\n\r", x_size);
-
-                            lv_obj_set_size(temp_obj, x_size, text_size.y);
+                            lv_obj_set_size(temp_obj, text_size.x, text_size.y);
                             lv_obj_set_style_transform_angle(temp_obj, data_structure[i].data.word.spin*10, 0);
 
                             if (data_structure[i].data.word.spin != 0)
                             {
-                                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                                lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, text_size.x, text_size.y);
                             }
 
                             lv_style_set_text_letter_space(&data_structure[i].data.word.style, word_space);
@@ -36920,14 +41295,17 @@ void recovery_data(void)
                         case TYPE_DATE:
                         {
                             temp_obj = lv_obj_create(win_content);          
-                            sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.date_time.typeface]);
-                            data_structure[i].data.date_time.info.name = temp_typeface;
-                            printf("%s\n\r", temp_typeface);
+                            //sprintf(temp_typeface,"/media/%s", typeface_buf[data_structure[i].data.date_time.typeface]);
+                            //data_structure[i].data.date_time.info.name = temp_typeface;
+                            //printf("%s\n\r", temp_typeface);
                             data_structure[i].data.date_time.info.weight = data_structure[i].data.date_time.size;
                             data_structure[i].data.date_time.info.style = data_structure[i].data.date_time.italic_bold;
-                            lv_ft_font_init(&data_structure[i].data.date_time.info);
-
-                            lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, data_structure[i].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                            //lv_ft_font_init(&data_structure[i].data.date_time.info);
+                            //lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, data_structure[i].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                            
+                            printf("typeface=%d\n\r", data_structure[i].data.date_time.typeface);
+                            lv_font_t* temp_font = font_list_get(data_structure[i].data.word.typeface, data_structure[i].data.date_time.size, data_structure[i].data.date_time.info.style);
+                            lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, temp_font, data_structure[i].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
                             lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                             lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -36938,26 +41316,26 @@ void recovery_data(void)
                             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                             lv_style_init(&data_structure[i].data.date_time.style);
-                            lv_style_set_text_font(&data_structure[i].data.date_time.style, data_structure[i].data.date_time.info.font);
+                            lv_style_set_text_font(&data_structure[i].data.date_time.style, temp_font);
                             word_space = data_structure[i].data.date_time.space;
                             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
-                            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+                            //x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
+                            //printf("x_size=%d\n\r", x_size);
 
-                            printf("x_size=%d\n\r", x_size);
-
-                            lv_obj_set_size(temp_obj, x_size, text_size.y);
+                            lv_obj_set_size(temp_obj, text_size.x, text_size.y);
                             lv_obj_set_style_transform_angle(temp_obj, data_structure[i].data.date_time.spin*10, 0);
 
                             if (data_structure[i].data.word.spin != 0)
                             {
-                                lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, text_size.x, text_size.y);
+                                lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, text_size.x, text_size.y);
                             }
 
                             lv_style_set_text_letter_space(&data_structure[i].data.date_time.style, word_space);
                             label1 = lv_label_create(temp_obj);
                             lv_obj_add_style(label1, &data_structure[i].data.date_time.style, 0);
 
+#if 0
                             if(data_structure[i].data.date_time.date_or_time == 0)
                             {
                                 switch(data_structure[i].data.date_time.date_or_time_type)
@@ -37053,8 +41431,9 @@ void recovery_data(void)
                                         break;
                                 }              
                             }
+#endif
 
-                            lv_label_set_text(label1, date_time_str);
+                            lv_label_set_text(label1, data_structure[i].data.date_time.text);
                             lv_obj_center(label1);     
                             lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
                             break;
@@ -37105,14 +41484,14 @@ void recovery_data(void)
                                     {
                                         my_symbol->option_2 = 5;
                                     }
-
+#if 0
                                     if( data_structure[i].data.qr_bar.figure== 1)
                                     {
                                         my_symbol->show_hrt = 1;
                                         memcpy(my_symbol->text,data_structure[i].data.qr_bar.text,str_len);
                                     }
-
-                                    if (data_structure[win_content_child_num].data.qr_bar.borders == 1)
+#endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
                                     {
                                         my_symbol->output_options = BARCODE_BOX;
                                         my_symbol->whitespace_width = 3;
@@ -37124,14 +41503,15 @@ void recovery_data(void)
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
                                     ZBarcode_Print(my_symbol, 0);
-                                    //ZBarcode_Delete(my_symbol);
 
                                     pdata = stbi_load("out.bmp", &width, &height, &channels, 1);
                                     printf("width=%d\n\r", width);
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)width);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)width);
+
+                                    //my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -37202,11 +41582,51 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -37235,7 +41655,7 @@ void recovery_data(void)
                                     height_len =  data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
 
-                                        //figure_borders = 0;
+
                 #if 0
                                         if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                                         {
@@ -37244,17 +41664,16 @@ void recovery_data(void)
                                             //figure_borders |= 0x01;
                                             data_structure[win_content_child_num].data.qr_bar.figure = 1;
                                         }
+                #endif
 
-                                        if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+                                        if (data_structure[i].data.qr_bar.borders == 1)
                                         {
                                             my_symbol->output_options = BARCODE_BOX;
                                             my_symbol->whitespace_width = 3;
                                             my_symbol-> whitespace_height = 3; 
                                             my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
                                             //figure_borders |= 0x02;
-                                            data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                         }
-                #endif
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -37268,7 +41687,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                   // my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -37340,11 +41760,51 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -37366,17 +41826,15 @@ void recovery_data(void)
                                     //figure_borders |= 0x01;
                                     data_structure[win_content_child_num].data.qr_bar.figure = 1;
                                 }
-
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                                {
-                                    my_symbol->output_options = BARCODE_BOX;
-                                    my_symbol->whitespace_width = 3;
-                                    my_symbol-> whitespace_height = 3; 
-                                    my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                    //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                                }
         #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                        //figure_borders |= 0x02;
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -37389,7 +41847,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                   // my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -37461,11 +41920,51 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -37476,7 +41975,6 @@ void recovery_data(void)
                                     my_symbol->symbology = BARCODE_HANXIN;
                                     height_len = data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
-                                //figure_borders = 0;
         #if 0
                                 if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
                                 {
@@ -37485,17 +41983,16 @@ void recovery_data(void)
                                     //figure_borders |= 0x01;
                                     data_structure[win_content_child_num].data.qr_bar.figure = 1;
                                 }
-
-                                if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
+        #endif
+                                if (data_structure[i].data.qr_bar.borders == 1)
                                 {
                                     my_symbol->output_options = BARCODE_BOX;
                                     my_symbol->whitespace_width = 3;
                                     my_symbol-> whitespace_height = 3; 
                                     my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
                                     //figure_borders |= 0x02;
-                                    data_structure[win_content_child_num].data.qr_bar.borders = 1;
                                 }
-        #endif
+        
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -37508,7 +42005,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                    //my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -37562,30 +42060,57 @@ void recovery_data(void)
                                         }
                                     }
 
-#if 0
-                                        stbi_write_bmp("QR_bar_code.bmp", width, height, 4, pnew_data);
-                                        // 使用data进行图像处理...
-                                        lv_mem_free(pnew_data);
-                                        stbi_image_free(pdata); // 释放内存
-
-                                        //显示图像
-                                        img = lv_img_create(temp_obj);
-                                        lv_img_set_src(img, "A:/root/QR_bar_code.bmp");
-                                        lv_obj_center(img);
-#endif
-
                                     sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.bmp",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
                                     stbi_write_bmp(bmp_name, width, height, 4, pnew_data);
                                     // 使用data进行图像处理...
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
-        
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -37616,26 +42141,25 @@ void recovery_data(void)
                                     my_symbol->symbology = BARCODE_CODE39;
                                     height_len =  data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
+    
+    
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -37648,7 +42172,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                    //   my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -37720,11 +42245,51 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -37735,26 +42300,24 @@ void recovery_data(void)
                                     my_symbol->symbology = BARCODE_CODE128;
                                     height_len = data_structure[win_content_child_num].data.qr_bar.height;
                                     my_symbol->scale = 1;
-                                    //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
+
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -37767,7 +42330,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                    //   my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r",(double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -37839,12 +42403,51 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                 data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
 
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -37857,26 +42460,23 @@ void recovery_data(void)
                                     height_len = data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
 
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -37889,7 +42489,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                     //  my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -37961,11 +42562,51 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                 data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -37978,26 +42619,23 @@ void recovery_data(void)
                                     height_len =  data_structure[i].data.qr_bar.height ;
                                     my_symbol->scale = 1;
 
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
                                     strcpy(my_symbol->outfile, "out.bmp");
 
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -38011,7 +42649,7 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)118.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)118.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
                                     printf("scale=%f\n\r",(double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -38082,12 +42720,52 @@ void recovery_data(void)
                                     // 使用data进行图像处理...
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
+                                    
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
 
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -38100,26 +42778,23 @@ void recovery_data(void)
                                     my_symbol->scale = 1;
 
 
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -38132,7 +42807,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                    //   my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r",(double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -38204,11 +42880,51 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
+
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
 
                                     lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
@@ -38220,26 +42936,24 @@ void recovery_data(void)
                                     height_len = data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
 
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
+
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
 
@@ -38251,7 +42965,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                     // my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -38323,13 +43038,53 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
-                                    lv_obj_center(img); 
+                                    lv_obj_center(img);
 
-                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
+
+                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
                                     break;
                                 }
@@ -38339,26 +43094,23 @@ void recovery_data(void)
                                     height_len = data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
 
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -38371,7 +43123,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                    // my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -38443,13 +43196,53 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
 
-                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
+
+                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
                                     break;
                                 }
@@ -38459,26 +43252,23 @@ void recovery_data(void)
                                     height_len = data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
 
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -38491,7 +43281,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                    // my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
             
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -38563,13 +43354,53 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
 
-                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
+
+                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
                                     break;
                                 }
@@ -38578,26 +43409,24 @@ void recovery_data(void)
                                     my_symbol->symbology = BARCODE_EAN14;
                                     height_len = data_structure[i].data.qr_bar.height;
                                     my_symbol->scale = 1;
-                            //figure_borders = 0;
-    #if 0
-                            if(lv_obj_has_state(sw_addition_QR_code_figure, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->show_hrt = 1;
-                                memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
-                                //figure_borders |= 0x01;
-                                data_structure[win_content_child_num].data.qr_bar.figure = 1;
-                            }
 
-                            if (lv_obj_has_state(sw_addition_QR_code_border, LV_STATE_CHECKED) == 1)
-                            {
-                                my_symbol->output_options = BARCODE_BOX;
-                                my_symbol->whitespace_width = 3;
-                                my_symbol-> whitespace_height = 3; 
-                                my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
-                                //figure_borders |= 0x02;
-                                data_structure[win_content_child_num].data.qr_bar.borders = 1;
-                            }
-    #endif
+                                    if (data_structure[i].data.qr_bar.figure == 1)
+                                    {
+                                        my_symbol->show_hrt = 1;
+                                        memcpy(my_symbol->text,lv_label_get_text(label_btn_addition_QR_code_text),strlen(lv_label_get_text(label_btn_addition_QR_code_text))+ 1);
+                                    }
+                                    else
+                                    {
+                                        my_symbol->show_hrt = 0;
+                                    }
+
+                                    if (data_structure[i].data.qr_bar.borders == 1)
+                                    {
+                                        my_symbol->output_options = BARCODE_BOX;
+                                        my_symbol->whitespace_width = 3;
+                                        my_symbol-> whitespace_height = 3; 
+                                        my_symbol-> border_width = 2;   /* Size of border in X-dimensions */
+                                    }
 
                                     strcpy(my_symbol->outfile, "out.bmp");
                                     ZBarcode_Encode(my_symbol, (unsigned char *)data_structure[i].data.qr_bar.text, 0);
@@ -38610,7 +43439,8 @@ void recovery_data(void)
                                     printf("height=%d\n\r", height);
                                     printf("channels=%d\n\r", channels);
                         
-                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)100.0/(float)height);
+                                    my_symbol->scale = (float)((float)150.0*(float)height_len/(float)QR_BAR_MAX_HIGHT/(float)height);
+                                     //my_symbol->scale = (float)height_len/(float)height;
                                     printf("scale=%f\n\r", (double)my_symbol->scale);
     
                                     strcpy(my_symbol->outfile, "out.bmp");
@@ -38682,13 +43512,53 @@ void recovery_data(void)
                                     lv_mem_free(pnew_data);
                                     stbi_image_free(pdata); // 释放内存
 
+                                    data = stbi_load(bmp_name, &width, &height, &channels, 0);
+                                    if (!data) 
+                                    {
+                                        printf("错误：无法加载图片 %s\n", bmp_name);
+                                    }
+                                    printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
+
+                                    sprintf(bmp_name,"/media/qr_bar_bmp/%02d%02d%02d%02d%02d%02d.png",g_system_time[0],g_system_time[1],g_system_time[2],g_system_time[3],g_system_time[4],g_system_time[5]);
+                                    
+                                    success = stbi_write_png(bmp_name, width, height, channels, data, width * channels);
+                                    if (!success) 
+                                    {
+                                        printf("错误：保存 PNG 失败\n");
+                                    } 
+                                    else
+                                    {
+                                        printf("PNG 保存成功：%s\n", bmp_name);
+                                    }
+
+                                    // 释放内存
+                                    stbi_image_free(data);
+
                                     //显示图像
                                     img = lv_img_create(temp_obj);
                                     sprintf(bmp_name_1,"A:%s",bmp_name);
                                     lv_img_set_src(img, bmp_name_1);
                                     lv_obj_center(img);
 
-                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
+                                    res = lv_img_decoder_get_info(bmp_name_1, &header);  // 直接传入文件路径
+
+                                    if (res == LV_RES_OK)
+                                    {
+                                        printf("PNG: %dx%d\n", header.w, header.h);
+                                    }
+                                    else
+                                    {
+                                        printf("lv_img_decoder_get_info error\n");
+                                    }
+
+                                    lv_img_set_zoom(img,data_structure[i].data.qr_bar.size);
+
+                                    width = header.w * data_structure[i].data.qr_bar.size / 256;
+                                    height = header.h * data_structure[i].data.qr_bar.size / 256;
+
+                                    lv_obj_set_size(temp_obj, width, height);
+
+                                    lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
 
                                     break;
                                 }
@@ -38708,26 +43578,72 @@ void recovery_data(void)
                             lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
+                            temp_obj = lv_obj_create(win_content);
+
+                            lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
+                            lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+
+                            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
+                            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_FOCUSED, NULL);
+                            lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
+                            lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
+
+                            char picture_name[128]={0};
+
                             // 假设你有一个图片对象
                             img_obj = lv_img_create(temp_obj);
-                            lv_img_set_src(img_obj, data_structure[i].data.picture.text);
 
-                            lv_obj_align(img_obj, LV_ALIGN_TOP_LEFT, 0, 0);
+                            if(strcmp(data_structure[i].data.picture.text_1,"png") != 0)
+                            {
+                                //int width, height, channels;
+                                data = stbi_load(data_structure[i].data.picture.text_1, &width, &height, &channels, 0);
+                                if (!data) 
+                                {
+                                    printf("错误：无法加载图片 %s\n", data_structure[i].data.picture.text_1);
+                                }
 
-                            lv_img_set_zoom(img_obj, data_structure[i].data.picture.size);
+                                printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
 
-                            // 获取图片对象
-                            img_1 = (lv_img_t*)img_obj;
 
-                            // 获取图片的源文件
-                            img_dsc = (lv_img_dsc_t*)img_1->src;
+                                // 步骤 2：将数据保存为 PNG
+                                success = stbi_write_png(data_structure[i].data.picture.text_2, width, height, channels, data, width * channels);
+                                if (!success) 
+                                {
+                                    printf("错误：保存 PNG 失败\n");
+                                } 
+                                else 
+                                {
+                                    printf("PNG 保存成功：%s\n", data_structure[i].data.picture.text_2);
+                                }
 
-                            // 获取图片的宽和高
-                            width = img_dsc->header.w;
-                            height = img_dsc->header.h;
+                                sprintf(picture_name, "A:%s", data_structure[i].data.picture.text_2);
 
-                            // 打印宽和高
-                            printf("Image width: %d, height: %d\n", width, height);
+                                stbi_image_free(data);
+                            }
+                            else
+                            {
+                                sprintf(picture_name, "A:%s", data_structure[i].data.picture.text_1);
+                            }
+                            
+                            lv_img_set_src(img_obj, picture_name);
+                            lv_obj_center(img_obj);
+                            
+                            res = lv_img_decoder_get_info(picture_name, &header);  // 直接传入文件路径
+
+                            if (res == LV_RES_OK)
+                            {
+                                printf("PNG: %dx%d\n", header.w, header.h);
+                            }
+                            else
+                            {
+                                printf("lv_img_decoder_get_info error\n");
+                            }
+
+                            lv_img_set_zoom(img_obj,data_structure[i].data.picture.size);
+
+                            width = header.w * data_structure[i].data.picture.size / 256;
+                            height = header.h * data_structure[i].data.picture.size / 256;
+
                             lv_obj_set_size(temp_obj, width, height);
                             lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
                             break;
@@ -38749,7 +43665,7 @@ void recovery_data(void)
                             img_obj = lv_img_create(temp_obj);
                             lv_img_set_src(img_obj,  &icon_buf[data_structure[i].data.icon.type]);
 
-                            lv_obj_align(img_obj, LV_ALIGN_CENTER, 0, 0);
+                            lv_obj_center(img_obj);
 
                             lv_img_set_zoom(img_obj, data_structure[i].data.icon.size);
 
@@ -38760,8 +43676,8 @@ void recovery_data(void)
                             img_dsc = (lv_img_dsc_t*)img_1->src;
 
                             // 获取图片的宽和高
-                            width = img_dsc->header.w;
-                            height = img_dsc->header.h;
+                            width = img_dsc->header.w * data_structure[i].data.icon.size / 256;
+                            height = img_dsc->header.h * data_structure[i].data.icon.size / 256;
 
                             // 打印宽和高
                             printf("Image width: %d, height: %d\n", width, height);
@@ -38793,13 +43709,14 @@ void recovery_data(void)
                             //data_structure[win_content_child_num].data.count.repetition = atoi(lv_label_get_text(label_btn_addition_count_times_repetition));
 
                             temp_obj = lv_obj_create(win_content);
-                            sprintf(temp_typeface, "/media/%s", typeface_buf[data_structure[win_content_child_num].data.count.typeface]);
-                            data_structure[win_content_child_num].data.count.typeface = i;
-                            printf("%s\n", temp_typeface);
-                            data_structure[win_content_child_num].data.count.info.name = temp_typeface;
+                            //sprintf(temp_typeface, "/media/%s", typeface_buf[data_structure[win_content_child_num].data.count.typeface]);
+                            //data_structure[win_content_child_num].data.count.typeface = i;
+                            //printf("%s\n", temp_typeface);
+                            //data_structure[win_content_child_num].data.count.info.name = temp_typeface;
                             data_structure[win_content_child_num].data.count.info.weight = data_structure[win_content_child_num].data.count.size;
 
-                            lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+                            //lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
+                            lv_font_t* temp_font = font_list_get(data_structure[win_content_child_num].data.count.typeface, data_structure[win_content_child_num].data.count.size, 0);
 
                             printf("lead_zero=%d\n\r", data_structure[win_content_child_num].data.count.lead_zero);
                             printf("law=%d\n\r", data_structure[win_content_child_num].data.count.law);
@@ -38849,8 +43766,8 @@ void recovery_data(void)
 
                             printf("tempString=%s\n\r", tempString);
 
-                        
-                            lv_txt_get_size(&text_size, tempString, data_structure[win_content_child_num].data.count.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                            word_space =  data_structure[win_content_child_num].data.count.space;
+                            lv_txt_get_size(&text_size, tempString, temp_font, word_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                             lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                             lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -38861,17 +43778,9 @@ void recovery_data(void)
                             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                             lv_style_init(&data_structure[win_content_child_num].data.count.style);
-                            lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, data_structure[win_content_child_num].data.count.info.font);
-
-                            word_space =  data_structure[win_content_child_num].data.count.space;
-
+                            lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style, temp_font);
                             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
-
-                            x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
-
-                            printf("x_size=%d\n\r", x_size);
-
-                            lv_obj_set_size(temp_obj, x_size, text_size.y);
+                            lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
                             lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
                             label1 = lv_label_create(temp_obj);
@@ -38887,14 +43796,14 @@ void recovery_data(void)
                         {
                             temp_obj = lv_obj_create(win_content);
 
-                            sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
+                            //sprintf(temp_typeface, "/media/%s", typeface_buf[0]);
                             //data_structure[win_content_child_num].data.word.typeface = 0;
                             //info.name = "./lvgl/src/extra/libs/freetype/arial.ttf";
                             //info.name = "./lvgl/src/extra/libs/freetype/simsun.ttc";
                             //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
-                            printf("%s\n", temp_typeface);
+                            //printf("%s\n", temp_typeface);
 
-                            data_structure[win_content_child_num].data.word.info.name = temp_typeface;
+                            //data_structure[win_content_child_num].data.word.info.name = temp_typeface;
 
                             data_structure[win_content_child_num].data.word.info.weight = data_structure[win_content_child_num].data.word.size;
 
@@ -38902,9 +43811,10 @@ void recovery_data(void)
 
                             data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
 
-                            lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+                            //lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
+                            lv_font_t* temp_font = font_list_get(0, data_structure[win_content_child_num].data.word.size, 0);
 
-                            lv_txt_get_size(&text_size, typeface_buf[0], data_structure[win_content_child_num].data.word.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                            lv_txt_get_size(&text_size, typeface_buf[0], temp_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                             lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                             lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -38915,7 +43825,7 @@ void recovery_data(void)
                             lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
                             lv_style_init(&data_structure[win_content_child_num].data.word.style);
-                            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, data_structure[win_content_child_num].data.word.info.font);
+                            lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, temp_font);
 
                             lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
@@ -39136,6 +44046,8 @@ void lv_demo_widgets(void)
 
     get_sd_id();
 
+    //get_config_data();
+
     //lv_obj_add_event_cb(lv_scr_act(), screen_touched_event_handler, LV_EVENT_PRESSED, NULL);
 
     LV_IMG_DECLARE(head_background_image);
@@ -39191,7 +44103,7 @@ void lv_demo_widgets(void)
     lv_obj_set_style_text_color(Battery_image, lv_color_hex(0x00ff00),LV_STATE_DEFAULT);
 
 
-    lv_freetype_init(64, 1, 0);
+    lv_freetype_init(40, 200, 1024*1024);
 #if 0
     lv_freetype_init(64, 1, 0);
     ///*Create a font*/
@@ -39766,7 +44678,7 @@ void lv_demo_widgets(void)
     {
         printf("file /dev/buzzer open ok!\r\n");
     }
-
+#if 0
     fd_mp1484_en = open("/dev/mp1484_en", O_RDWR);
 	if(fd_mp1484_en < 0)
     {
@@ -39777,7 +44689,7 @@ void lv_demo_widgets(void)
         printf("file /dev/mp1484_en open ok!\r\n");
         set_mp1484_en(1);
     }
-
+#endif
 
     fd_bm8563 = open("/dev/bm8563", O_RDWR);
 	if(fd_bm8563 < 0)
@@ -39789,6 +44701,27 @@ void lv_demo_widgets(void)
         printf("file /dev/bm8563 open ok!\r\n");
     }
 
+    fd_rc522 = open("/dev/rc522", O_RDWR);
+	if(fd_rc522 < 0)
+    {
+		printf("file /dev/rc522 open failed!\r\n");
+	}
+    else
+    {
+        printf("file /dev/rc522 open ok!\r\n");
+    }
+
+    get_config_data();
+
+    fd_optoelectronic = open("/dev/optoelectronic", O_RDWR);
+	if(fd_optoelectronic < 0)
+    {
+		printf("open /dev/keys-key failed!\r\n");
+	}
+    else
+    {
+        printf("open /dev/keys-key  ok!\r\n");
+    }
 
     pwm_init();
     pwm_voltage();
