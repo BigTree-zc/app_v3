@@ -38,10 +38,12 @@ int main(void)
 #include <fcntl.h>
 #include <stdlib.h>
 
-#define DISP_BUF_SIZE (800 * 480)
+#define DISP_BUF_SIZE (480 * 272)
 
 //void msleep(unsigned int n);
 //void sleep(unsigned int n);
+
+extern void initialize(void);
 
 int main(void)
 {
@@ -116,11 +118,18 @@ int main(void)
     fbdev_init();
 
     /*A small buffer for LittlevGL to draw the screen's content*/
-    static lv_color_t buf[DISP_BUF_SIZE];
+    //static lv_color_t buf[DISP_BUF_SIZE];
+
+    // 分配两个缓冲区
+    static lv_color_t buf1[DISP_BUF_SIZE];
+    static lv_color_t buf2[DISP_BUF_SIZE]; // 第二个缓冲区
 
     /*Initialize a descriptor for the buffer*/
     static lv_disp_draw_buf_t disp_buf;
-    lv_disp_draw_buf_init(&disp_buf, buf, NULL, DISP_BUF_SIZE);
+    //lv_disp_draw_buf_init(&disp_buf, buf, NULL, DISP_BUF_SIZE);
+
+    // 初始化时告诉LVGL使用这两个缓冲区
+    lv_disp_draw_buf_init(&disp_buf, buf1, buf2, DISP_BUF_SIZE);
 
     /*Initialize and register a display driver*/
     static lv_disp_drv_t disp_drv;
@@ -194,8 +203,7 @@ int main(void)
     while(1) 
     {
         lv_timer_handler();
-        usleep(10);
-        //function_20240522();
+        usleep(5000);
     }
     
     return 0;

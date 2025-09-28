@@ -28,7 +28,7 @@
 #include <regex.h> // 用于正则表达式匹配
 
 
-#define  SOFTWARE_VERSION  "V1.0_20250811"
+#define  SOFTWARE_VERSION  "V1.0_20250928"
 
 
 
@@ -122,7 +122,10 @@ static lv_obj_t * win_content;
 static lv_obj_t* win_obj;
 static lv_obj_t* screen_off_obj;
 
-#define CANVAS_WIDTH      1077
+
+//#define CANVAS_WIDTH      9169   //39
+#define CANVAS_WIDTH      16077   //156
+//#define CANVAS_WIDTH      5000  //39
 #define CANVAS_HEIGHT     158
 
 #define PRINT_KEY_NUM     130   // PE2
@@ -148,8 +151,8 @@ static lv_obj_t* screen_off_obj;
 #define rPE_PULL0 0XAC  //PE_PULL0寄存器地址偏移
 
 
-#define CANVAS_WIDTH_1  1000
-#define CANVAS_HEIGHT_1 150
+#define CANVAS_WIDTH_1  2077
+#define CANVAS_HEIGHT_1 158
 #define WORD_MAX_SIZE 200
 
 
@@ -271,10 +274,13 @@ lv_timer_t * timer_100ms;
 lv_obj_t* temp_focused_obj;
 
 lv_obj_t* canvas;
-lv_color_t canvasBuf[(32 * 1024) / 8 * 150];
+
+lv_color_t *canvasBuf  = NULL;
 
 lv_style_t style_info;
 lv_ft_info_t info;
+
+static lv_img_dsc_t* snapshot = NULL;
 
 int fd_pwm;
 int fd_period_0;
@@ -291,9 +297,9 @@ int fd_enable_1;
 #define LENGTH            100
 
 
-#define NEW_TEXT_MAX_NUMBER 20
-#define TEXT_MAX_LENGTH     256
-#define BREAK_MAX_NUMBER    8
+#define NEW_TEXT_MAX_NUMBER 10
+#define TEXT_MAX_LENGTH     200
+#define BREAK_MAX_NUMBER    5
 
 
 enum
@@ -330,8 +336,11 @@ typedef struct  _DATE_TIME_STRUCTURE_
     unsigned char italic_bold;//斜体
     unsigned char space;//间距
     unsigned char size;//大小
-    unsigned char date_or_time;//0:date;1:time;
+    unsigned char date_or_time;//0:date;1:time;2:validity
     unsigned char date_or_time_type;
+    unsigned char year;
+    unsigned char month;
+    unsigned char day;
     int spin;//旋转
     lv_ft_info_t info;
     lv_style_t style;
@@ -355,8 +364,8 @@ typedef struct  _QR_BAR_STRUCTURE_
 
 typedef struct  _PICTURE_STRUCTURE_
 {
-    char text_1[128];//存储图片名称
-    char text_2[128];//存储图片名称
+    char text_1[100];//存储图片名称
+    char text_2[100];//存储图片名称
     unsigned int size;
 }PICTURE_STRUCTURE;
 
@@ -546,6 +555,7 @@ lv_obj_t* left_stop_img_typeface;
 lv_obj_t* right_stop_img_typeface;
 lv_obj_t* typeface_slider_bg;
 lv_obj_t* slider_typeface;
+lv_obj_t* slider_main;
 
 #define TYPEFACE_NUMBER   37
 #define QR_CODE_NUMBER    4
@@ -662,6 +672,7 @@ static const lv_btnmatrix_ctrl_t keyboard_ctrl[] =
 };
 
 lv_obj_t* pwd_keyboard;
+lv_obj_t* yield_text_area;
 
 
 lv_obj_t* system_date_head_bg;
@@ -793,7 +804,7 @@ typedef struct  _DATE_TYPE_OBJ_
 
 DATE_TYPE_OBJ date_type_obj[DATA_TYPE_NUMBER];
 
-#define TIME_TYPE_NUMBER   6
+#define TIME_TYPE_NUMBER   5
 
 
 lv_obj_t* trigger_mode;
@@ -1230,6 +1241,8 @@ static lv_obj_t* Ink_cartridge_error_content;
 static lv_obj_t* label_warning_content;
 static lv_obj_t* button_ack;
 static lv_obj_t* button_ack_label;
+static lv_obj_t* button_return;
+static lv_obj_t* button_return_label;
 
 unsigned char g_file_num = 0;
 
@@ -1356,17 +1369,6 @@ static const uint8_t iv[KEYSIZE] =
     0xff, 0xc0, 0x01, 0x7d
 };
 
-#if 0
-static uint8_t original_msg[MSG_SIZE] =
-{
-    0x00, 0xfc, 0xa2, 0xf4,
-    0x93, 0xfa, 0x64, 0xeb,
-    0x87, 0xca, 0xeb, 0x62,
-    0x90, 0x89, 0x34, 0xdb,
-};
-#endif
-
-
 // 字体样式标志位（可组合使用，如粗体+斜体）
 typedef enum {
     FONT_STYLE_NORMAL = 0x00, // 默认
@@ -1401,19 +1403,26 @@ CARD_INFORMATION card_info_newest;
 int read_card_info_result = 0;
 
 unsigned int total_output_last;
+unsigned char total_output_changeFlag = 0;
 
 AUTHORIZATION_INFORMATION  g_authorization;
+
+typedef struct _VALIDITY_DATE_ {
+    unsigned char flag;          
+    unsigned char year;         
+    unsigned char month;        
+    unsigned char day;        
+} VALIDITY_DATE;
+
+VALIDITY_DATE validity_date;
+unsigned char flag_modification_or_addition = 0;
 
 static void textarea_text_event_cb(lv_event_t* e);
 static void drag_event_handler(lv_event_t* e);
 
-unsigned short get_print_data_for_each_column(unsigned int line_number,unsigned int A_number,unsigned char odd_even);
 void set_mp1484_en(unsigned char gpio_status);
 void delay_100ns(unsigned int ns);
-void p_74hc595d(unsigned short data);
 void initialize(void);
-void function_20240522(void);
-void set_PH45_GPIO(unsigned char gpio_num,unsigned char gpio_status);
 void set_mp1484_en(unsigned char gpio_status);
 int get_max(int buf[],int len);
 void print_event_cb(lv_event_t *e);
@@ -1451,10 +1460,46 @@ void addition_text_updata(void);
 void addition_QR_bar_updata(void);
 int check_string_format(const char *str);
 void check_hp45(void);
+// 判断是否为闰年
+bool isLeapYear(int year);
+// 获取指定年月的天数
+int daysInMonth(int year, int month) ;
+// 计算有效期后的日期
+void calculateExpiryDate(int startYear, int startMonth, int startDay,
+                         int validYears, int validMonths, int validDays,
+                         int *endYear, int *endMonth, int *endDay);
 
 
 
 static FontNode* font_list_head = NULL;
+
+
+// 方向定义
+typedef enum {
+    CROP_DIRECTION_NORMAL = 0,    // 正向：从左到右，从上到下
+    CROP_DIRECTION_REVERSE_X = 1, // 逆向：从右到左，从上到下
+    CROP_DIRECTION_REVERSE_Y = 2, // 正倒：从左到右，从下到上
+    CROP_DIRECTION_REVERSE_XY = 3 // 逆倒：从右到左，从下到上
+} CropDirection;
+
+bool find_effective_x_range(const uint8_t* input_data, uint32_t input_width, uint32_t input_height,
+    uint32_t x1, uint32_t x2,
+    uint32_t* effective_start_x, uint32_t* effective_end_x);
+
+    // 完全重写的正确截图函数
+bool crop_x_range_correct(const uint8_t* input_data, uint32_t input_width, uint32_t input_height,
+    uint32_t x1, uint32_t x2,
+    uint8_t* output_buf, uint32_t output_buf_size,
+    uint32_t* output_width, uint32_t* output_height,
+    uint32_t* actual_start_x, uint32_t* actual_end_x,
+    CropDirection direction);
+
+static void button_left_stop_event_cb(lv_event_t* e);
+static void button_right_stop_event_cb(lv_event_t* e);
+static void file_change_event_cb(lv_event_t* e);
+static void file_draw_event_cb(lv_event_t* e);
+void tabview_event_cb(lv_event_t * e);
+
 
 FontNode* font_list_find(FontType type, uint16_t size, FontStyle style)
 {
@@ -1559,6 +1604,8 @@ void font_list_release(FontType type, uint16_t size, FontStyle style)
     {
         node->ref_count--;
     }
+
+    font_list_gc();
 }
 
 
@@ -1611,1141 +1658,7 @@ unsigned char stringToHex(char a)
     return 0;
 }
 
-//获取1列的打印数据
-unsigned short get_print_data_for_each_column(unsigned int line_number,unsigned int A_number,unsigned char odd_even)
-{
-    unsigned int nozzle_number;
-    unsigned short ret = 0;
 
-    //偶数
-    if (odd_even == 0)
-    {
-        nozzle_number = line_number * 2 + 2;
-    }
-    //奇数
-    else
-    {
-        nozzle_number = line_number * 2 + 1;
-    }
-    switch (A_number)
-    {
-        case 1:
-            switch (nozzle_number)
-            {
-                case 1:
-                    ret = 0x0001;
-                    break;
-                case 45:
-                    ret = 0x0004;
-                    break;
-                case 42:
-                    ret = 0x0008;
-                    break;
-                case 89:
-                    ret = 0x0010;
-                    break;
-                case 86:
-                    ret = 0x0020;
-                    break;
-                case 133:
-                    ret = 0x0040;
-                    break;
-                case 130:
-                    ret = 0x0080;
-                    break;
-                case 177:
-                    ret = 0x0100;
-                    break;
-                case 174:
-                    ret = 0x0200;
-                    break;
-                case 221:
-                    ret = 0x0400;
-                    break;
-                case 218:
-                    ret = 0x0800;
-                    break;
-                case 265:
-                    ret = 0x1000;
-                    break;
-                case 262:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-        case 2:
-            switch (nozzle_number)
-            {
-                case 7:
-                    ret = 0x0001;
-                    break;
-                case 4:
-                    ret = 0x0002;
-                    break;
-                case 51:
-                    ret = 0x0004;
-                    break;
-                case 48:
-                    ret = 0x0008;
-                    break;
-                case 95:
-                    ret = 0x0010;
-                    break;
-                case 92:
-                    ret = 0x0020;
-                    break;
-                case 139:
-                    ret = 0x0040;
-                    break;
-                case 136:
-                    ret = 0x0080;
-                    break;
-                case 183:
-                    ret = 0x0100;
-                    break;
-                case 180:
-                    ret = 0x0200;
-                    break;
-                case 227:
-                    ret = 0x0400;
-                    break;
-                case 224:
-                    ret = 0x0800;
-                    break;
-                case 271:
-                    ret = 0x1000;
-                    break;
-                case 268:
-                    ret = 0x2000;
-                    break;
-                default:
-                        ret = 0x00;
-                        break;
-            }
-            break;
-        case 3:
-            switch (nozzle_number)
-            {
-                case 13:
-                    ret = 0x0001;
-                    break;
-                case 10:
-                    ret = 0x0002;
-                    break;
-                case 57:
-                    ret = 0x0004;
-                    break;
-                case 54:
-                    ret = 0x0008;
-                    break;
-                case 101:
-                    ret = 0x0010;
-                    break;
-                case 98:
-                    ret = 0x0020;
-                    break;
-                case 145:
-                    ret = 0x0040;
-                    break;
-                case 142:
-                    ret = 0x0080;
-                    break;
-                case 189:
-                    ret = 0x0100;
-                    break;
-                case 186:
-                    ret = 0x0200;
-                    break;
-                case 233:
-                    ret = 0x0400;
-                    break;
-                case 230:
-                    ret = 0x0800;
-                    break;
-                case 277:
-                    ret = 0x1000;
-                    break;
-                case 274:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 4:
-            switch (nozzle_number)
-            {
-                case 19:
-                    ret = 0x0001;
-                    break;
-                case 16:
-                    ret = 0x0002;
-                    break;
-                case 63:
-                    ret = 0x0004;
-                    break;
-                case 60:
-                    ret = 0x0008;
-                    break;
-                case 107:
-                    ret = 0x0010;
-                    break;
-                case 104:
-                    ret = 0x0020;
-                    break;
-                case 151:
-                    ret = 0x0040;
-                    break;
-                case 148:
-                    ret = 0x0080;
-                    break;
-                case 195:
-                    ret = 0x0100;
-                    break;
-                case 192:
-                    ret = 0x0200;
-                    break;
-                case 239:
-                    ret = 0x0400;
-                    break;
-                case 236:
-                    ret = 0x0800;
-                    break;
-                case 283:
-                    ret = 0x1000;
-                    break;
-                case 280:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 5:
-            switch (nozzle_number)
-            {
-                case 25:
-                    ret = 0x0001;
-                    break;
-                case 22:
-                    ret = 0x0002;
-                    break;
-                case 69:
-                    ret = 0x0004;
-                    break;
-                case 66:
-                    ret = 0x0008;
-                    break;
-                case 113:
-                    ret = 0x0010;
-                    break;
-                case 110:
-                    ret = 0x0020;
-                    break;
-                case 157:
-                    ret = 0x0040;
-                    break;
-                case 154:
-                    ret = 0x0080;
-                    break;
-                case 201:
-                    ret = 0x0100;
-                    break;
-                case 198:
-                    ret = 0x0200;
-                    break;
-                case 245:
-                    ret = 0x0400;
-                    break;
-                case 242:
-                    ret = 0x0800;
-                    break;
-                case 289:
-                    ret = 0x1000;
-                    break;
-                case 286:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 6:
-            switch (nozzle_number)
-            {
-                case 31:
-                    ret = 0x0001;
-                    break;
-                case 28:
-                    ret = 0x0002;
-                    break;
-                case 75:
-                    ret = 0x0004;
-                    break;
-                case 72:
-                    ret = 0x0008;
-                    break;
-                case 119:
-                    ret = 0x0010;
-                    break;
-                case 116:
-                    ret = 0x0020;
-                    break;
-                case 163:
-                    ret = 0x0040;
-                    break;
-                case 160:
-                    ret = 0x0080;
-                    break;
-                case 207:
-                    ret = 0x0100;
-                    break;
-                case 204:
-                    ret = 0x0200;
-                    break;
-                case 251:
-                    ret = 0x0400;
-                    break;
-                case 248:
-                    ret = 0x0800;
-                    break;
-                case 295:
-                    ret = 0x1000;
-                    break;
-                case 292:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 7:
-            switch (nozzle_number)
-            {
-                case 37:
-                    ret = 0x0001;
-                    break;
-                case 34:
-                    ret = 0x0002;
-                    break;            
-                case 81:
-                    ret = 0x0004;
-                    break;
-                case 78:
-                    ret = 0x0008;
-                    break;
-                case 125:
-                    ret = 0x0010;
-                    break;
-                case 122:
-                    ret = 0x0020;
-                    break;
-                case 169:
-                    ret = 0x0040;
-                    break;
-                case 166:
-                    ret = 0x0080;
-                    break;
-                case 213:
-                    ret = 0x0100;
-                    break;
-                case 210:
-                    ret = 0x0200;
-                    break;
-                case 257:
-                    ret = 0x0400;
-                    break;
-                case 254:
-                    ret = 0x0800;
-                    break;
-                case 298:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-
-        case 8:
-            switch (nozzle_number)
-            {
-                case 40:
-                    ret = 0x0002;
-                    break;
-                case 43:
-                    ret = 0x0004;
-                    break;
-                case 84:
-                    ret = 0x0008;
-                    break;
-                case 87:
-                    ret = 0x0010;
-                    break;
-                case 128:
-                    ret = 0x0020;
-                    break;
-                case 131:
-                    ret = 0x0040;
-                    break;
-                case 172:
-                    ret = 0x0080;
-                    break;
-                case 175:
-                    ret = 0x0100;
-                    break;
-                case 216:
-                    ret = 0x0200;
-                    break;
-                case 219:
-                    ret = 0x0400;
-                    break;
-                case 260:
-                    ret = 0x0800;
-                    break;
-                case 263:
-                    ret = 0x1000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 9:
-            switch (nozzle_number)
-            {
-                case 5:
-                    ret = 0x0001;
-                    break;
-                case 2:
-                    ret = 0x0002;
-                    break;
-                case 49:
-                    ret = 0x0004;
-                    break;
-                case 46:
-                    ret = 0x0008;
-                    break;
-                case 93:
-                    ret = 0x0010;
-                    break;
-                case 90:
-                    ret = 0x0020;
-                    break;
-                case 137:
-                    ret = 0x0040;
-                    break;
-                case 134:
-                    ret = 0x0080;
-                    break;
-                case 181:
-                    ret = 0x0100;
-                    break;
-                case 178:
-                    ret = 0x0200;
-                    break;
-                case 225:
-                    ret = 0x0400;
-                    break;
-                case 222:
-                    ret = 0x0800;
-                    break;
-                case 269:
-                    ret = 0x1000;
-                    break;
-                case 266:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 10:
-            switch (nozzle_number)
-            {
-                case 11:
-                    ret = 0x0001;
-                    break;
-                case 8:
-                    ret = 0x0002;
-                    break;
-                case 55:
-                    ret = 0x0004;
-                    break;
-                case 52:
-                    ret = 0x0008;
-                    break;
-                case 99:
-                    ret = 0x0010;
-                    break;
-                case 96:
-                    ret = 0x0020;
-                    break;
-                case 143:
-                    ret = 0x0040;
-                    break;
-                case 140:
-                    ret = 0x0080;
-                    break;
-                case 187:
-                    ret = 0x0100;
-                    break;
-                case 184:
-                    ret = 0x0200;
-                    break;
-                case 231:
-                    ret = 0x0400;
-                    break;
-                case 228:
-                    ret = 0x0800;
-                    break;
-                case 275:
-                    ret = 0x1000;
-                    break;
-                case 272:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 11:
-            switch (nozzle_number)
-            {
-                case 17:
-                    ret = 0x0001;
-                    break;
-                case 14:
-                    ret = 0x0002;
-                    break;
-                case 61:
-                    ret = 0x0004;
-                    break;
-                case 58:
-                    ret = 0x0008;
-                    break;
-                case 105:
-                    ret = 0x0010;
-                    break;
-                case 102:
-                    ret = 0x0020;
-                    break;
-                case 149:
-                    ret = 0x0040;
-                    break;
-                case 146:
-                    ret = 0x0080;
-                    break;
-                case 193:
-                    ret = 0x0100;
-                    break;
-                case 190:
-                    ret = 0x0200;
-                    break;
-                case 237:
-                    ret = 0x0400;
-                    break;
-                case 234:
-                    ret = 0x0800;
-                    break;
-                case 281:
-                    ret = 0x1000;
-                    break;
-                case 278:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 12:
-            switch (nozzle_number)
-            {
-                case 23:
-                    ret = 0x0001;
-                    break;
-                case 20:
-                    ret = 0x0002;
-                    break;
-                case 67:
-                    ret = 0x0004;
-                    break;
-                case 64:
-                    ret = 0x0008;
-                    break;
-                case 111:
-                    ret = 0x0010;
-                    break;
-                case 108:
-                    ret = 0x0020;
-                    break;
-                case 155:
-                    ret = 0x0040;
-                    break;
-                case 152:
-                    ret = 0x0080;
-                    break;
-                case 199:
-                    ret = 0x0100;
-                    break;
-                case 196:
-                    ret = 0x0200;
-                    break;
-                case 243:
-                    ret = 0x0400;
-                    break;
-                case 240:
-                    ret = 0x0800;
-                    break;
-                case 287:
-                    ret = 0x1000;
-                    break;
-                case 284:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 13:
-            switch (nozzle_number)
-            {
-                case 29:
-                    ret = 0x0001;
-                    break;
-                case 26:
-                    ret = 0x0002;
-                    break;
-                case 73:
-                    ret = 0x0004;
-                    break;
-                case 70:
-                    ret = 0x0008;
-                    break;
-                case 117:
-                    ret = 0x0010;
-                    break;
-                case 114:
-                    ret = 0x0020;
-                    break;
-                case 161:
-                    ret = 0x0040;
-                    break;
-                case 158:
-                    ret = 0x0080;
-                    break;
-                case 205:
-                    ret = 0x0100;
-                    break;
-                case 202:
-                    ret = 0x0200;
-                    break;
-                case 249:
-                    ret = 0x0400;
-                    break;
-                case 246:
-                    ret = 0x0800;
-                    break;
-                case 293:
-                    ret = 0x1000;
-                    break;
-                case 290:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 14:
-            switch (nozzle_number)
-            {
-                case 35:
-                    ret = 0x0001;
-                    break;
-                case 32:
-                    ret = 0x0002;
-                    break;
-                case 79:
-                    ret = 0x0004;
-                    break;
-                case 76:
-                    ret = 0x0008;
-                    break;
-                case 123:
-                    ret = 0x0010;
-                    break;
-               case 120:
-                    ret = 0x0020;
-                    break;
-                case 167:
-                    ret = 0x0040;
-                    break;
-                case 164:
-                    ret = 0x0080;
-                    break;
-                case 211:
-                    ret = 0x0100;
-                    break;
-                case 208:
-                    ret = 0x0200;
-                    break;
-                case 255:
-                    ret = 0x0400;
-                    break;
-                case 252:
-                    ret = 0x0800;
-                    break;
-                case 299:
-                    ret = 0x1000;
-                    break;
-                case 296:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 15:
-            switch(nozzle_number)
-            {
-                case 38:
-                    ret = 0x0002;
-                    break;
-                case 41:
-                    ret = 0x0004;
-                    break;
-                case 82:
-                    ret = 0x0008;
-                    break;
-                case 85:
-                    ret = 0x0010;
-                    break;
-                case 126:
-                    ret = 0x0020;
-                    break;
-                case 129:
-                    ret = 0x0040;
-                    break;
-                case 170:
-                    ret = 0x0080;
-                    break;
-                case 173:
-                    ret = 0x0100;
-                    break;
-                case 214:
-                    ret = 0x0200;
-                    break;
-                case 217:
-                    ret = 0x0400;
-                    break;
-                case 258:
-                    ret = 0x0800;
-                    break;
-                case 261:
-                    ret = 0x1000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 16:
-            switch (nozzle_number)
-            {
-                case 3:
-                    ret = 0x0001;
-                    break;
-                case 47:
-                    ret = 0x0004;
-                    break;
-                case 44:
-                    ret = 0x0008;
-                    break;
-                case 91:
-                    ret = 0x0010;
-                    break;
-                case 88:
-                    ret = 0x0020;
-                    break;
-                case 135:
-                    ret = 0x0040;
-                    break;
-                case 132:
-                    ret = 0x0080;
-                    break;
-                case 179:
-                    ret = 0x0100;
-                    break;
-                case 176:
-                    ret = 0x0200;
-                    break;
-                case 223:
-                    ret = 0x0400;
-                    break;
-                case 220:
-                    ret = 0x0800;
-                    break;
-                case 267:
-                    ret = 0x1000;
-                    break;
-                case 264:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 17:
-            switch (nozzle_number)
-            {
-                case 9:
-                    ret = 0x0001;
-                    break;
-                case 6:
-                    ret = 0x0002;
-                    break;
-                case 53:
-                    ret = 0x0004;
-                    break;
-                case 50:
-                    ret = 0x0008;
-                    break;
-                case 97:
-                    ret = 0x0010;
-                    break;
-                case 94:
-                    ret = 0x0020;
-                    break;
-                case 141:
-                    ret = 0x0040;
-                    break;
-                case 138:
-                    ret = 0x0080;
-                    break;
-                case 185:
-                    ret = 0x0100;
-                    break;
-                case 182:
-                    ret = 0x0200;
-                    break;
-                case 229:
-                    ret = 0x0400;
-                    break;
-                case 226:
-                    ret = 0x0800;
-                    break;
-                case 273:
-                    ret = 0x1000;
-                    break;
-                case 270:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x00;
-                    break;
-            }
-            break;
-
-        case 18:
-            switch (nozzle_number)
-            {
-                case 15:
-                    ret = 0x0001;
-                    break;
-                case 12:
-                    ret = 0x0002;
-                    break;
-                case 59:
-                    ret = 0x0004;
-                    break;
-                case 56:
-                    ret = 0x0008;
-                    break;
-                case 103:
-                    ret = 0x0010;
-                    break;
-                case 100:
-                    ret = 0x0020;
-                    break;
-                case 147:
-                    ret = 0x0040;
-                    break;
-                case 144:
-                    ret = 0x0080;
-                    break;
-                case 191:
-                    ret = 0x0100;
-                    break;
-                case 188:
-                    ret = 0x0200;
-                    break;
-                case 235:
-                    ret = 0x0400;
-                    break;
-                case 232:
-                    ret = 0x0800;
-                    break;
-                case 279:
-                    ret = 0x1000;
-                    break;
-                case 276:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 19:
-            switch (nozzle_number)
-            {
-                case 21:
-                    ret = 0x0001;
-                    break;
-                case 18:
-                    ret = 0x0002;
-                    break;
-                case 65:
-                    ret = 0x0004;
-                    break;
-                case 62:
-                    ret = 0x0008;
-                    break;
-                case 109:
-                    ret = 0x0010;
-                    break;
-                case 106:
-                    ret = 0x0020;
-                    break;
-                case 153:
-                    ret = 0x0040;
-                    break;
-                case 150:
-                    ret = 0x0080;
-                    break;
-                case 197:
-                    ret = 0x0100;
-                    break;
-                case 194:
-                    ret = 0x0200;
-                    break;
-                case 241:
-                    ret = 0x0400;
-                    break;
-                case 238:
-                    ret = 0x0800;
-                    break;
-                case 285:
-                    ret = 0x1000;
-                    break;
-                case 282:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-
-        case 20:
-            switch (nozzle_number)
-            {
-                case 27:
-                    ret = 0x0001;
-                    break;
-                case 24:
-                    ret = 0x0002;
-                    break;
-                case 71:
-                    ret = 0x0004;
-                    break;
-                case 68:
-                    ret = 0x0008;
-                    break;
-                case 115:
-                    ret = 0x0010;
-                    break;
-                case 112:
-                    ret = 0x0020;
-                    break;
-                case 159:
-                    ret = 0x0040;
-                    break;
-                case 156:
-                    ret = 0x0080;
-                    break;
-                case 203:
-                    ret = 0x0100;
-                    break;
-                case 200:
-                    ret = 0x0200;
-                    break;
-                case 247:
-                    ret = 0x0400;
-                    break;
-                case 244:
-                    ret = 0x0800;
-                    break;
-                case 291:
-                    ret = 0x0100;
-                    break;
-                case 288:
-                    ret = 0x0200;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-        case 21:
-            switch (nozzle_number)
-            {
-                case 33:
-                    ret = 0x0001;
-                    break;
-                case 30:
-                    ret = 0x0002;
-                    break;
-                case 77:
-                    ret = 0x0004;
-                    break;
-                case 74:
-                    ret = 0x0008;
-                    break;
-                case 121:
-                    ret = 0x0010;
-                    break;
-                case 118:
-                    ret = 0x0020;
-                    break;
-                case 165:
-                    ret = 0x0040;
-                    break;
-                case 162:
-                    ret = 0x0080;
-                    break;
-                case 209:
-                    ret = 0x0100;
-                    break;
-                case 206:
-                    ret = 0x0200;
-                    break;
-                case 253:
-                    ret = 0x0400;
-                    break;
-                case 250:
-                    ret = 0x0800;
-                    break;
-                case 297:
-                    ret = 0x1000;
-                    break;
-                case 294:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-
-
-        case 22:
-            switch (nozzle_number)
-            {
-                case 39:
-                    ret = 0x0001;
-                    break;
-                case 36:
-                    ret = 0x0002;
-                    break;
-                case 83:
-                    ret = 0x0004;
-                    break;
-                case 80:
-                    ret = 0x0008;
-                    break;
-                case 127:
-                    ret = 0x0010;
-                    break;
-                case 124:
-                    ret = 0x0020;
-                    break;
-                case 171:
-                    ret = 0x0040;
-                    break;
-                case 168:
-                    ret = 0x0080;
-                    break;
-                case 215:
-                    ret = 0x0100;
-                    break;
-                case 212:
-                    ret = 0x0200;
-                    break;
-                case 259:
-                    ret = 0x0400;
-                    break;
-                case 256:
-                    ret = 0x0800;
-                    break;
-                case 300:
-                    ret = 0x2000;
-                    break;
-                default:
-                    ret = 0x0000;
-                    break;
-            }
-            break;
-    }
- 
-    return ret;
-}
-
-void set_PH45_GPIO(unsigned char gpio_num,unsigned char gpio_status)
-{
-    unsigned char databuf[2];
-    int retvalue;
-
-    databuf[0] = gpio_status;
-    databuf[1] = gpio_num;
-    retvalue = write(fd_ph45, databuf, sizeof(databuf));      
-    if(retvalue < 0)
-    {
-        printf("fd_ph45 Control Failed!\r\n");
-        close(fd_ph45);
-    }    
-}
 
 
 int pwm_voltage(void)
@@ -2984,7 +1897,7 @@ void delay_100ns(unsigned int ns)
     for(i=0;i<ns;i++);
 }
 
-
+#if 1
 void initialize(void)
 {
 
@@ -3021,42 +1934,7 @@ void initialize(void)
         printf("挂载失败，请检查设备名称或挂载点\n");
     }
 }
-
-#if 0
-void function_20240522(void)
-{
-    int retvalue;
-
-    if(print_button_enable == 1)
-    {
-        print_button_enable = 0;
-        sleep(1);
-
-        lv_timer_pause(timer_100ms);
-
-        retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
-        if(retvalue < 0)
-        {
-            printf("fd_ph45 Control Failed!\r\n");
-            close(fd_ph45);
-        }
-        else
-        {
-             printf("fd_ph45 Control ok!\r\n");
-        }
-
-        lv_timer_resume(timer_100ms);
-
-        system_data.total_output++;
-
-        set_system_data();
-    }   
-}
 #endif
-
-
-
-
 
 // 从 /proc/meminfo 中提取内存信息
 int get_memory_info(MemoryInfo *mem) {
@@ -3108,6 +1986,7 @@ int get_memory_info(MemoryInfo *mem) {
 
 // 示例：打印内存信息
 void print_memory_info(const MemoryInfo *mem) {
+
     printf("Memory Info (KB):\n");
     printf("  Total:     %lu\n", mem->total);
     printf("  Free:      %lu\n", mem->free);
@@ -3165,29 +2044,287 @@ void screen_touched_event_handler(lv_event_t * e)
 }
 
 
+// 获取指定位置的像素值（0表示有效数据）
+static bool get_pixel(const uint8_t* data, uint32_t width, uint32_t x, uint32_t y) {
+    uint32_t bytes_per_line = (width + 7) / 8;
+    uint32_t byte_index = y * bytes_per_line + (x / 8);
+    uint32_t bit_index = 7 - (x % 8);
+    return (data[byte_index] >> bit_index) & 0x01;
+}
+
+
+// 设置指定位置的像素值
+static void set_pixel(uint8_t* data, uint32_t width, uint32_t x, uint32_t y, bool value) {
+    uint32_t bytes_per_line = (width + 7) / 8;
+    uint32_t byte_index = y * bytes_per_line + (x / 8);
+    uint32_t bit_index = 7 - (x % 8);
+
+    if (value) {
+        data[byte_index] |= (1 << bit_index);
+    }
+    else {
+        data[byte_index] &= ~(1 << bit_index);
+    }
+}
+
+// 在指定X范围内检测有效数据的实际边界（修正版）
+bool find_effective_x_range(const uint8_t* input_data, uint32_t input_width, uint32_t input_height,
+    uint32_t x1, uint32_t x2,
+    uint32_t* effective_start_x, uint32_t* effective_end_x) {
+    if (input_data == NULL || x1 > x2 || x2 >= input_width ||
+        effective_start_x == NULL || effective_end_x == NULL) {
+        return false;
+    }
+
+    // 初始化边界值为无效值
+    uint32_t min_x = UINT32_MAX;
+    uint32_t max_x = 0;
+    bool found_effective_pixel = false;
+
+    printf("Scanning for effective data in X range %d-%d...\n", x1, x2);
+
+    // 逐行扫描指定X范围
+    for (uint32_t y = 0; y < input_height; y++) {
+        bool found_in_this_row = false;
+        uint32_t row_min_x = UINT32_MAX;
+        uint32_t row_max_x = 0;
+
+        // 从左到右扫描该行
+        for (uint32_t x = x1; x <= x2; x++) {
+            if (!get_pixel(input_data, input_width, x, y)) {
+                found_effective_pixel = true;
+                found_in_this_row = true;
+                if (x < row_min_x) row_min_x = x;
+                if (x > row_max_x) row_max_x = x;
+            }
+        }
+
+        // 更新全局边界
+        if (found_in_this_row) {
+            if (row_min_x < min_x) min_x = row_min_x;
+            if (row_max_x > max_x) max_x = row_max_x;
+
+            // 调试信息
+            printf("Row %d: found data at X=%d-%d\n", y, row_min_x, row_max_x);
+        }
+    }
+
+    if (!found_effective_pixel) {
+        printf("No effective data found in range %d-%d\n", x1, x2);
+        return false;
+    }
+
+    // 确保边界值有效
+    if (min_x == UINT32_MAX || max_x == 0 || min_x > max_x) {
+        printf("Invalid boundary values: min_x=%u, max_x=%u\n", min_x, max_x);
+        return false;
+    }
+
+    *effective_start_x = min_x;
+    *effective_end_x = max_x;
+
+    printf("Final effective range: X=%d-%d, width=%d\n",
+        min_x, max_x, max_x - min_x + 1);
+
+    return true;
+}
+
+// 完全重写的正确截图函数
+bool crop_x_range_correct(const uint8_t* input_data, uint32_t input_width, uint32_t input_height,
+    uint32_t x1, uint32_t x2,
+    uint8_t* output_buf, uint32_t output_buf_size,
+    uint32_t* output_width, uint32_t* output_height,
+    uint32_t* actual_start_x, uint32_t* actual_end_x,
+    CropDirection direction) {
+    if (input_data == NULL || output_buf == NULL ||
+        output_width == NULL || output_height == NULL ||
+        actual_start_x == NULL || actual_end_x == NULL ||
+        input_width == 0 || input_height == 0 ||
+        x1 >= input_width || x2 > input_width || x1 >= x2) {
+        return false;
+    }
+
+    // 1. 在x1-x2范围内检测有效数据的实际边界
+    uint32_t effective_start_x, effective_end_x;
+    if (!find_effective_x_range(input_data, input_width, input_height, x1, x2,
+        &effective_start_x, &effective_end_x)) {
+        printf("No effective data found in range %d-%d\n", x1, x2);
+        return false;
+    }
+
+    printf("Effective data: X=%d-%d, Requested range: X=%d-%d\n",
+        effective_start_x, effective_end_x, x1, x2);
+
+    // 2. 输出buffer的宽度应该是请求的范围宽度，不是有效数据的宽度！
+    //uint32_t cropped_width = x2 - x1 + 1;  // 这是关键修正！
+    uint32_t cropped_width = effective_end_x - effective_start_x + 1;  // 这是关键修正！
+    uint32_t cropped_height = input_height;
+
+    // 3. 检查输出buffer是否足够大
+    uint32_t dst_bytes_per_line = (cropped_width + 7) / 8;
+    uint32_t required_size = dst_bytes_per_line * cropped_height;
+
+    if (output_buf_size < required_size) {
+        printf("Output buffer too small: need %d, have %d\n", required_size, output_buf_size);
+        return false;
+    }
+
+    // 4. 清空输出buffer（全部设为1，表示无效数据）
+    memset(output_buf, 0xFF, output_buf_size);  // 全部设为1
+
+    //uint32_t src_bytes_per_line = (input_width + 7) / 8;
+    //uint32_t dst_bytes_per_line_out = (cropped_width + 7) / 8;
+
+    // 5. 根据方向进行数据复制
+    switch (direction) {
+    case CROP_DIRECTION_NORMAL: {
+        uint32_t error_x = effective_start_x - effective_start_x/8*8;
+        // 正向：从左到右，从上到下
+        // 使用逐像素复制确保正确对齐
+        for (uint32_t y = 0; y < cropped_height; y++) {
+            for (uint32_t x = 0; x < cropped_width + error_x; x++) {
+                //uint32_t orig_x = x1 + x;
+                uint32_t orig_x = effective_start_x + x;
+                bool pixel_value;
+
+                if (orig_x >= effective_start_x && orig_x <= effective_end_x) {
+                    // 有效数据区域
+                    pixel_value = get_pixel(input_data, input_width, orig_x, y);
+                }
+                else {
+                    // 无效数据区域：设为1
+                    pixel_value = true;
+                }
+
+                set_pixel(output_buf, cropped_width, x, y, pixel_value);
+            }
+        }
+        break;
+    }
+
+    case CROP_DIRECTION_REVERSE_X: {
+        // 逆向：从右到左，从上到下
+        uint32_t error_x = effective_start_x - effective_start_x/8*8;
+        for (uint32_t y = 0; y < cropped_height; y++) {
+            for (uint32_t x = 0; x < cropped_width+error_x; x++) {
+                // 计算在原始图像中的位置
+                //uint32_t orig_x = x1 + x;
+                uint32_t orig_x = effective_start_x + x;
+                bool pixel_value;
+
+                if (orig_x >= effective_start_x && orig_x <= effective_end_x) {
+                    // 有效数据区域：逆向取图
+                    uint32_t reverse_x = effective_start_x + (effective_end_x - orig_x);
+                    pixel_value = get_pixel(input_data, input_width, reverse_x, y);
+                }
+                else {
+                    // 无效数据区域：设为1
+                    pixel_value = true;
+                }
+
+                set_pixel(output_buf, cropped_width, x, y, pixel_value);
+            }
+        }
+        break;
+    }
+
+    case CROP_DIRECTION_REVERSE_Y: {
+        // 正倒：从左到右，从下到上
+        uint32_t error_x = effective_start_x - effective_start_x/8*8;
+        for (uint32_t y = 0; y < cropped_height; y++) {
+            uint32_t src_y = cropped_height - 1 - y;
+            for (uint32_t x = 0; x < cropped_width+error_x; x++) {
+                //uint32_t orig_x = x1 + x;
+                uint32_t orig_x = effective_start_x + x;
+                bool pixel_value;
+
+                if (orig_x >= effective_start_x && orig_x <= effective_end_x) {
+                    pixel_value = get_pixel(input_data, input_width, orig_x, src_y);
+                }
+                else {
+                    pixel_value = true;
+                }
+
+                set_pixel(output_buf, cropped_width, x, y, pixel_value);
+            }
+        }
+        break;
+    }
+
+    case CROP_DIRECTION_REVERSE_XY: {
+        // 逆倒：从右到左，从下到上
+        uint32_t error_x = effective_start_x - effective_start_x/8*8;
+        for (uint32_t y = 0; y < cropped_height; y++) {
+            uint32_t src_y = cropped_height - 1 - y;
+            for (uint32_t x = 0; x < cropped_width+error_x; x++) {
+                //uint32_t orig_x = x1 + x;
+                uint32_t orig_x = effective_start_x + x;
+                bool pixel_value;
+
+                if (orig_x >= effective_start_x && orig_x <= effective_end_x) {
+                    // 有效数据区域：逆向取图
+                    uint32_t reverse_x = effective_start_x + (effective_end_x - orig_x);
+                    pixel_value = get_pixel(input_data, input_width, reverse_x, src_y);
+                }
+                else {
+                    // 无效数据区域：设为1
+                    pixel_value = true;
+                }
+
+                set_pixel(output_buf, cropped_width, x, y, pixel_value);
+            }
+        }
+        break;
+    }
+    }
+
+    // 6. 返回结果
+    *output_width = cropped_width;
+    *output_height = cropped_height;
+    *actual_start_x = effective_start_x;
+    *actual_end_x = effective_end_x;
+
+    return true;
+}
+
+
 static void timer_100ms_cb(lv_timer_t * t)
 {
     int retvalue;
     char buf[2]={0};
     unsigned char databuf[20] = {0};
+    char datastr[20] = {0};
     static int time_count_1s = 0;
     static int adc_count_5s = 0;
     static int flash_set_count = 0;
     static int rept_count = 0;
     static int rc522_count = 0;
+    //static unsigned power_on = 0;
     int voltage = 0;
     char cmd[64]={0};
     unsigned char* pdata = NULL;
-    unsigned char* pdata2 = NULL;
-    unsigned char data = 0;
-    int i, j;
-    static lv_img_dsc_t* snapshot = NULL;
-    unsigned int x1, y1, x2, y2,flag;
+   // unsigned char* pdata2 = NULL;
+   // unsigned char data = 0;
+    int i;
+    //int j;
+    //unsigned int x1, y1, x2, y2,flag;
     unsigned char break_num = 0;
     unsigned char win_content_child_num;
     char date_time_str[64]={0};
     pid_t status;
     //unsigned char *temp_p = NULL;
+    int now_year;
+    int now_month;
+    int now_day;
+    int end_year;
+    int end_month;
+    int end_day;
+  //  uint32_t bytes_per_line = 0;
+  // uint32_t byte_index = 0;
+  //  uint32_t bit_index = 0;
+ //  uint8_t pixel = 0;
+    uint32_t start_x, end_x;
+    bool success;
 
     time_count_1s++;
     if(time_count_1s >= 10)
@@ -3231,6 +2368,13 @@ static void timer_100ms_cb(lv_timer_t * t)
                     snprintf(cmd, sizeof(cmd), "date -s '%04d-%02d-%02d %02d:%02d:%02d'", 2000+g_system_time[0],g_system_time[1],g_system_time[2], g_system_time[3],g_system_time[4],g_system_time[5]);
                     system(cmd);               
                 }
+#if 0
+                if(power_on == 0)
+                {
+                    power_on = 1;
+                    recovery_data();
+                }
+#endif
             }
         }
     }
@@ -3251,9 +2395,29 @@ static void timer_100ms_cb(lv_timer_t * t)
             lv_obj_del(screen_off_obj);    
             g_screen_touch_flag = 0;
             g_screen_touch_count = 0;
+
+            if(system_data.system.buzzer == 0)
+            {
+                buf[0] = 1;
+                retvalue = write(fd_buzzer, buf, 1);
+                if(retvalue < 0)
+                {
+                    printf("BEEP Control Failed!\r\n");
+                    close(fd_buzzer);
+                }
+                usleep(300000);
+
+                buf[0] = 0;
+                retvalue = write(fd_buzzer, buf, 1);
+                if(retvalue < 0)
+                {
+                    printf("BEEP Control Failed!\r\n");
+                    close(fd_buzzer);
+                }
+            }
         }
     }
-
+#if 0
     g_data_structure_count++;
     if(g_data_structure_count > 800)
     {
@@ -3321,6 +2485,65 @@ static void timer_100ms_cb(lv_timer_t * t)
                                     break;
                                 case 13:
                                     sprintf(date_time_str, "%02d年%02d月%02d日", g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 14:
+                                    sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                                    break;
+                                case 15:
+                                    sprintf(date_time_str, "延期");
+                                    break;
+                            }
+                        }
+                        else if(data_structure[i].data.date_time.date_or_time == 2)
+                        {
+                            now_year =  2000 + g_system_time[0];
+                            now_month =  g_system_time[1];
+                            now_day =  g_system_time[2];
+                            calculateExpiryDate(now_year,now_month,now_day,data_structure[i].data.date_time.year,data_structure[i].data.date_time.month,data_structure[i].data.date_time.day,&end_year,&end_month,&end_day);
+  
+                            switch(data_structure[i].data.date_time.date_or_time_type)
+                            {
+                                case 0:
+                                    sprintf(date_time_str, "%04d/%02d/%02d", end_year, end_month, end_day);
+                                    break;
+                                case 1:
+                                    sprintf(date_time_str, "%02d/%02d/%02d", end_year%100, end_month, end_day);
+                                    break;
+                                case 2:
+                                    sprintf(date_time_str, "%04d-%02d-%02d", end_year, end_month, end_day);
+                                    break;
+                                case 3:
+                                    sprintf(date_time_str, "%02d-%02d-%02d", end_year%100, end_month, end_day);
+                                    break;
+                                case 4:
+                                    sprintf(date_time_str, "%04d.%02d.%02d", end_year, end_month, end_day);
+                                    break;
+                                case 5:
+                                    sprintf(date_time_str, "%02d.%02d.%02d", end_year%100, end_month, end_day);
+                                    break;
+                                case 6:
+                                    sprintf(date_time_str, "%02d/%02d/%04d", end_day,  end_month, end_year);
+                                    break;
+                                case 7:
+                                    sprintf(date_time_str, "%02d/%02d/%02d", end_day,  end_month, end_year%100);
+                                    break;
+                                case 8:
+                                    sprintf(date_time_str, "%02d-%02d-%04d", end_day,  end_month, end_year);
+                                    break;
+                                case 9:
+                                    sprintf(date_time_str, "%02d-%02d-%02d", end_day,  end_month, end_year%100);
+                                    break;
+                                case 10:
+                                    sprintf(date_time_str, "%02d.%02d.%04d", end_day,  end_month, end_year);
+                                    break;
+                                case 11:
+                                    sprintf(date_time_str, "%02d.%02d.%02d", end_day,  end_month, end_year%100);
+                                    break;
+                                case 12:
+                                    sprintf(date_time_str, "%04d年%02d月%02d日", end_year, end_month, end_day);
+                                    break;
+                                case 13:
+                                    sprintf(date_time_str, "%02d年%02d月%02d日", end_year%100, end_month, end_day);
                                     break;
                                 case 14:
                                     sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
@@ -3411,16 +2634,15 @@ static void timer_100ms_cb(lv_timer_t * t)
                 break;
             }
         }
-   
-
     }
+#endif
 
     adc_count_5s++;
     if(adc_count_5s >= 5000)
     {
         adc_count_5s = 0;
     }
-#if 0
+#if 1
     if((adc_count_5s %300) == 0)
     {
         MemoryInfo mem;
@@ -3688,6 +2910,65 @@ static void timer_100ms_cb(lv_timer_t * t)
                             break;
                     }
                 }
+                else if(data_structure[i].data.date_time.date_or_time == 2)
+                {
+                    now_year =  2000 + g_system_time[0];
+                    now_month =  g_system_time[1];
+                    now_day =  g_system_time[2];
+                    calculateExpiryDate(now_year,now_month,now_day,data_structure[i].data.date_time.year,data_structure[i].data.date_time.month,data_structure[i].data.date_time.day,&end_year,&end_month,&end_day);
+
+                    switch(data_structure[i].data.date_time.date_or_time_type)
+                    {
+                        case 0:
+                            sprintf(date_time_str, "%04d/%02d/%02d", end_year, end_month, end_day);
+                            break;
+                        case 1:
+                            sprintf(date_time_str, "%02d/%02d/%02d", end_year%100, end_month, end_day);
+                            break;
+                        case 2:
+                            sprintf(date_time_str, "%04d-%02d-%02d", end_year, end_month, end_day);
+                            break;
+                        case 3:
+                            sprintf(date_time_str, "%02d-%02d-%02d", end_year%100, end_month, end_day);
+                            break;
+                        case 4:
+                            sprintf(date_time_str, "%04d.%02d.%02d", end_year, end_month, end_day);
+                            break;
+                        case 5:
+                            sprintf(date_time_str, "%02d.%02d.%02d", end_year%100, end_month, end_day);
+                            break;
+                        case 6:
+                            sprintf(date_time_str, "%02d/%02d/%04d", end_day,  end_month, end_year);
+                            break;
+                        case 7:
+                            sprintf(date_time_str, "%02d/%02d/%02d", end_day,  end_month, end_year%100);
+                            break;
+                        case 8:
+                            sprintf(date_time_str, "%02d-%02d-%04d", end_day,  end_month, end_year);
+                            break;
+                        case 9:
+                            sprintf(date_time_str, "%02d-%02d-%02d", end_day,  end_month, end_year%100);
+                            break;
+                        case 10:
+                            sprintf(date_time_str, "%02d.%02d.%04d", end_day,  end_month, end_year);
+                            break;
+                        case 11:
+                            sprintf(date_time_str, "%02d.%02d.%02d", end_day,  end_month, end_year%100);
+                            break;
+                        case 12:
+                            sprintf(date_time_str, "%04d年%02d月%02d日", end_year, end_month, end_day);
+                            break;
+                        case 13:
+                            sprintf(date_time_str, "%02d年%02d月%02d日", end_year%100, end_month, end_day);
+                            break;
+                        case 14:
+                            sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                            break;
+                        case 15:
+                            sprintf(date_time_str, "延期");
+                            break;
+                    }
+                }
                 else
                 {
                     switch(data_structure[i].data.date_time.date_or_time_type)
@@ -3739,7 +3020,7 @@ static void timer_100ms_cb(lv_timer_t * t)
 
         lv_obj_update_layout(win_content);
 
-        snapshot = lv_snapshot_take(win_content, LV_IMG_CF_TRUE_COLOR_ALPHA);
+        snapshot = lv_snapshot_take(win_content, LV_IMG_CF_ALPHA_1BIT);
 
         if(snapshot == NULL)
         {
@@ -3748,8 +3029,26 @@ static void timer_100ms_cb(lv_timer_t * t)
         else
         {
             printf("lv_snapshot_take ok\n");
+            printf("napshot->data_size=%u\n\r",snapshot->data_size);
+            printf("snapshot->header.w=%u\n\r",snapshot->header.w);
+            printf("snapshot->header.h=%u\n\r",snapshot->header.h);
+            printf("snapshot->header.cf=%u\n\r",snapshot->header.cf);
+
+#if 0
+            for (i = 0; i < CANVAS_HEIGHT; i++)
+            {
+                for (j = 0; j < 50; j++)
+                {
+                    data = *(snapshot->data + (i * CANVAS_WIDTH + j) * 4);
+                    printf("%02x ", data);
+                }
+
+                printf("\n\r");
+            }
+#endif
         }
 
+#if 0
         lv_draw_img_dsc_t img_dsc;
         lv_draw_img_dsc_init(&img_dsc);
 
@@ -3757,12 +3056,24 @@ static void timer_100ms_cb(lv_timer_t * t)
         lv_obj_align(canvas, LV_ALIGN_TOP_LEFT, 0, 0);
         //lv_obj_center(canvas);
         /* 第三步：为画布设置缓冲区 */
+
+        size_t buf_size = CANVAS_WIDTH * CANVAS_HEIGHT * sizeof(lv_color_t);
+
+        canvasBuf = (lv_color_t *)malloc(buf_size);
+    
+        if (canvasBuf == NULL) 
+        {
+            printf("Memory allocation failed for canvas\n");
+            return;
+        }
+
         lv_canvas_set_buffer(canvas, canvasBuf, CANVAS_WIDTH, CANVAS_HEIGHT, LV_IMG_CF_TRUE_COLOR);
         lv_canvas_fill_bg(canvas, lv_color_hex(0xffffff), LV_OPA_COVER);
 
         lv_canvas_draw_img(canvas, 0, 0, snapshot, &img_dsc);
 
         lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
+#endif
 
         memset((char *)&subsection_structure,0,sizeof(subsection_structure));
 
@@ -3823,21 +3134,25 @@ static void timer_100ms_cb(lv_timer_t * t)
         {
             printf("PRINT_KEY\n");
             key_value = 1;
-            buf[0] = 1;
-	        retvalue = write(fd_buzzer, buf, 1);
-	        if(retvalue < 0)
-            {
-		        printf("BEEP Control Failed!\r\n");
-		        close(fd_buzzer);
-            }
-            usleep(300000);
 
-            buf[0] = 0;
-            retvalue = write(fd_buzzer, buf, 1);
-	        if(retvalue < 0)
+            if(system_data.system.buzzer == 0)
             {
-		        printf("BEEP Control Failed!\r\n");
-		        close(fd_buzzer);
+                buf[0] = 1;
+                retvalue = write(fd_buzzer, buf, 1);
+                if(retvalue < 0)
+                {
+                    printf("BEEP Control Failed!\r\n");
+                    close(fd_buzzer);
+                }
+                usleep(300000);
+
+                buf[0] = 0;
+                retvalue = write(fd_buzzer, buf, 1);
+                if(retvalue < 0)
+                {
+                    printf("BEEP Control Failed!\r\n");
+                    close(fd_buzzer);
+                }
             }
 
             g_screen_off_count = 0;
@@ -3848,238 +3163,80 @@ static void timer_100ms_cb(lv_timer_t * t)
 
             if(subsection_structure.total > 0)
             {
-
                 if(subsection_structure.current == 0)
                 {
-                    //新建画布，获取图片，发送给底层
-                    pdata = (unsigned char*)canvasBuf;
-    #if 0
-                    for (i = 0; i < CANVAS_HEIGHT; i++)
-                    {
-                        for (j = 0; j < 50; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            printf("%02x ", data);
-                        }
+                    pdata = snapshot->data; 
 
-                        printf("\n\r");
-                    }
-    #endif
-                    //获取x1,即图片的左上x坐标
-                    flag = 0;
-                    for (i = 2; i <= subsection_structure.x[0]; i++)
+                    printf("h=%d\n\r",snapshot->header.h);
+                    printf("w=%d\n\r", snapshot->header.w);
+                    printf("size=%d\n\r", snapshot->data_size);
+#if 0                    
+                    bytes_per_line = (snapshot->header.w + 7) / 8;
+                    for (i = 0; i < snapshot->header.h; i++) 
                     {
-                        for (j = 2; j <= CANVAS_HEIGHT - 3; j++)
+                        //printf("Row %3d: ", y);
+                        for (j= 0; j < 100; j++) 
                         {
-                            data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                            if (data != 0xff)
+                            byte_index = i * bytes_per_line + (j / 8);
+                            bit_index = 7 - (j % 8);
+                            pixel = (pdata[byte_index] >> bit_index) & 0x01;
+                            printf("%d", pixel);
+
+                            // 每8位加一个空格便于阅读
+                            // if ((x + 1) % 8 == 0) printf(" ");
+                        }
+                        printf("\n");
+                    }
+#endif
+
+                    success = crop_x_range_correct(pdata, snapshot->header.w, snapshot->header.h,0,subsection_structure.x[0],   \
+                                                    print_data.data, sizeof(print_data.data), &print_data.data_width, &print_data.data_hight, \
+                                                    &start_x, &end_x,system_data.print.print_direction);
+
+
+                    if (success) 
+                    {
+                        printf("Cropped successfully:\n");
+                        printf("  Original: %dx%d\n", snapshot->header.w, snapshot->header.h);
+                        printf("  Cropped: %dx%d\n", print_data.data_width, print_data.data_hight);
+                        printf("  Start position: (%d, %d)\n", start_x, end_x);
+
+                        // output_buf 现在包含裁剪后的二值化数据
+                        // 其中像素值为0的区域是您需要的有效数据
+#if 0
+                        for (i = 0; i < print_data.data_hight; i++) 
+                        {
+                            //printf("Row %3d: ", y);
+                            for (j= 0; j < 100; j++) 
                             {
-                                flag = i;
-                                break;
+                                byte_index = i * bytes_per_line + (j / 8);
+                                bit_index = 7 - (j % 8);
+                                pixel = (print_data.data[byte_index] >> bit_index) & 0x01;
+                                printf("%d", pixel);
+
+                                // 每8位加一个空格便于阅读
+                            // if ((x + 1) % 8 == 0) printf(" ");
                             }
+                            printf("\n");
                         }
+#endif
+                        print_data.trigger_mode = system_data.print.trigger_mode;
+                        print_data.nozzle = system_data.print.nozzle;
+                        print_data.concentration = system_data.print.concentration;
+                        print_data.word_width = system_data.print.width;
+                        print_data.print_number = system_data.print.print_number;
+                        print_data.print_interval = system_data.print.print_interval;
+                        print_data.trigger_delay = system_data.print.trigger_delay;
+                        print_data.print_speed = system_data.print.print_speed;
 
-                        if (flag != 0)
-                        {
-                            break;
-                        }
+                        printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
+                        printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
+                        printf("nozzle=%d\n", print_data.nozzle);
                     }
-
-                    x1 = flag;
-                    printf("x1=%d\n", x1);
-
-                    //获取y1,即图片左上y坐标
-                    flag = 0;
-                    for (i = 2; i <= CANVAS_HEIGHT - 3; i++)
-                    {
-                        for (j = 2; j <= CANVAS_WIDTH - 3; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
-
-                        if (flag != 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    y1 = flag;
-                    printf("y1=%d\n", y1);
-
-
-                    //获取x2,即图片右下方x坐标
-                    flag = 0;
-                    for (i = subsection_structure.x[0]; i >= 2; i--)
-                    {
-                        for (j = 2; j <= CANVAS_HEIGHT - 3; j++)
-                        {
-                            data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
-
-                        if (flag != 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    x2 = flag;
-                    printf("x2=%d\n", x2);
-
-                    //获取y2,即图片右下方x坐标
-                    flag = 0;
-                    for (i = CANVAS_HEIGHT - 3; i >= 2; i--)
-                    {
-                        for (j = 2; j <= subsection_structure.x[0]; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
-
-                        if (flag != 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    y2 = flag;
-                    printf("y2=%d\n", y2);
-                    print_data.data_width = x2 - x1 + 1;
-                    print_data.data_hight = y2 - y1 + 1;
-
-                    print_data.trigger_mode = system_data.print.trigger_mode;
-                    print_data.nozzle = system_data.print.nozzle;
-                    print_data.concentration = system_data.print.concentration;
-                    print_data.word_width = system_data.print.width;
-                    print_data.print_number = system_data.print.print_number;
-                    print_data.print_interval = system_data.print.print_interval;
-                    print_data.trigger_delay = system_data.print.trigger_delay;
-                    print_data.print_speed = system_data.print.print_speed;
-
-                    printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
-                    printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
-                    printf("nozzle=%d\n", print_data.nozzle);
                 
-    #if 0
-                pdata2 = (unsigned char*)canvasBuf;
-                for (i = y1; i <= y2; i++)
-                {
-                    for (j = x1; j <= x2; j++)
-                    {
-                        data = *(pdata2 + (i * 1024 + j) * 4);
-                        if (data > 127)
-                        {
-                            data = 0;
-                        }
-                        else
-                        {
-                            data = 1;
-                        }
-                        printf("%u ", data);
-                    }
-                    printf("\n");
-                }
-    #endif
+
                     if((print_data.data_width  > 2)&&(print_data.data_hight > 2))
                     {
-                        if(system_data.print.print_direction == 0)
-                        {               
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 1)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 2)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 3)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-
                         retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
                         if(retvalue < 0)
                         {
@@ -4090,364 +3247,94 @@ static void timer_100ms_cb(lv_timer_t * t)
                         {
                             //printf("fd_ph45 Control ok!\r\n");
                         }
-
-                        buf[0] = 1;
-                        retvalue = write(fd_buzzer, buf, 1);
-                        if(retvalue < 0)
+                        
+                        if(system_data.system.buzzer == 0)
                         {
-                            printf("BEEP Control Failed!\r\n");
-                            close(fd_buzzer);
-                        }
-                        usleep(300000);
+                            buf[0] = 1;
+                            retvalue = write(fd_buzzer, buf, 1);
+                            if(retvalue < 0)
+                            {
+                                printf("BEEP Control Failed!\r\n");
+                                close(fd_buzzer);
+                            }
+                            usleep(300000);
 
-                        buf[0] = 0;
-                        retvalue = write(fd_buzzer, buf, 1);
-                        if(retvalue < 0)
-                        {
-                            printf("BEEP Control Failed!\r\n");
-                            close(fd_buzzer);
+                            buf[0] = 0;
+                            retvalue = write(fd_buzzer, buf, 1);
+                            if(retvalue < 0)
+                            {
+                                printf("BEEP Control Failed!\r\n");
+                                close(fd_buzzer);
+                            }
                         }
                     }
 
                     system_data.total_output++;
 
-                    flash_set_count = 0;
+                    total_output_changeFlag = 1;
 
-                    //set_system_data();   
+                    flash_set_count = 0;       
 
-    #if 0
-
-                AUTHORIZATION_INFORMATION  authorization;
-
-                memset(msg, 0, MSG_SIZE);
-                memset(&context, 0, sizeof(context));
-                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                AES_convert_key(&context);
-                AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
-
-                if(authorization.device_id == g_sd_serial)
-                {
-                    if(authorization.locked_state == 1)
-                    {
-                        memset(databuf,0,sizeof(databuf));
-                        databuf[0] = 0x04;
-                        
-                        retvalue = read(fd_bm8563, databuf, 16);
-                        if(retvalue < 0)
-                        {
-                            printf("fd_bm8563 Failed!\r\n");
-                            close(fd_bm8563);
-                        }
-
-                        memset(msg, 0, MSG_SIZE);
-                        memset(&context, 0, sizeof(context));
-                        AES_set_key(&context, key, iv, AES_MODE_128);
-
-                        CARD_INFORMATION card_info;
-
-                        AES_convert_key(&context);
-                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
-
-                        temp_p = (unsigned char *)&card_info;
-
-                        unsigned char crc =  CRC8(temp_p,16);
-                        if(card_info.crc == crc)
-                        {
-                            printf("databuf ok\n");
-
-                            if(card_info.machine_model == authorization.machine_model)
-                            {
-                                card_info.count++;
-                                card_info.rtc_time.year = g_system_time[0];
-                                card_info.rtc_time.month = g_system_time[1];
-                                card_info.rtc_time.day = g_system_time[2];
-                                card_info.rtc_time.hour = g_system_time[3];
-                                card_info.rtc_time.minute =  g_system_time[4];
-                                card_info.rtc_time.second = g_system_time[5];
-                                card_info.crc = CRC8((unsigned char *)&card_info,16);
-
-                                memset(msg, 0, MSG_SIZE);
-                                memset(&context, 0, sizeof(context));
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                                memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
-
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",msg[i]);
-                                }
-
-                                printf("\n\r");
-
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-                                AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
-
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",out[i]);
-                                }
-
-                                printf("\n\r");
-
-                                databuf[0] = 0x03;
-                                memcpy(databuf+1,out,16);
-
-                                /* 向/dev/beep文件写入数据 */
-                                retvalue = write(fd_bm8563, databuf, 17);
-                                if(retvalue < 0)
-                                {
-                                    printf("write Control Failed!\r\n");
-                                    close(fd_bm8563);
-                                }
-
-                              //  print_button_enable = 3;
-                              subsection_structure.current++;    
-                            }
-                        }
-                    }
-                    else if(authorization.locked_state == 2)
-                    {
-                       // print_button_enable = 3;
-                       subsection_structure.current++;    
-                    }
-                }
-#endif
-                    
-
-                   // subsection_structure.current++;                 
+                    subsection_structure.current++;        
                 }
                 else if(subsection_structure.current < subsection_structure.total)
                 {
-                    //新建画布，获取图片，发送给底层
-                    pdata = (unsigned char*)canvasBuf;
-    #if 0
-                    for (i = 0; i < CANVAS_HEIGHT; i++)
-                    {
-                        for (j = 0; j < 50; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            printf("%02x ", data);
-                        }
+                    pdata = snapshot->data; 
 
-                        printf("\n\r");
+
+                    printf("h=%d\n\r",snapshot->header.h);
+                    printf("w=%d\n\r", snapshot->header.w);
+                    printf("size=%d\n\r", snapshot->data_size);
+
+ #if 0                   
+                    bytes_per_line = (snapshot->header.w + 7) / 8;
+                    for (i = 0; i < snapshot->header.h; i++) 
+                    {
+                        //printf("Row %3d: ", y);
+                        for (j= 0; j < 100; j++) 
+                        {
+                            byte_index = i * bytes_per_line + (j / 8);
+                            bit_index = 7 - (j % 8);
+                            pixel = (pdata[byte_index] >> bit_index) & 0x01;
+                            printf("%d", pixel);
+
+                            // 每8位加一个空格便于阅读
+                            // if ((x + 1) % 8 == 0) printf(" ");
+                        }
+                        printf("\n");
                     }
-    #endif
-                    //获取x1,即图片的左上x坐标
-                    flag = 0;
-                    for (i = subsection_structure.x[subsection_structure.current-1]; i <= subsection_structure.x[subsection_structure.current]; i++)
+#endif
+
+                    success = crop_x_range_correct(pdata, snapshot->header.w, snapshot->header.h,subsection_structure.x[subsection_structure.current-1],subsection_structure.x[subsection_structure.current],   \
+                                                    print_data.data, sizeof(print_data.data), &print_data.data_width, &print_data.data_hight, \
+                                                    &start_x, &end_x,system_data.print.print_direction);
+
+
+                    if (success) 
                     {
-                        for (j = 2; j <= CANVAS_HEIGHT - 3; j++)
-                        {
-                            data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
+                        printf("Cropped successfully:\n");
+                        printf("  Original: %dx%d\n", snapshot->header.w, snapshot->header.h);
+                        printf("  Cropped: %dx%d\n", print_data.data_width, print_data.data_hight);
+                        printf("  Start position: (%d, %d)\n", start_x, end_x);                  
 
-                        if (flag != 0)
-                        {
-                            break;
-                        }
-                    }
 
-                    x1 = flag;
-                    printf("x1=%d\n", x1);
 
-                    //获取y1,即图片左上y坐标
-                    flag = 0;
-                    for (i = 2; i <= CANVAS_HEIGHT - 3; i++)
-                    {
-                        for (j = subsection_structure.x[subsection_structure.current-1]; j <= subsection_structure.x[subsection_structure.current]; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
+                        print_data.trigger_mode = system_data.print.trigger_mode;
+                        print_data.nozzle = system_data.print.nozzle;
+                        print_data.concentration = system_data.print.concentration;
+                        print_data.word_width = system_data.print.width;
+                        print_data.print_number = system_data.print.print_number;
+                        print_data.print_interval = system_data.print.print_interval;
+                        print_data.trigger_delay = system_data.print.trigger_delay;
+                        print_data.print_speed = system_data.print.print_speed;
 
-                        if (flag != 0)
-                        {
-                            break;
-                        }
+                        printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
+                        printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
+                        printf("nozzle=%d\n", print_data.nozzle);
                     }
 
-                    y1 = flag;
-                    printf("y1=%d\n", y1);
-
-
-                    //获取x2,即图片右下方x坐标
-                    flag = 0;
-                    for (i = subsection_structure.x[subsection_structure.current]; i >= subsection_structure.x[subsection_structure.current-1]; i--)
-                    {
-                        for (j = 2; j <= CANVAS_HEIGHT - 3; j++)
-                        {
-                            data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
-
-                        if (flag != 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    x2 = flag;
-                    printf("x2=%d\n", x2);
-
-                    //获取y2,即图片右下方x坐标
-                    flag = 0;
-                    for (i = CANVAS_HEIGHT - 3; i >= 2; i--)
-                    {
-                        for (j = subsection_structure.x[subsection_structure.current-1]; j <= subsection_structure.x[subsection_structure.current]; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
-
-                        if (flag != 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    y2 = flag;
-                    printf("y2=%d\n", y2);
-                    print_data.data_width = x2 - x1 + 1;
-                    print_data.data_hight = y2 - y1 + 1;
-
-                    print_data.trigger_mode = system_data.print.trigger_mode;
-                    print_data.nozzle = system_data.print.nozzle;
-                    print_data.concentration = system_data.print.concentration;
-                    print_data.word_width = system_data.print.width;
-                    print_data.print_number = system_data.print.print_number;
-                    print_data.print_interval = system_data.print.print_interval;
-                    print_data.trigger_delay = system_data.print.trigger_delay;
-                    print_data.print_speed = system_data.print.print_speed;
-
-                    printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
-                    printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
-                    printf("nozzle=%d\n", print_data.nozzle);
-                
-    #if 0
-                pdata2 = (unsigned char*)canvasBuf;
-                for (i = y1; i <= y2; i++)
-                {
-                    for (j = x1; j <= x2; j++)
-                    {
-                        data = *(pdata2 + (i * 1024 + j) * 4);
-                        if (data > 127)
-                        {
-                            data = 0;
-                        }
-                        else
-                        {
-                            data = 1;
-                        }
-                        printf("%u ", data);
-                    }
-                    printf("\n");
-                }
-    #endif
                     if((print_data.data_width  > 2)&&(print_data.data_hight > 2))
                     {
-                        if(system_data.print.print_direction == 0)
-                        {               
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 1)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 2)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 3)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-
                         retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
                         if(retvalue < 0)
                         {
@@ -4459,244 +3346,203 @@ static void timer_100ms_cb(lv_timer_t * t)
                             printf("fd_ph45 Control ok!\r\n");
                         }
 
-                        buf[0] = 1;
-                        retvalue = write(fd_buzzer, buf, 1);
-                        if(retvalue < 0)
+                        if(system_data.system.buzzer == 0)
                         {
-                            printf("BEEP Control Failed!\r\n");
-                            close(fd_buzzer);
-                        }
-                        usleep(300000);
+                            buf[0] = 1;
+                            retvalue = write(fd_buzzer, buf, 1);
+                            if(retvalue < 0)
+                            {
+                                printf("BEEP Control Failed!\r\n");
+                                close(fd_buzzer);
+                            }
+                            usleep(300000);
 
-                        buf[0] = 0;
-                        retvalue = write(fd_buzzer, buf, 1);
-                        if(retvalue < 0)
-                        {
-                            printf("BEEP Control Failed!\r\n");
-                            close(fd_buzzer);
+                            buf[0] = 0;
+                            retvalue = write(fd_buzzer, buf, 1);
+                            if(retvalue < 0)
+                            {
+                                printf("BEEP Control Failed!\r\n");
+                                close(fd_buzzer);
+                            }
                         }
                     }
 
                     system_data.total_output++;
 
+                    total_output_changeFlag = 1;
+
                     flash_set_count = 0;
 
-                    //set_system_data();   
-
-
-#if 0
-
-                AUTHORIZATION_INFORMATION  authorization;
-
-                memset(msg, 0, MSG_SIZE);
-                memset(&context, 0, sizeof(context));
-                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                AES_convert_key(&context);
-                AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
-
-                if(authorization.device_id == g_sd_serial)
-                {
-                    if(authorization.locked_state == 1)
-                    {
-                        memset(databuf,0,sizeof(databuf));
-                        databuf[0] = 0x04;
-                        
-                        retvalue = read(fd_bm8563, databuf, 16);
-                        if(retvalue < 0)
-                        {
-                            printf("fd_bm8563 Failed!\r\n");
-                            close(fd_bm8563);
-                        }
-
-                        memset(msg, 0, MSG_SIZE);
-                        memset(&context, 0, sizeof(context));
-                        AES_set_key(&context, key, iv, AES_MODE_128);
-
-                        CARD_INFORMATION card_info;
-
-                        AES_convert_key(&context);
-                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
-
-                        temp_p = (unsigned char *)&card_info;
-
-                        unsigned char crc =  CRC8(temp_p,16);
-                        if(card_info.crc == crc)
-                        {
-                            printf("databuf ok\n");
-
-                            if(card_info.machine_model == authorization.machine_model)
-                            {
-                                card_info.count++;
-                                card_info.rtc_time.year = g_system_time[0];
-                                card_info.rtc_time.month = g_system_time[1];
-                                card_info.rtc_time.day = g_system_time[2];
-                                card_info.rtc_time.hour = g_system_time[3];
-                                card_info.rtc_time.minute =  g_system_time[4];
-                                card_info.rtc_time.second = g_system_time[5];
-                                card_info.crc = CRC8((unsigned char *)&card_info,16);
-
-                                memset(msg, 0, MSG_SIZE);
-                                memset(&context, 0, sizeof(context));
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                                memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
-
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",msg[i]);
-                                }
-
-                                printf("\n\r");
-
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-                                AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
-
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",out[i]);
-                                }
-
-                                printf("\n\r");
-
-                                databuf[0] = 0x03;
-                                memcpy(databuf+1,out,16);
-
-                                /* 向/dev/beep文件写入数据 */
-                                retvalue = write(fd_bm8563, databuf, 17);
-                                if(retvalue < 0)
-                                {
-                                    printf("write Control Failed!\r\n");
-                                    close(fd_bm8563);
-                                }
-
-                                //print_button_enable = 3;
-
-                                subsection_structure.current++;    
-                            }
-                        }
-                    }
-                    else if(authorization.locked_state == 2)
-                    {
-                        //print_button_enable = 3;
-
-                        subsection_structure.current++;    
-                    }
-                }
-#endif
-
-                    //subsection_structure.current++;    
+                    subsection_structure.current++;
                 }
                 else
                 {
-                    //新建画布，获取图片，发送给底层
-                    pdata = (unsigned char*)canvasBuf;
-    #if 0
-                    for (i = 0; i < CANVAS_HEIGHT; i++)
+                    pdata = snapshot->data; 
+
+                    printf("h=%d\n\r",snapshot->header.h);
+                    printf("w=%d\n\r", snapshot->header.w);
+                    printf("size=%d\n\r", snapshot->data_size);
+
+#if 0                    
+                    bytes_per_line = (snapshot->header.w + 7) / 8;
+
+                    for (i = 0; i < snapshot->header.h; i++) 
                     {
-                        for (j = 0; j < 50; j++)
+                        //printf("Row %3d: ", y);
+                        for (j= 0; j < 100; j++) 
                         {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            printf("%02x ", data);
+                            byte_index = i * bytes_per_line + (j / 8);
+                            bit_index = 7 - (j % 8);
+                            pixel = (pdata[byte_index] >> bit_index) & 0x01;
+                            printf("%d", pixel);
+
+                            // 每8位加一个空格便于阅读
+                            // if ((x + 1) % 8 == 0) printf(" ");
+                        }
+                        printf("\n");
+                    }
+#endif
+
+                    success = crop_x_range_correct(pdata, snapshot->header.w, snapshot->header.h,subsection_structure.x[subsection_structure.current-1],CANVAS_WIDTH - 1,   \
+                                                    print_data.data, sizeof(print_data.data), &print_data.data_width, &print_data.data_hight, \
+                                                    &start_x, &end_x,system_data.print.print_direction);
+
+
+                    if (success) 
+                    {
+                        printf("Cropped successfully:\n");
+                        printf("  Original: %dx%d\n", snapshot->header.w, snapshot->header.h);
+                        printf("  Cropped: %dx%d\n", print_data.data_width, print_data.data_hight);
+                        printf("  Start position: (%d, %d)\n", start_x, end_x);                  
+
+                        print_data.trigger_mode = system_data.print.trigger_mode;
+                        print_data.nozzle = system_data.print.nozzle;
+                        print_data.concentration = system_data.print.concentration;
+                        print_data.word_width = system_data.print.width;
+                        print_data.print_number = system_data.print.print_number;
+                        print_data.print_interval = system_data.print.print_interval;
+                        print_data.trigger_delay = system_data.print.trigger_delay;
+                        print_data.print_speed = system_data.print.print_speed;
+
+                        printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
+                        printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
+                        printf("nozzle=%d\n", print_data.nozzle);
+                    }
+
+                    if((print_data.data_width  > 2)&&(print_data.data_hight > 2))
+                    {
+                        retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
+                        if(retvalue < 0)
+                        {
+                            printf("fd_ph45 Control Failed!\r\n");
+                            close(fd_ph45);
+                        }
+                        else
+                        {
+                            printf("fd_ph45 Control ok!\r\n");
                         }
 
-                        printf("\n\r");
-                    }
-    #endif
-                    //获取x1,即图片的左上x坐标
-                    flag = 0;
-                    for (i = subsection_structure.x[subsection_structure.current - 1]; i <= CANVAS_WIDTH - 3; i++)
-                    {
-                        for (j = 2; j < CANVAS_HEIGHT - 3; j++)
+                        lv_snapshot_free(snapshot);
+          
+                        if(system_data.system.buzzer == 0)
                         {
-                            data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                            if (data != 0xff)
+                            buf[0] = 1;
+                            retvalue = write(fd_buzzer, buf, 1);
+                            if(retvalue < 0)
                             {
-                                flag = i;
-                                break;
+                                printf("BEEP Control Failed!\r\n");
+                                close(fd_buzzer);
+                            }
+                            usleep(300000);
+
+                            buf[0] = 0;
+                            retvalue = write(fd_buzzer, buf, 1);
+                            if(retvalue < 0)
+                            {
+                                printf("BEEP Control Failed!\r\n");
+                                close(fd_buzzer);
                             }
                         }
-
-                        if (flag != 0)
-                        {
-                            break;
-                        }
                     }
 
-                    x1 = flag;
-                    printf("x1=%d\n", x1);
+                    system_data.total_output++;
 
-                    //获取y1,即图片左上y坐标
-                    flag = 0;
-                    for (i = 2; i <= CANVAS_HEIGHT - 3; i++)
+                    total_output_changeFlag = 1;
+
+                    flash_set_count = 0;   
+
+                    subsection_structure.current = 0;   
+
+                    print_button_enable = 3;    
+                }
+            }
+            //没有分段的情况
+            else
+            {
+                //新建画布，获取图片，发送给底层
+                //pdata = (unsigned char*)canvasBuf;
+                pdata = snapshot->data; 
+
+                printf("h=%d\n\r",snapshot->header.h);
+                printf("w=%d\n\r", snapshot->header.w);
+                printf("size=%d\n\r", snapshot->data_size);
+
+#if 0
+                bytes_per_line = (snapshot->header.w + 7) / 8;
+
+                for (i = 0; i < snapshot->header.h; i++) 
+                {
+                    //printf("Row %3d: ", y);
+                    for (j= 0; j < 100; j++) 
                     {
-                        for (j = subsection_structure.x[subsection_structure.current - 1]; j <= CANVAS_WIDTH - 3; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
+                        byte_index = i * bytes_per_line + (j / 8);
+                        bit_index = 7 - (j % 8);
+                        pixel = (pdata[byte_index] >> bit_index) & 0x01;
+                        printf("%d", pixel);
 
-                        if (flag != 0)
-                        {
-                            break;
-                        }
+                        // 每8位加一个空格便于阅读
+                        // if ((x + 1) % 8 == 0) printf(" ");
                     }
+                    printf("\n");
+                }
+#endif
 
-                    y1 = flag;
-                    printf("y1=%d\n", y1);
+                success = crop_x_range_correct(pdata, snapshot->header.w, snapshot->header.h,0,CANVAS_WIDTH - 1,   \
+                                                print_data.data, sizeof(print_data.data), &print_data.data_width, &print_data.data_hight, \
+                                                &start_x, &end_x,system_data.print.print_direction);
 
 
-                    //获取x2,即图片右下方x坐标
-                    flag = 0;
-                    for (i = CANVAS_WIDTH - 3; i >= subsection_structure.x[subsection_structure.current - 1]; i--)
+                if (success) 
+                {
+                    printf("Cropped successfully:\n");
+                    printf("  Original: %dx%d\n", snapshot->header.w, snapshot->header.h);
+                    printf("  Cropped: %dx%d\n", print_data.data_width, print_data.data_hight);
+                    printf("  Start position: (%d, %d)\n", start_x, end_x);      
+
+
+                    // output_buf 现在包含裁剪后的二值化数据
+                    // 其中像素值为0的区域是您需要的有效数据
+#if 0
+
+                    bytes_per_line = (print_data.data_width + 7) / 8;
+
+                    for (i = 0; i < print_data.data_hight; i++) 
                     {
-                        for (j = 2; j < CANVAS_HEIGHT - 2; j++)
+                        //printf("Row %3d: ", y);
+                        for (j= 0; j < 100; j++) 
                         {
-                            data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
+                            byte_index = i * bytes_per_line + (j / 8);
+                            bit_index = 7 - (j % 8);
+                            pixel = (print_data.data[byte_index] >> bit_index) & 0x01;
+                            printf("%d", pixel);
 
-                        if (flag != 0)
-                        {
-                            break;
+                            // 每8位加一个空格便于阅读
+                        // if ((x + 1) % 8 == 0) printf(" ");
                         }
+                        printf("\n");
                     }
+#endif
 
-                    x2 = flag;
-                    printf("x2=%d\n", x2);
-
-                    //获取y2,即图片右下方x坐标
-                    flag = 0;
-                    for (i = CANVAS_HEIGHT - 3; i >= 2; i--)
-                    {
-                        for (j = subsection_structure.x[subsection_structure.current - 1]; j <= CANVAS_WIDTH - 3; j++)
-                        {
-                            data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                            if (data != 0xff)
-                            {
-                                flag = i;
-                                break;
-                            }
-                        }
-
-                        if (flag != 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    y2 = flag;
-                    printf("y2=%d\n", y2);
-                    print_data.data_width = x2 - x1 + 1;
-                    print_data.data_hight = y2 - y1 + 1;
 
                     print_data.trigger_mode = system_data.print.trigger_mode;
                     print_data.nozzle = system_data.print.nozzle;
@@ -4710,482 +3556,11 @@ static void timer_100ms_cb(lv_timer_t * t)
                     printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
                     printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
                     printf("nozzle=%d\n", print_data.nozzle);
-                
-    #if 0
-                pdata2 = (unsigned char*)canvasBuf;
-                for (i = y1; i <= y2; i++)
-                {
-                    for (j = x1; j <= x2; j++)
-                    {
-                        data = *(pdata2 + (i * 1024 + j) * 4);
-                        if (data > 127)
-                        {
-                            data = 0;
-                        }
-                        else
-                        {
-                            data = 1;
-                        }
-                        printf("%u ", data);
-                    }
-                    printf("\n");
+                    printf("print_direction=%d\n", system_data.print.print_direction);
                 }
-    #endif
-                   if((print_data.data_width  > 2)&&(print_data.data_hight > 2))
-                    {
-                        if(system_data.print.print_direction == 0)
-                        {               
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 1)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 2)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 3)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-
-                        retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
-                        if(retvalue < 0)
-                        {
-                            printf("fd_ph45 Control Failed!\r\n");
-                            close(fd_ph45);
-                        }
-                        else
-                        {
-                            printf("fd_ph45 Control ok!\r\n");
-                        }
-
-                        buf[0] = 1;
-                        retvalue = write(fd_buzzer, buf, 1);
-                        if(retvalue < 0)
-                        {
-                            printf("BEEP Control Failed!\r\n");
-                            close(fd_buzzer);
-                        }
-                        usleep(300000);
-
-                        buf[0] = 0;
-                        retvalue = write(fd_buzzer, buf, 1);
-                        if(retvalue < 0)
-                        {
-                            printf("BEEP Control Failed!\r\n");
-                            close(fd_buzzer);
-                        }
-                    }
-
-                    system_data.total_output++;
-
-                    flash_set_count = 0;
-
-                    //set_system_data();   
-
-#if 0
-
-                AUTHORIZATION_INFORMATION  authorization;
-
-                memset(msg, 0, MSG_SIZE);
-                memset(&context, 0, sizeof(context));
-                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                AES_convert_key(&context);
-                AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
-
-                if(authorization.device_id == g_sd_serial)
-                {
-                    if(authorization.locked_state == 1)
-                    {
-                        memset(databuf,0,sizeof(databuf));
-                        databuf[0] = 0x04;
-                        
-                        retvalue = read(fd_bm8563, databuf, 16);
-                        if(retvalue < 0)
-                        {
-                            printf("fd_bm8563 Failed!\r\n");
-                            close(fd_bm8563);
-                        }
-
-                        memset(msg, 0, MSG_SIZE);
-                        memset(&context, 0, sizeof(context));
-                        AES_set_key(&context, key, iv, AES_MODE_128);
-
-                        CARD_INFORMATION card_info;
-
-                        AES_convert_key(&context);
-                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
-
-                        temp_p = (unsigned char *)&card_info;
-
-                        unsigned char crc =  CRC8(temp_p,16);
-                        if(card_info.crc == crc)
-                        {
-                            printf("databuf ok\n");
-
-                            if(card_info.machine_model == authorization.machine_model)
-                            {
-                                card_info.count++;
-                                card_info.rtc_time.year = g_system_time[0];
-                                card_info.rtc_time.month = g_system_time[1];
-                                card_info.rtc_time.day = g_system_time[2];
-                                card_info.rtc_time.hour = g_system_time[3];
-                                card_info.rtc_time.minute =  g_system_time[4];
-                                card_info.rtc_time.second = g_system_time[5];
-                                card_info.crc = CRC8((unsigned char *)&card_info,16);
-
-                                memset(msg, 0, MSG_SIZE);
-                                memset(&context, 0, sizeof(context));
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                                memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
-
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",msg[i]);
-                                }
-
-                                printf("\n\r");
-
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-                                AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
-
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",out[i]);
-                                }
-
-                                printf("\n\r");
-
-                                databuf[0] = 0x03;
-                                memcpy(databuf+1,out,16);
-
-                                /* 向/dev/beep文件写入数据 */
-                                retvalue = write(fd_bm8563, databuf, 17);
-                                if(retvalue < 0)
-                                {
-                                    printf("write Control Failed!\r\n");
-                                    close(fd_bm8563);
-                                }
-
-                                print_button_enable = 3;
-                            }
-                        }
-                    }
-                    else if(authorization.locked_state == 2)
-                    {
-                        print_button_enable = 3;
-                    }
-                }
-#endif
-
-
-                    //print_button_enable = 3;             
-                }
-            }
-            else
-            {
-                //新建画布，获取图片，发送给底层
-                pdata = (unsigned char*)canvasBuf;
-#if 0
-                for (i = 0; i < CANVAS_HEIGHT; i++)
-                {
-                    for (j = 0; j < 50; j++)
-                    {
-                        data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                        printf("%02x ", data);
-                    }
-
-                    printf("\n\r");
-                }
-#endif
-                //获取x1,即图片的左上x坐标
-                flag = 0;
-                for (i = 2; i <= CANVAS_WIDTH - 3; i++)
-                {
-                    for (j = 2; j <= CANVAS_HEIGHT - 3; j++)
-                    {
-                        data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                        if (data != 0xff)
-                        {
-                            flag = i;
-                            break;
-                        }
-                    }
-
-                    if (flag != 0)
-                    {
-                        break;
-                    }
-                }
-
-                x1 = flag;
-                printf("x1=%d\n", x1);
-
-                //获取y1,即图片左上y坐标
-                flag = 0;
-                for (i = 2; i <= CANVAS_HEIGHT - 3; i++)
-                {
-                    for (j = 2; j <= CANVAS_WIDTH - 3; j++)
-                    {
-                        data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                        if (data != 0xff)
-                        {
-                            flag = i;
-                            break;
-                        }
-                    }
-
-                    if (flag != 0)
-                    {
-                        break;
-                    }
-                }
-
-                y1 = flag;
-                printf("y1=%d\n", y1);
-
-
-                //获取x2,即图片右下方x坐标
-                flag = 0;
-                for (i = CANVAS_WIDTH - 3; i >= 2; i--)
-                {
-                    for (j = 2; j <= CANVAS_HEIGHT - 3; j++)
-                    {
-                        data = *(pdata + (j * CANVAS_WIDTH + i) * 4);
-                        if (data != 0xff)
-                        {
-                            flag = i;
-                            break;
-                        }
-                    }
-
-                    if (flag != 0)
-                    {
-                        break;
-                    }
-                }
-
-                x2 = flag;
-                printf("x2=%d\n", x2);
-
-                //获取y2,即图片右下方x坐标
-                flag = 0;
-                for (i = CANVAS_HEIGHT - 3; i >= 2; i--)
-                {
-                    for (j = 2; j <= CANVAS_WIDTH - 3; j++)
-                    {
-                        data = *(pdata + (i * CANVAS_WIDTH + j) * 4);
-                        if (data != 0xff)
-                        {
-                            flag = i;
-                            break;
-                        }
-                    }
-
-                    if (flag != 0)
-                    {
-                        break;
-                    }
-                }
-
-                y2 = flag;
-                printf("y2=%d\n", y2);
-                print_data.data_width = x2 - x1 + 1;
-                print_data.data_hight = y2 - y1 + 1;
-
-                print_data.trigger_mode = system_data.print.trigger_mode;
-                print_data.nozzle = system_data.print.nozzle;
-                print_data.concentration = system_data.print.concentration;
-                print_data.word_width = system_data.print.width;
-                print_data.print_number = system_data.print.print_number;
-                print_data.print_interval = system_data.print.print_interval;
-                print_data.trigger_delay = system_data.print.trigger_delay;
-                print_data.print_speed = system_data.print.print_speed;
-
-                printf("printWidth=%d printHeight=%d\n", print_data.data_width, print_data.data_hight);
-                printf("concentration=%d word_width=%d\n", print_data.concentration, print_data.word_width);
-                printf("nozzle=%d\n", print_data.nozzle);
-                printf("print_direction=%d\n", system_data.print.print_direction);
             
-#if 0
-            pdata2 = (unsigned char*)canvasBuf;
-            for (i = y1; i <= y2; i++)
-            {
-                for (j = x1; j <= x2; j++)
+                if((print_data.data_width  > 2)&&(print_data.data_hight > 2))
                 {
-                    data = *(pdata2 + (i * 1024 + j) * 4);
-                    if (data > 127)
-                    {
-                        data = 0;
-                    }
-                    else
-                    {
-                        data = 1;
-                    }
-                    printf("%u ", data);
-                }
-                printf("\n");
-            }
-#endif
-                   if((print_data.data_width  > 2)&&(print_data.data_hight > 2))
-                    {
-                        if(system_data.print.print_direction == 0)
-                        {               
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 1)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[i * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 2)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i) * print_data.data_width + j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-                        else if(system_data.print.print_direction == 3)
-                        {
-                            pdata2 = (unsigned char*)canvasBuf;
-                            for (i = 0; i < print_data.data_hight; i++)
-                            {
-                                for (j = 0; j < print_data.data_width; j++)
-                                {
-                                    data = *(pdata2 + ((i + y1) * CANVAS_WIDTH + j + x1) * 4);
-                                    if (data > 127)
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 0;
-                                    }
-                                    else
-                                    {
-                                        print_data.data[(print_data.data_hight - 1 - i)  * print_data.data_width + print_data.data_width - 1 - j] = 1;
-                                    }
-                                    //printf("%u ", print_data.data[i * print_data.data_width + j]);
-                                }
-                                //printf("\n");
-                            }
-                        }
-
                     retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
                     if(retvalue < 0)
                     {
@@ -5197,157 +3572,42 @@ static void timer_100ms_cb(lv_timer_t * t)
                         printf("fd_ph45 Control ok!\r\n");
                     }
 
-                    buf[0] = 1;
-                    retvalue = write(fd_buzzer, buf, 1);
-                    if(retvalue < 0)
+                    lv_snapshot_free(snapshot);
+                    
+                    if(system_data.system.buzzer == 0)
                     {
-                        printf("BEEP Control Failed!\r\n");
-                        close(fd_buzzer);
-                    }
-                    usleep(300000);
-
-                    buf[0] = 0;
-                    retvalue = write(fd_buzzer, buf, 1);
-                    if(retvalue < 0)
-                    {
-                        printf("BEEP Control Failed!\r\n");
-                        close(fd_buzzer);
-                    }
-                }
-
-                system_data.total_output++;
-
-                flash_set_count = 0;
-
-//                set_system_data();
-#if 0
-
-                AUTHORIZATION_INFORMATION  authorization;
-
-                memset(msg, 0, MSG_SIZE);
-                memset(&context, 0, sizeof(context));
-                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                AES_convert_key(&context);
-                AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&authorization, MSG_SIZE);
-
-                if(authorization.device_id == g_sd_serial)
-                {
-                    if(authorization.locked_state == 1)
-                    {
-                        memset(databuf,0,sizeof(databuf));
-                        databuf[0] = 0x04;
-                        
-                        retvalue = read(fd_bm8563, databuf, 16);
+                        buf[0] = 1;
+                        retvalue = write(fd_buzzer, buf, 1);
                         if(retvalue < 0)
                         {
-                            printf("fd_bm8563 Failed!\r\n");
-                            close(fd_bm8563);
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
                         }
+                        usleep(300000);
 
-                        printf("读卡密文:\r\n");
-                        for(i=0;i<16;i++)
+                        buf[0] = 0;
+                        retvalue = write(fd_buzzer, buf, 1);
+                        if(retvalue < 0)
                         {
-                            printf("0x%x ",databuf[i]);
+                            printf("BEEP Control Failed!\r\n");
+                            close(fd_buzzer);
                         }
-                        printf("\n\r");
-
-                        memset(msg, 0, MSG_SIZE);
-                        memset(&context, 0, sizeof(context));
-                        AES_set_key(&context, key, iv, AES_MODE_128);
-
-                        CARD_INFORMATION card_info;
-
-                        AES_convert_key(&context);
-                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info, MSG_SIZE);
-
-                        temp_p = (unsigned char *)&card_info;
-
-                        printf("读卡明文:\r\n");
-                        for(i=0;i<16;i++)
-                        {
-                            printf("0x%x ",*(temp_p+i));
-                        }
-                        printf("\n\r");
-                        
-                        unsigned char crc =  CRC8(temp_p,16);
-                        if(card_info.crc == crc)
-                        {
-                            printf("databuf ok\n");
-
-                            if(card_info.machine_model == authorization.machine_model)
-                            {
-                                card_info.count++;
-                                card_info.rtc_time.year = g_system_time[0];
-                                card_info.rtc_time.month = g_system_time[1];
-                                card_info.rtc_time.day = g_system_time[2];
-                                card_info.rtc_time.hour = g_system_time[3];
-                                card_info.rtc_time.minute =  g_system_time[4];
-                                card_info.rtc_time.second = g_system_time[5];
-                                card_info.crc = CRC8((unsigned char *)&card_info,16);
-
-                                memset(msg, 0, MSG_SIZE);
-                                memset(&context, 0, sizeof(context));
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-
-                                memcpy(msg, (unsigned char *)&card_info, MSG_SIZE);
-
-                                printf("写卡明文:\r\n");
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",msg[i]);
-                                }
-
-                                printf("\n\r");
-
-                                AES_set_key(&context, key, iv, AES_MODE_128);
-                                AES_cbc_encrypt(&context, msg, out, MSG_SIZE);
-
-                                printf("写卡密文:\r\n");
-                                for(i=0;i<16;i++)
-                                {
-                                    printf("0x%x ",out[i]);
-                                }
-
-                                printf("\n\r");
-
-                                databuf[0] = 0x03;
-                                memcpy(databuf+1,out,16);
-
-                                /* 向/dev/beep文件写入数据 */
-                                retvalue = write(fd_bm8563, databuf, 17);
-                                if(retvalue < 0)
-                                {
-                                    printf("write Control Failed!\r\n");
-                                    close(fd_bm8563);
-                                }
-
-                                print_button_enable = 3;
-                            }
-                        }
-                        else
-                        {
-                            printf("crc error!\r\n");
-                            printf("crc=0x%x\r\n",crc);
-                            printf("card_info.crc=0x%x\r\n",card_info.crc);           
-                        }
-                    }
-                    else if(authorization.locked_state == 2)
-                    {
-                        print_button_enable = 3;
                     }
                 }
                 else
                 {
-                    printf("设备未激活!\r\n");
-                    printf("device_id=0x%08x\r\n",authorization.device_id);
-                    printf("g_sd_serial=0x%08x\r\n",g_sd_serial);
+                    lv_snapshot_free(snapshot);   
                 }
-#endif
+
+                system_data.total_output++;
+
+                total_output_changeFlag = 1;
+
+                flash_set_count = 0;
+
                 print_button_enable = 3;
 
             }
-
         } 
     }
     else if(print_button_enable == 3)
@@ -5503,6 +3763,65 @@ static void timer_100ms_cb(lv_timer_t * t)
                             break;
                     }
                 }
+                else if(data_structure[i].data.date_time.date_or_time == 2)
+                {
+                    now_year =  2000 + g_system_time[0];
+                    now_month =  g_system_time[1];
+                    now_day =  g_system_time[2];
+                    calculateExpiryDate(now_year,now_month,now_day,data_structure[i].data.date_time.year,data_structure[i].data.date_time.month,data_structure[i].data.date_time.day,&end_year,&end_month,&end_day);
+
+                    switch(data_structure[i].data.date_time.date_or_time_type)
+                    {
+                        case 0:
+                            sprintf(date_time_str, "%04d/%02d/%02d", end_year, end_month, end_day);
+                            break;
+                        case 1:
+                            sprintf(date_time_str, "%02d/%02d/%02d", end_year%100, end_month, end_day);
+                            break;
+                        case 2:
+                            sprintf(date_time_str, "%04d-%02d-%02d", end_year, end_month, end_day);
+                            break;
+                        case 3:
+                            sprintf(date_time_str, "%02d-%02d-%02d", end_year%100, end_month, end_day);
+                            break;
+                        case 4:
+                            sprintf(date_time_str, "%04d.%02d.%02d", end_year, end_month, end_day);
+                            break;
+                        case 5:
+                            sprintf(date_time_str, "%02d.%02d.%02d", end_year%100, end_month, end_day);
+                            break;
+                        case 6:
+                            sprintf(date_time_str, "%02d/%02d/%04d", end_day,  end_month, end_year);
+                            break;
+                        case 7:
+                            sprintf(date_time_str, "%02d/%02d/%02d", end_day,  end_month, end_year%100);
+                            break;
+                        case 8:
+                            sprintf(date_time_str, "%02d-%02d-%04d", end_day,  end_month, end_year);
+                            break;
+                        case 9:
+                            sprintf(date_time_str, "%02d-%02d-%02d", end_day,  end_month, end_year%100);
+                            break;
+                        case 10:
+                            sprintf(date_time_str, "%02d.%02d.%04d", end_day,  end_month, end_year);
+                            break;
+                        case 11:
+                            sprintf(date_time_str, "%02d.%02d.%02d", end_day,  end_month, end_year%100);
+                            break;
+                        case 12:
+                            sprintf(date_time_str, "%04d年%02d月%02d日", end_year, end_month, end_day);
+                            break;
+                        case 13:
+                            sprintf(date_time_str, "%02d年%02d月%02d日", end_year%100, end_month, end_day);
+                            break;
+                        case 14:
+                            sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                            break;
+                        case 15:
+                            sprintf(date_time_str, "延期");
+                            break;
+                    }
+                }
                 else
                 {
                     switch(data_structure[i].data.date_time.date_or_time_type)
@@ -5552,19 +3871,8 @@ static void timer_100ms_cb(lv_timer_t * t)
 
         lv_obj_update_layout(win_content);
 
-        if (canvas != NULL)
-        {
-            if (snapshot != NULL)
-            {
-                lv_snapshot_free(snapshot);
-            }
 
-            lv_obj_del(canvas);
-            //lv_obj_del(canvas_bg);
-            printf("lv_obj_del canvas\n");
-        }
-
-        snapshot = lv_snapshot_take(win_content, LV_IMG_CF_TRUE_COLOR_ALPHA);
+        snapshot = lv_snapshot_take(win_content, LV_IMG_CF_ALPHA_1BIT);
 
         if(snapshot == NULL)
         {
@@ -5574,7 +3882,7 @@ static void timer_100ms_cb(lv_timer_t * t)
         {
             printf("lv_snapshot_take ok\n");
         }
-
+#if 0
         lv_draw_img_dsc_t img_dsc;
         lv_draw_img_dsc_init(&img_dsc);
 
@@ -5588,6 +3896,7 @@ static void timer_100ms_cb(lv_timer_t * t)
         lv_canvas_draw_img(canvas, 0, 0, snapshot, &img_dsc);
 
         lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
+#endif
 
         memset((char *)&subsection_structure,0,sizeof(subsection_structure));
 
@@ -5625,36 +3934,45 @@ static void timer_100ms_cb(lv_timer_t * t)
     else if(print_button_enable == 4)
     {
         print_button_enable = 0;
-        if (canvas != NULL)
-        {
-            if (snapshot != NULL)
-            {
-                lv_snapshot_free(snapshot);
-            }
-
-            lv_obj_del(canvas);
-            //lv_obj_del(canvas_bg);
-            printf("lv_obj_del canvas\n");
-        }        
+        lv_snapshot_free(snapshot);
     }
 
 
     flash_set_count++;
-    if((flash_set_count / 600) >= system_data.print.flash_set)
+    if(system_data.print.flash_set != 0)
     {
-        flash_set_count = 0;
-        print_data.trigger_mode = 3;
-        //printf("trigger_mode=%d\n", print_data.trigger_mode);
-        retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
-        if(retvalue < 0)
+        if((flash_set_count / 600) >= system_data.print.flash_set)
         {
-            printf("fd_ph45 Control Failed!\r\n");
-            close(fd_ph45);
+            flash_set_count = 0;
+            print_data.trigger_mode = 3;
+            //printf("trigger_mode=%d\n", print_data.trigger_mode);
+            retvalue = write(fd_ph45,(unsigned char *)&print_data, sizeof(print_data));      
+            if(retvalue < 0)
+            {
+                printf("fd_ph45 Control Failed!\r\n");
+                close(fd_ph45);
+            }
+            else
+            {
+                //printf("fd_ph45 Control ok!\r\n");
+            }
         }
-        else
+    }
+
+    if(total_output_changeFlag == 1)
+    {
+        total_output_changeFlag = 0;
+        
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            //printf("fd_ph45 Control ok!\r\n");
+            sprintf(datastr,"总产量:%u",system_data.total_output);
         }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            sprintf(datastr,"Total Output:%u",system_data.total_output);
+        }
+
+        lv_label_set_text(Total_output_label, datastr);
     }
 
     
@@ -5677,7 +3995,8 @@ static void main_slider_event_cb(lv_event_t* e)
     {
         temp =  lv_slider_get_value(target); 
         printf("temp=%d\n", temp);
-        x_data = temp * 6;
+        x_data = temp * 156;
+        //x_data = temp * 39;
        // lv_obj_scroll_to_x(win_content, temp*7, LV_ANIM_ON);
         lv_indev_t* indev = lv_indev_get_act(); //获取输入设备
         if (indev == NULL)  return;
@@ -5763,17 +4082,17 @@ void slider_show_2(void)
     lv_style_init(&style_pressed_color);                           //初始化样式
     lv_style_set_bg_color(&style_pressed_color, lv_color_hex3(0xffffff));//设置背景颜色
 
-    lv_obj_t* slider = lv_slider_create(lv_scr_act());            //创建滑块
-    lv_obj_remove_style_all(slider);                               //移除所有样式
+    slider_main = lv_slider_create(lv_scr_act());            //创建滑块
+    lv_obj_remove_style_all(slider_main);                               //移除所有样式
 
-    lv_obj_add_style(slider, &style_main, LV_PART_MAIN);             //添加样式
-    lv_obj_add_style(slider, &style_indicator, LV_PART_INDICATOR);   //添加样式 指示器
-    lv_obj_add_style(slider, &style_pressed_color, LV_PART_INDICATOR | LV_STATE_PRESSED); //添加样式 指示器 按压状态
-    lv_obj_add_style(slider, &style_knob, LV_PART_KNOB);             //添加样式 圆头
-    lv_obj_add_style(slider, &style_pressed_color, LV_PART_KNOB | LV_STATE_PRESSED);      //添加样式 圆头 按压状态
-    lv_obj_align(slider, LV_ALIGN_TOP_LEFT, 39, 186);
+    lv_obj_add_style(slider_main, &style_main, LV_PART_MAIN);             //添加样式
+    lv_obj_add_style(slider_main, &style_indicator, LV_PART_INDICATOR);   //添加样式 指示器
+    lv_obj_add_style(slider_main, &style_pressed_color, LV_PART_INDICATOR | LV_STATE_PRESSED); //添加样式 指示器 按压状态
+    lv_obj_add_style(slider_main, &style_knob, LV_PART_KNOB);             //添加样式 圆头
+    lv_obj_add_style(slider_main, &style_pressed_color, LV_PART_KNOB | LV_STATE_PRESSED);      //添加样式 圆头 按压状态
+    lv_obj_align(slider_main, LV_ALIGN_TOP_LEFT, 39, 186);
     //lv_obj_center(slider);                                         //居中显示
-    lv_obj_add_event_cb(slider, main_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(slider_main, main_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 
@@ -5844,9 +4163,30 @@ static void button_keyboard_return_event_cb(lv_event_t* e)
         lv_obj_del(label_keyboard_return);
         lv_obj_del(btn_keyboard_return);
 
-        lv_timer_resume(timer_100ms);
-
         addition_text_updata();
+    }
+}
+
+
+static void button_modification_text_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_modification_text_keyboard_return_event_cb\n");
+
+        buzzer_enable = 1;
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        //addition_text_updata();
     }
 }
 
@@ -5871,11 +4211,36 @@ static void button_keyboard_confirm_event_cb(lv_event_t* e)
         lv_obj_del(label_keyboard_return);
         lv_obj_del(btn_keyboard_return);
 
-        lv_timer_resume(timer_100ms);
-
         addition_text_updata();
     }
 }
+
+static void button_modification_text_keyboard_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_modification_text_keyboard_confirm_event_cb\n");
+        buzzer_enable = 1;
+        //获取输入框数据给到文本显示框
+        lv_label_set_text(label_file_management_text_label, lv_textarea_get_text(textarea_text_keyboard));
+        lv_label_set_text(label_file_management_label, lv_textarea_get_text(textarea_text_keyboard));
+        lv_obj_set_style_text_opa(label_file_management_text_label, LV_OPA_COVER, LV_STATE_DEFAULT);
+        lv_obj_del(textarea_bg_keyboard);
+        lv_obj_del(pinyin_ime);
+        lv_obj_del(textarea_text_keyboard);
+        lv_obj_del(keyboard_bg);
+        lv_obj_del(label_keyboard_confirm);
+        lv_obj_del(btn_keyboard_confirm);
+        lv_obj_del(label_keyboard_return);
+        lv_obj_del(btn_keyboard_return);
+
+        //addition_text_updata();
+    }
+}
+
+
 static void button_left_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -5948,8 +4313,11 @@ static void button_add_event_cb(lv_event_t* e)
                 case TYPE_WORD:
                 case TYPE_SYMBOL:
                 {
+                    
                     if (data_structure[index].data.word.size < WORD_MAX_SIZE)
                     {
+                        font_list_release(data_structure[index].data.word.typeface, data_structure[index].data.word.size, data_structure[index].data.word.italic_bold);
+          
                         data_structure[index].data.word.size += 5;
 
                         if (data_structure[index].data.word.size >= WORD_MAX_SIZE)
@@ -5980,14 +4348,15 @@ static void button_add_event_cb(lv_event_t* e)
                         lv_obj_set_style_bg_opa(temp_focused_obj, LV_OPA_TRANSP, 0);
                         lv_obj_clear_flag(temp_focused_obj, LV_OBJ_FLAG_SCROLLABLE);
                         lv_obj_set_style_border_width(temp_focused_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-                        lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);
-                        lv_obj_remove_style(label1, &data_structure[index].data.word.style, 0);
-                        lv_style_reset(&data_structure[index].data.word.style);
+                        lv_obj_t* label1 = lv_obj_get_child(temp_focused_obj, 0);         
+                        lv_obj_remove_style(label1, &data_structure[index].data.word.style, 0);  
+                        lv_style_reset(&data_structure[index].data.word.style);  
                         lv_style_init(&data_structure[index].data.word.style);
-                        lv_style_set_text_font(&data_structure[index].data.word.style, temp_font);
-                        lv_obj_add_style(label1, &data_structure[index].data.word.style, 0);
+                        lv_style_set_text_font(&data_structure[index].data.word.style, temp_font);    
+                        lv_obj_add_style(label1, &data_structure[index].data.word.style, 0);   
                         lv_obj_center(label1);
                         lv_obj_set_style_text_color(label1, lv_color_hex(0xff0000), LV_PART_MAIN);
+
                     }
                     else
                     {
@@ -6029,6 +4398,8 @@ static void button_add_event_cb(lv_event_t* e)
                 {
                     if (data_structure[index].data.date_time.size < WORD_MAX_SIZE)
                     {
+                        font_list_release(data_structure[index].data.date_time.typeface, data_structure[index].data.date_time.size, data_structure[index].data.date_time.italic_bold);
+
                         data_structure[index].data.date_time.size += 5;
 
                         if (data_structure[index].data.date_time.size >= WORD_MAX_SIZE)
@@ -6101,6 +4472,7 @@ static void button_add_event_cb(lv_event_t* e)
                 {
                     if (data_structure[index].data.count.size < WORD_MAX_SIZE)
                     {
+                        font_list_release(data_structure[index].data.count.typeface, data_structure[index].data.count.size, 0);
                         data_structure[index].data.count.size += 5;
 
                         if (data_structure[index].data.count.size >= WORD_MAX_SIZE)
@@ -6319,6 +4691,7 @@ static void button_reduce_event_cb(lv_event_t* e)
                 {
                     if (data_structure[index].data.word.size > 10)
                     {
+                        font_list_release(data_structure[index].data.word.typeface, data_structure[index].data.word.size, data_structure[index].data.word.italic_bold);
                         data_structure[index].data.word.size -= 5;
 
                         if (data_structure[index].data.word.size <= 10)
@@ -6397,6 +4770,8 @@ static void button_reduce_event_cb(lv_event_t* e)
                 {
                     if (data_structure[index].data.date_time.size > 12)
                     {
+                        font_list_release(data_structure[index].data.date_time.typeface, data_structure[index].data.date_time.size, data_structure[index].data.date_time.italic_bold);
+
                         data_structure[index].data.date_time.size -= 5;
 
                         if (data_structure[index].data.date_time.size <= 12)
@@ -6467,6 +4842,7 @@ static void button_reduce_event_cb(lv_event_t* e)
                 {
                     if (data_structure[index].data.count.size > 12)
                     {
+                        font_list_release(data_structure[index].data.count.typeface, data_structure[index].data.count.size, 0);
                         data_structure[index].data.count.size -= 5;
 
                         if (data_structure[index].data.count.size <= 12)
@@ -6719,7 +5095,7 @@ static void Ink_cartridge_error_prompt_window(void)
     lv_obj_set_style_text_font(label_warning_content, &heiFont16_1, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(label_warning_content, lv_color_hex(0x000000), LV_STATE_DEFAULT);
     lv_label_set_text(label_warning_content, "墨盒识别失败，请更换墨盒再试！");
-    lv_obj_align(label_warning_content, LV_ALIGN_TOP_LEFT, 20, 0);
+    lv_obj_align(label_warning_content, LV_ALIGN_TOP_LEFT, 20, -5);
 
 
     button_ack = lv_btn_create(Ink_cartridge_error_content);
@@ -6756,12 +5132,14 @@ static void button_print_event_cb(lv_event_t* e)
 
     if(code == LV_EVENT_CLICKED)
     {
+        buzzer_enable = 1;
+
         if (print_status == 0)
         {
             printf("\n****************************************\n");
             printf("printing\n");
             print_status = 1;
-
+            
             if(read_card_info_result == 1)
             {
                 total_output_last = system_data.total_output;
@@ -6879,198 +5257,6 @@ static void button_print_event_cb(lv_event_t* e)
                 printf("device_id=0x%08x\n\r",g_authorization.device_id);
                 printf("g_sd_serial=0x%08x\n\r",g_sd_serial);
             }
-
-#if 0
-
-            memset(msg, 0, MSG_SIZE);
-            memset(&context, 0, sizeof(context));
-            AES_set_key(&context, key, iv, AES_MODE_128);
-
-            AES_convert_key(&context);
-            memset((unsigned char *)&g_authorization,0,sizeof(g_authorization));
-            AES_cbc_decrypt(&context, g_authorization_buf, (unsigned char *)&g_authorization, MSG_SIZE);
-
-            for(i=0;i<16;i++)
-            {
-                printf("0x%x ",g_authorization_buf[i]);
-            }
-
-            printf("\n\r");
-
-            p = (unsigned char *)&g_authorization;
-
-            for(i=0;i<16;i++)
-            {
-                printf("0x%x ",*(p+i));
-            }
-
-            printf("\n\r");
-
-            if(g_authorization.device_id == g_sd_serial)
-            {
-                if(g_authorization.locked_state == 1)
-                {
-                    read_writer_rtc_enable = 0;
-
-                    memset(databuf,0,sizeof(databuf));
-                    databuf[0] = 0x04;
-                    
-                    retvalue = read(fd_bm8563, databuf, 16);
-                    if(retvalue < 0)
-                    {
-                        printf("fd_bm8563 Failed!\r\n");
-                        close(fd_bm8563);
-                    }
-
-                    printf("读卡密文\n\r");
-                    for(i=0;i<16;i++)
-                    {
-                        printf("0x%x ",databuf[i]);
-                    }
-                    printf("\n\r");
-
-                    memset(msg, 0, MSG_SIZE);
-                    memset(&context, 0, sizeof(context));
-                    AES_set_key(&context, key, iv, AES_MODE_128);
-
-                    AES_convert_key(&context);
-                    memset((char *)&card_info_newest,0,sizeof(card_info_newest));
-                    AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
-
-                    p = (unsigned char *)&card_info_newest;
-                    printf("读卡明文\n\r");
-                    for(i=0;i<16;i++)
-                    {
-                        printf("0x%x ",*(p+i));
-                    }
-                    printf("\n\r");
-
-                    crc =  CRC8(p,16);
-                    if(crc == card_info_newest.crc)
-                    {
-                        printf("databuf ok\n");
-
-                        if(card_info_newest.machine_model == g_authorization.machine_model)
-                        {
-                            LV_FONT_DECLARE(heiFont16_1);
-                            lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
-                            lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-                            if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
-                            {
-                                lv_label_set_text(label_print,  "打印中");
-                            }
-                            else if(system_data.system.language == LANGUAGE_ENGLISH)
-                            {
-                                lv_label_set_text(label_print, "Printing");
-                            }
-                            lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
-
-                            print_button_enable = 1;
-                        }
-                        else
-                        {
-                             printf("card_info.machine_model != authorization.machine_model\n");
-                        }
-                    }
-                    else
-                    {
-                        printf("1 crc error crc=0x%x\n",crc);
-                        
-                        memset(databuf,0,sizeof(databuf));
-                        databuf[0] = 0x04;
-                        
-                        retvalue = read(fd_bm8563, databuf, 16);
-                        if(retvalue < 0)
-                        {
-                            printf("fd_bm8563 Failed!\r\n");
-                            close(fd_bm8563);
-                        }
-
-                        printf("读卡密文\n\r");
-                        for(i=0;i<16;i++)
-                        {
-                            printf("0x%x ",databuf[i]);
-                        }
-                        printf("\n\r");
-
-                        memset(msg, 0, MSG_SIZE);
-                        memset(&context, 0, sizeof(context));
-                        AES_set_key(&context, key, iv, AES_MODE_128);
-
-                        AES_convert_key(&context);
-                        memset((char *)&card_info_newest,0,sizeof(card_info_newest));
-                        AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
-
-                        p = (unsigned char *)&card_info_newest;
-                        printf("读卡明文\n\r");
-                        for(i=0;i<16;i++)
-                        {
-                            printf("0x%x ",*(p+i));
-                        }
-                        printf("\n\r");
-
-                        crc =  CRC8(p,16);
-                        if(crc == card_info_newest.crc)
-                        {
-                            printf("databuf ok\n");
-
-                            if(card_info_newest.machine_model == g_authorization.machine_model)
-                            {
-                                LV_FONT_DECLARE(heiFont16_1);
-                                lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
-                                lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-                                if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
-                                {
-                                    lv_label_set_text(label_print,  "打印中");
-                                }
-                                else if(system_data.system.language == LANGUAGE_ENGLISH)
-                                {
-                                    lv_label_set_text(label_print, "Printing");
-                                }
-                                lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
-
-                                print_button_enable = 1;
-                            }
-                            else
-                            {
-                                printf("card_info.machine_model != authorization.machine_model\n");
-                            }
-                        }
-                        else
-                        {
-                            printf("2 crc error crc=0x%x\n",crc);
-                        }
-                    }
-
-                    read_writer_rtc_enable = 1;
-                }
-                else if(g_authorization.locked_state == 2)
-                {
-                    LV_FONT_DECLARE(heiFont16_1);
-                    lv_obj_set_style_text_font(label_print, &heiFont16_1, LV_STATE_DEFAULT);
-                    lv_obj_set_style_text_color(label_print, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-                    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
-                    {
-                        lv_label_set_text(label_print,  "打印中");
-                    }
-                    else if(system_data.system.language == LANGUAGE_ENGLISH)
-                    {
-                        lv_label_set_text(label_print, "Printing");
-                    }
-                    lv_obj_align(label_print, LV_ALIGN_TOP_LEFT, 425, 251);
-
-                    print_button_enable = 1;
-                }
-            }
-            else
-            {
-                printf("id error\n");
-                printf("device_id=0x%08x\n\r",g_authorization.device_id);
-                printf("g_sd_serial=0x%08x\n\r",g_sd_serial);
-            }
-#endif
-           // print_button_enable = 1;
-
         }
         else if(read_card_info_result == 1)
         {
@@ -7272,20 +5458,7 @@ static void button_print_event_cb(lv_event_t* e)
             }
 
             print_button_enable = 4;
-#if 0
-            //清空画布
-            if (canvas != NULL)
-            {
-                if (snapshot != NULL)
-                {
-                    lv_snapshot_free(snapshot);
-                }
 
-                lv_obj_del(canvas);
-                //lv_obj_del(canvas_bg);
-                printf("lv_obj_del canvas\n");
-            }
-#endif
         }
     }
 }
@@ -7372,7 +5545,7 @@ static void btn_file_delete_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     char file_name[100]={0};
-    char image_name[128]={0};
+    //char image_name[128]={0};
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
@@ -7409,7 +5582,7 @@ static void btn_file_delete_event_cb(lv_event_t* e)
             // 刷新表格
             lv_obj_invalidate(table_addition_picture_1);  // 刷新表格，触发重绘
 
-
+#if 0
             memset(file_name,0,sizeof(file_name)); 
             remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
 
@@ -7420,6 +5593,7 @@ static void btn_file_delete_event_cb(lv_event_t* e)
             {
                 perror("unlink");
             }
+#endif
 
             g_file_num--;
         }
@@ -7468,7 +5642,7 @@ static void imgbtn_file_return_event_cb(lv_event_t* e)
         printf("imgbtn_file_return_event_cb\n");
         lv_obj_del(obj_addition_picture_head_bg);
         lv_obj_del(label_addition_picture_head);
-        lv_obj_del(obj_addition_picture_preview_bg);
+        //lv_obj_del(obj_addition_picture_preview_bg);
         lv_obj_del(table_addition_picture);
         lv_obj_del(win_content_typeface);   
         lv_obj_del(typeface_slider_bg);   
@@ -7551,6 +5725,12 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
     lv_img_header_t header;
     lv_res_t res;
     lv_font_t* temp_font = NULL;
+    int now_year = 0;
+    int now_month = 0;
+    int now_day = 0;
+    int end_year = 0;
+    int end_month = 0;
+    int end_day = 0;
 
 
 
@@ -7622,6 +5802,9 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                 lv_obj_del(lv_obj_get_child(win_content, 0)); 
             }
         }
+
+        printf("sizeof(data_structure)=%d\n\r",sizeof(data_structure));
+        printf("sizeof(DATA_STRUCTURE)=%d\n\r",sizeof(DATA_STRUCTURE));
 
         memset(&data_structure, 0, sizeof(data_structure));
 
@@ -7719,7 +5902,7 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 //lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, data_structure[i].data.date_time.info.font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
                                 temp_font = font_list_get(data_structure[i].data.date_time.typeface, data_structure[i].data.date_time.size, data_structure[i].data.date_time.italic_bold);
                                 //lv_point_t text_size;
-                                lv_txt_get_size(&text_size, lv_label_get_text(label_file_management_label), temp_font, data_structure[i].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                                lv_txt_get_size(&text_size, data_structure[i].data.date_time.text, temp_font, data_structure[i].data.date_time.space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);  
 
                                 lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                                 lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -7789,6 +5972,65 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                             break;
                                         case 13:
                                             sprintf(date_time_str, "%02d年%02d月%02d日", g_system_time[0], g_system_time[1], g_system_time[2]);
+                                            break;
+                                        case 14:
+                                            sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                                            break;
+                                        case 15:
+                                            sprintf(date_time_str, "延期");
+                                            break;
+                                    }
+                                }
+                                else if(data_structure[i].data.date_time.date_or_time == 2)
+                                {
+                                    now_year =  2000 + g_system_time[0];
+                                    now_month =  g_system_time[1];
+                                    now_day =  g_system_time[2];
+                                    calculateExpiryDate(now_year,now_month,now_day,data_structure[i].data.date_time.year,data_structure[i].data.date_time.month,data_structure[i].data.date_time.day,&end_year,&end_month,&end_day);
+
+                                    switch(data_structure[i].data.date_time.date_or_time_type)
+                                    {
+                                        case 0:
+                                            sprintf(date_time_str, "%04d/%02d/%02d", end_year, end_month, end_day);
+                                            break;
+                                        case 1:
+                                            sprintf(date_time_str, "%02d/%02d/%02d", end_year%100, end_month, end_day);
+                                            break;
+                                        case 2:
+                                            sprintf(date_time_str, "%04d-%02d-%02d", end_year, end_month, end_day);
+                                            break;
+                                        case 3:
+                                            sprintf(date_time_str, "%02d-%02d-%02d", end_year%100, end_month, end_day);
+                                            break;
+                                        case 4:
+                                            sprintf(date_time_str, "%04d.%02d.%02d", end_year, end_month, end_day);
+                                            break;
+                                        case 5:
+                                            sprintf(date_time_str, "%02d.%02d.%02d", end_year%100, end_month, end_day);
+                                            break;
+                                        case 6:
+                                            sprintf(date_time_str, "%02d/%02d/%04d", end_day,  end_month, end_year);
+                                            break;
+                                        case 7:
+                                            sprintf(date_time_str, "%02d/%02d/%02d", end_day,  end_month, end_year%100);
+                                            break;
+                                        case 8:
+                                            sprintf(date_time_str, "%02d-%02d-%04d", end_day,  end_month, end_year);
+                                            break;
+                                        case 9:
+                                            sprintf(date_time_str, "%02d-%02d-%02d", end_day,  end_month, end_year%100);
+                                            break;
+                                        case 10:
+                                            sprintf(date_time_str, "%02d.%02d.%04d", end_day,  end_month, end_year);
+                                            break;
+                                        case 11:
+                                            sprintf(date_time_str, "%02d.%02d.%02d", end_day,  end_month, end_year%100);
+                                            break;
+                                        case 12:
+                                            sprintf(date_time_str, "%04d年%02d月%02d日", end_year, end_month, end_day);
+                                            break;
+                                        case 13:
+                                            sprintf(date_time_str, "%02d年%02d月%02d日", end_year%100, end_month, end_day);
                                             break;
                                         case 14:
                                             sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
@@ -10013,55 +8255,55 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 //data_structure[win_content_child_num].data.count.typeface = i;
                                 //printf("%s\n", temp_typeface);
                                 //data_structure[win_content_child_num].data.count.info.name = temp_typeface;
-                                data_structure[win_content_child_num].data.count.info.weight = data_structure[win_content_child_num].data.count.size;
-                                word_space =  data_structure[win_content_child_num].data.count.space;
+                                data_structure[i].data.count.info.weight = data_structure[i].data.count.size;
+                                word_space =  data_structure[i].data.count.space;
 
                                 //lv_ft_font_init(&data_structure[win_content_child_num].data.count.info);
-                                temp_font = font_list_get(data_structure[win_content_child_num].data.count.typeface, data_structure[win_content_child_num].data.count.size, 0);
+                                temp_font = font_list_get(data_structure[i].data.count.typeface, data_structure[i].data.count.size, 0);
                         
-                                printf("lead_zero=%d\n\r", data_structure[win_content_child_num].data.count.lead_zero);
-                                printf("law=%d\n\r", data_structure[win_content_child_num].data.count.law);
+                                printf("lead_zero=%d\n\r", data_structure[i].data.count.lead_zero);
+                                printf("law=%d\n\r", data_structure[i].data.count.law);
 
                                 //确定显示值的位数
                                 //递增
-                                if (data_structure[win_content_child_num].data.count.law == 0)
+                                if (data_structure[i].data.count.law == 0)
                                 {
-                                    if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                                    if (data_structure[i].data.count.current_value < data_structure[i].data.count.minimum)
                                     {
-                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                                        data_structure[i].data.count.current_value = data_structure[i].data.count.minimum;
                                     }
-                                    else if(data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                                    else if(data_structure[i].data.count.current_value > data_structure[i].data.count.maximum)
                                     {
-                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                                        data_structure[i].data.count.current_value = data_structure[i].data.count.maximum;
                                     }
 
-                                    if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                                    if (data_structure[i].data.count.lead_zero == 0)
                                     {
-                                        formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                                        formatNumberWithLeadingZeros(data_structure[i].data.count.current_value, data_structure[i].data.count.maximum, tempString);
                                     }
                                     else
                                     {
-                                        sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                                        sprintf(tempString, "%d", data_structure[i].data.count.current_value);
                                     }
                                 }
                                 else
                                 {
-                                    if (data_structure[win_content_child_num].data.count.current_value < data_structure[win_content_child_num].data.count.minimum)
+                                    if (data_structure[i].data.count.current_value < data_structure[i].data.count.minimum)
                                     {
-                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.minimum;
+                                        data_structure[i].data.count.current_value = data_structure[i].data.count.minimum;
                                     }
-                                    else if (data_structure[win_content_child_num].data.count.current_value > data_structure[win_content_child_num].data.count.maximum)
+                                    else if (data_structure[i].data.count.current_value > data_structure[i].data.count.maximum)
                                     {
-                                        data_structure[win_content_child_num].data.count.current_value = data_structure[win_content_child_num].data.count.maximum;
+                                        data_structure[i].data.count.current_value = data_structure[i].data.count.maximum;
                                     }
 
-                                    if (data_structure[win_content_child_num].data.count.lead_zero == 0)
+                                    if (data_structure[i].data.count.lead_zero == 0)
                                     {
-                                        formatNumberWithLeadingZeros(data_structure[win_content_child_num].data.count.current_value, data_structure[win_content_child_num].data.count.maximum, tempString);
+                                        formatNumberWithLeadingZeros(data_structure[i].data.count.current_value, data_structure[i].data.count.maximum, tempString);
                                     }
                                     else
                                     {
-                                        sprintf(tempString, "%d", data_structure[win_content_child_num].data.count.current_value);
+                                        sprintf(tempString, "%d", data_structure[i].data.count.current_value);
                                     }       
                                 }
 
@@ -10078,15 +8320,15 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                                 lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
-                                lv_style_init(&data_structure[win_content_child_num].data.count.style);
-                                lv_style_set_text_font(&data_structure[win_content_child_num].data.count.style,temp_font);
+                                lv_style_init(&data_structure[i].data.count.style);
+                                lv_style_set_text_font(&data_structure[i].data.count.style,temp_font);
          
                                 printf("x=%u y=%u\n\r", text_size.x, text_size.y);
                                 lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
-                                lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
+                                lv_style_set_text_letter_space(&data_structure[i].data.count.style, word_space);
                                 label1 = lv_label_create(temp_obj);
-                                lv_obj_add_style(label1, &data_structure[win_content_child_num].data.count.style, 0);
+                                lv_obj_add_style(label1, &data_structure[i].data.count.style, 0);
                                 lv_label_set_text(label1, tempString);
                                 lv_obj_center(label1);
         
@@ -10103,14 +8345,14 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 //sprintf(temp_typeface, "./lvgl/src/extra/libs/freetype/%s", typeface_buf[SOURCE_HAN_SERIF_CN_REGULAR_1]);
                                 //printf("%s\n", temp_typeface);
                                 //data_structure[win_content_child_num].data.word.info.name = temp_typeface;
-                                data_structure[win_content_child_num].data.word.info.weight = data_structure[win_content_child_num].data.word.size;
-                                data_structure[win_content_child_num].data.word.spin = 0;
-                                data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
+                                data_structure[i].data.word.info.weight = data_structure[i].data.word.size;
+                                data_structure[i].data.word.spin = 0;
+                                data_structure[i].data.word.info.style = FT_FONT_STYLE_NORMAL;
 
                                 //lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
-                                temp_font = font_list_get(0, data_structure[win_content_child_num].data.word.size, 0);
+                                temp_font = font_list_get(0, data_structure[i].data.word.size, 0);
 
-                                lv_txt_get_size(&text_size, data_structure[win_content_child_num].data.word.text, temp_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                                lv_txt_get_size(&text_size, data_structure[i].data.word.text, temp_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 
                                 lv_obj_set_style_bg_opa(temp_obj, LV_OPA_TRANSP, 0);
                                 lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -10120,14 +8362,14 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
                                 lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_DEFOCUSED, NULL);
                                 lv_obj_clear_flag(temp_obj, LV_OBJ_FLAG_SCROLLABLE);
 
-                                lv_style_init(&data_structure[win_content_child_num].data.word.style);
-                                lv_style_set_text_font(&data_structure[win_content_child_num].data.word.style, temp_font);
+                                lv_style_init(&data_structure[i].data.word.style);
+                                lv_style_set_text_font(&data_structure[i].data.word.style, temp_font);
 
                                 lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
                                 label1 = lv_label_create(temp_obj);
-                                lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
-                                lv_label_set_text(label1, data_structure[win_content_child_num].data.word.text);
+                                lv_obj_add_style(label1, &data_structure[i].data.word.style, 0);
+                                lv_label_set_text(label1, data_structure[i].data.word.text);
                                 lv_obj_center(label1);
                                 lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y); 
                                 break;
@@ -10139,7 +8381,7 @@ static void imgbtn_file_confirm_event_cb(lv_event_t* e)
 
         lv_obj_del(obj_addition_picture_head_bg);
         lv_obj_del(label_addition_picture_head);
-        lv_obj_del(obj_addition_picture_preview_bg);
+        //lv_obj_del(obj_addition_picture_preview_bg);
         lv_obj_del(table_addition_picture);
         lv_obj_del(win_content_typeface);   
         lv_obj_del(typeface_slider_bg);   
@@ -10199,7 +8441,7 @@ static void slider_show_file()
     lv_style_init(&style_main);                                    //初始化样式
     lv_style_set_bg_opa(&style_main, LV_OPA_TRANSP);                 //设置背景透明度
     lv_style_set_bg_color(&style_main, lv_color_hex3(0xffffff));        //设置背景颜色
-    lv_style_set_size_A(&style_main, 20, 142);
+    lv_style_set_size_A(&style_main, 20, 113);
     lv_style_set_pad_ver(&style_main, 0);                          //设置上下边距
     lv_style_init(&style_indicator);                               //初始化样式
     lv_style_set_bg_opa(&style_indicator, LV_OPA_TRANSP);            //设置背景透明度
@@ -10228,7 +8470,7 @@ static void slider_show_file()
     lv_obj_add_style(slider_typeface, &style_pressed_color, LV_PART_INDICATOR | LV_STATE_PRESSED); //添加样式 指示器 按压状态
     lv_obj_add_style(slider_typeface, &style_knob, LV_PART_KNOB);             //添加样式 圆头
     lv_obj_add_style(slider_typeface, &style_pressed_color, LV_PART_KNOB | LV_STATE_PRESSED);      //添加样式 圆头 按压状态
-    lv_obj_align(slider_typeface, LV_ALIGN_TOP_LEFT, 460, 65);
+    lv_obj_align(slider_typeface, LV_ALIGN_TOP_LEFT, 460, 94);
     //lv_obj_center(slider);                                         //居中显示
     lv_obj_add_event_cb(slider_typeface, file_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_slider_set_value(slider_typeface, 100, LV_ANIM_ON);
@@ -10314,7 +8556,7 @@ static int isSubstring(char* str, char* subStr)
 static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    char file_name[100]={0};
+    //char file_name[100]={0};
     //DIR *dir;
     //struct dirent *entry;
     //struct stat file_stat;
@@ -10358,7 +8600,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
         lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
 
-        lv_table_set_col_width(table_addition_picture_1, 0, 210);
+        lv_table_set_col_width(table_addition_picture_1, 0, 367);
         lv_table_set_col_width(table_addition_picture_1, 1, 90);
 
         //重新绘制表格
@@ -10372,7 +8614,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             //int picture_type = 0;
             char created_time[20] ={0};
             //char size_str[20]; // 存储转换后的字符串
-            char image_name[128]; // 存储提取的图片名称
+            //char image_name[128]; // 存储提取的图片名称
 
             g_file_num = 0;
 
@@ -10409,7 +8651,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             }
 
             closedir(dir);
-
+#if 0
             remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
 
             printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,g_row,0));
@@ -10420,6 +8662,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             lv_img_set_src(picture_img, image_name);
             //lv_obj_align(picture_img, LV_ALIGN_CENTER, 0, 10);
             //lv_img_set_zoom(picture_img, 128); 
+#endif
         }
         else
         {
@@ -10434,7 +8677,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             //int picture_type = 0;
             char created_time[20] ={0};
             //char size_str[20]; // 存储转换后的字符串
-            char image_name[128]; // 存储提取的图片名称
+            //char image_name[128]; // 存储提取的图片名称
 
             dir = opendir("/media/file");
             if (dir == NULL) 
@@ -10469,6 +8712,7 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             }
 
             closedir(dir);
+#if 0
 
             remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
 
@@ -10480,7 +8724,11 @@ static void button_file_search_keyboard_confirm_event_cb(lv_event_t* e)
             lv_img_set_src(picture_img, image_name);
             //lv_obj_align(picture_img, LV_ALIGN_CENTER, 0, 10);
             //lv_img_set_zoom(picture_img, 128); 
+#endif
         }
+
+        lv_obj_add_event_cb(table_addition_picture_1, file_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
+        lv_obj_add_event_cb(table_addition_picture_1, file_change_event_cb, LV_EVENT_PRESSED, NULL);
     }
 }
 
@@ -10530,8 +8778,8 @@ static void file_change_event_cb(lv_event_t* e)
     lv_obj_t* obj = lv_event_get_target(e);
     uint16_t col;
     uint16_t row;
-    char picture_name[100] = { 0 };
-    char picture_name_1[128] = { 0 };
+    //char picture_name[100] = { 0 };
+    //char picture_name_1[128] = { 0 };
 
     lv_table_get_selected_cell(obj, &row, &col);
     printf("row=%d\n\r", row);
@@ -10541,10 +8789,10 @@ static void file_change_event_cb(lv_event_t* e)
     g_row = row;
     lv_obj_invalidate(obj);  // 刷新表格，触发重绘
 
-    remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),picture_name);
-    sprintf(picture_name_1,"A:/media/img/%s.bmp", picture_name);
+    //remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),picture_name);
+    //sprintf(picture_name_1,"A:/media/img/%s.bmp", picture_name);
     
-    lv_img_set_src(picture_img, picture_name_1);
+    //lv_img_set_src(picture_img, picture_name_1);
     //lv_obj_align(picture_img, LV_ALIGN_CENTER, 0, 10);
     //lv_img_set_zoom(picture_img, 128); 
 }
@@ -10584,7 +8832,7 @@ static void btn_file_search_event_cb(lv_event_t* e)
         lv_obj_set_size(textarea_text_keyboard, 480, 95);
         lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont16_1, 0);
         lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_textarea_set_max_length(textarea_text_keyboard, 100);
+        lv_textarea_set_max_length(textarea_text_keyboard, 200);
         //lv_textarea_set_placeholder_text(textarea_text_keyboard, "Smart printer");
         //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
         lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -10690,7 +8938,7 @@ int compare_files(const void *a, const void *b) {
     return 0;
 }
 
-
+#if 0
 
 static void button_file_event_cb(lv_event_t* e)
 {
@@ -11079,7 +9327,393 @@ static void button_file_event_cb(lv_event_t* e)
         lv_obj_align(label_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
+#endif
 
+
+
+
+static void button_file_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    //char file_name[100]={0};
+    FileInfo *files = NULL;
+    int count = 0;
+    char full_path[512];
+
+
+    code = lv_event_get_code(e);
+    if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
+    {
+        buzzer_enable = 1;
+
+        printf("file\n");
+        obj_addition_picture_head_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_head_bg, 480, 24);
+        lv_obj_align(obj_addition_picture_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(obj_addition_picture_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_head_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_head_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_head = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_head, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_head, "文件");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_head, "File");
+        }
+
+        lv_obj_align(label_addition_picture_head, LV_ALIGN_TOP_LEFT, 200, 4);
+
+
+        obj_addition_picture_btn_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_btn_bg, 480, 30);
+        lv_obj_align(obj_addition_picture_btn_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_obj_set_style_border_width(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_btn_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_btn_bg, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_btn_bg, 0, LV_PART_SCROLLBAR);
+
+
+        
+        LV_IMG_DECLARE(search);
+        img_addition_picture_search = lv_img_create(lv_scr_act());
+        lv_img_set_src(img_addition_picture_search, &search);
+        lv_obj_align(img_addition_picture_search, LV_ALIGN_TOP_LEFT, 10, 28);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_search = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_search, "搜索");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_search, "Search");
+        }
+        lv_obj_align(label_addition_picture_search, LV_ALIGN_TOP_LEFT, 40, 32);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        btn_addition_picture_search = lv_btn_create(lv_scr_act());
+        lv_obj_set_size(btn_addition_picture_search, 200, 24);
+        lv_obj_align(btn_addition_picture_search, LV_ALIGN_TOP_LEFT, 84, 28);
+        lv_obj_set_style_border_width(btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(btn_addition_picture_search, 5, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(btn_addition_picture_search, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        label_btn_addition_picture_search = lv_label_create(btn_addition_picture_search);
+        lv_obj_set_style_text_font(label_btn_addition_picture_search, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_btn_addition_picture_search, lv_color_hex(0x1C1C1C), LV_STATE_DEFAULT);
+        lv_label_set_text(label_btn_addition_picture_search, "");
+        lv_obj_align(label_btn_addition_picture_search, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_border_width(label_btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(label_btn_addition_picture_search, lv_color_hex(0x8a8a8a), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(label_btn_addition_picture_search, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(label_btn_addition_picture_search, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_opa(label_btn_addition_picture_search, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(label_btn_addition_picture_search, lv_color_hex(0xffffff), LV_PART_MAIN);
+        lv_obj_add_event_cb(btn_addition_picture_search, btn_file_search_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+
+        LV_IMG_DECLARE(picture_delete);
+        btn_addition_picture_delete = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_picture_delete, LV_IMGBTN_STATE_RELEASED, NULL, &picture_delete, NULL);
+        lv_obj_set_size(btn_addition_picture_delete, picture_delete.header.w, picture_delete.header.h);
+        lv_obj_align(btn_addition_picture_delete, LV_ALIGN_TOP_LEFT, 310, 27);
+        lv_obj_add_event_cb(btn_addition_picture_delete, btn_file_delete_event_cb, LV_EVENT_CLICKED, NULL);
+
+        //打开
+        LV_IMG_DECLARE(open_25_1);
+        btn_addition_picture_open = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_addition_picture_open, LV_IMGBTN_STATE_RELEASED, NULL, &open_25_1, NULL);
+        lv_obj_set_size(btn_addition_picture_open, open_25_1.header.w, open_25_1.header.h);
+        lv_obj_align(btn_addition_picture_open, LV_ALIGN_TOP_LEFT, 400, 27);
+        lv_obj_add_event_cb(btn_addition_picture_open, imgbtn_file_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+
+        static lv_style_t table_cell_style;
+        lv_style_init(&table_cell_style);
+        lv_style_set_pad_all(&table_cell_style, 2); // 设置所有方向的填充为5像素
+
+        table_addition_picture = lv_table_create(lv_scr_act());
+        lv_obj_add_style(table_addition_picture, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_set_style_text_font(table_addition_picture, &heiFont16_1, LV_STATE_DEFAULT);
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_table_set_cell_value(table_addition_picture, 0, 0, " 名称");
+            lv_table_set_cell_value(table_addition_picture, 0, 1, "   时间");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_table_set_cell_value(table_addition_picture, 0, 0, " Name");
+            lv_table_set_cell_value(table_addition_picture, 0, 1, "   Time");
+        }
+
+        lv_obj_align(table_addition_picture, LV_ALIGN_TOP_LEFT, 0, 54);
+        lv_table_set_col_width(table_addition_picture, 0, 367);
+        lv_table_set_col_width(table_addition_picture, 1, 90);
+
+
+
+        obj_addition_table_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_table_bg, 460, 176);
+        lv_obj_align(obj_addition_table_bg, LV_ALIGN_TOP_LEFT, 0, 75);
+        lv_obj_set_style_border_width(obj_addition_table_bg, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_table_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_table_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_table_bg, 0, LV_PART_SCROLLBAR);
+
+        win_content_typeface = lv_obj_create(obj_addition_table_bg);
+        lv_obj_set_size(win_content_typeface, 460, 500);
+        lv_obj_align(win_content_typeface, LV_ALIGN_TOP_LEFT, -16, -16);
+        lv_obj_set_style_bg_color(win_content_typeface, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(win_content_typeface, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(win_content_typeface, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(win_content_typeface, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(win_content_typeface, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_pad_all(win_content_typeface, 0, LV_STATE_DEFAULT);
+
+
+        table_addition_picture_1 = lv_table_create(win_content_typeface);
+        LV_FONT_DECLARE(heiFont16_1);
+        lv_obj_add_style(table_addition_picture_1, &table_cell_style, LV_PART_ITEMS); // 应用样式到表格的单元格部分
+        lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
+
+        lv_table_set_col_width(table_addition_picture_1, 0, 367);
+        lv_table_set_col_width(table_addition_picture_1, 1, 90);
+
+        DIR *dir;
+        struct dirent *entry;
+        struct stat file_stat;
+        //char path[300];
+        //unsigned char picture_count = 0;
+        //int picture_type = 0;
+        char created_time[20] ={0};
+        //char size_str[20]; // 存储转换后的字符串
+        //char image_name[128]; // 存储提取的图片名称
+
+        g_file_num = 0;
+
+        dir = opendir("/media/file");
+        if (dir == NULL) 
+        {
+            perror("opendir");
+            exit(EXIT_FAILURE);
+        }
+
+#if 0
+
+        while ((entry = readdir(dir)) != NULL) 
+        {
+            snprintf(path, sizeof(path), "%s/%s", "/media/file", entry->d_name);
+            if (stat(path, &file_stat) == -1) 
+            {
+                perror("stat");
+                continue;
+            }
+
+            if ((S_ISREG(file_stat.st_mode))&&(g_file_num < USB_PICTURE_NUMBER))
+            {  
+                // 只处理普通文件
+                if (is_dat_file(entry->d_name)) 
+                {
+                    //print_file_info(entry->d_name, &file_stat);
+                    lv_table_set_cell_value(table_addition_picture_1, g_file_num, 0, entry->d_name);
+                    printf("Created: %s", ctime(&file_stat.st_ctime));
+                    format_time(ctime(&file_stat.st_ctime), created_time);
+                    printf("created_time=%s\n\r",created_time);
+                    lv_table_set_cell_value(table_addition_picture_1, g_file_num, 1, created_time);
+                    g_file_num++;
+                }
+            }
+        }
+#endif
+
+        // 第一次遍历，统计文件数量
+        while ((entry = readdir(dir)) != NULL) 
+        {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+            count++;
+        }
+        rewinddir(dir);
+
+        // 分配内存
+        files = (FileInfo *)malloc(count * sizeof(FileInfo));
+        if (files == NULL) {
+            perror("malloc");
+            closedir(dir);
+            //return -1;
+        }
+
+            // 第二次遍历，收集文件信息
+        int index = 0;
+        while ((entry = readdir(dir)) != NULL && index < count) 
+        {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+
+            // 构建完整路径
+            snprintf(full_path, sizeof(full_path), "%s/%s", "/media/file", entry->d_name);
+
+            // 获取文件状态
+            if (stat(full_path, &file_stat) == -1) {
+                perror("stat");
+                continue;
+            }
+
+            // 只处理普通文件
+            if (S_ISREG(file_stat.st_mode)) 
+            {
+                strncpy(files[index].name, entry->d_name, sizeof(files[index].name) - 1);
+                files[index].mtime = file_stat.st_mtime;
+                index++;
+            }
+        }
+
+
+        // 实际有效的文件数
+        count = index;
+
+        // 按修改时间排序
+        qsort(files, count, sizeof(FileInfo), compare_files);
+
+        // 输出结果
+        //printf("%-40s %-20s %s\n", "Filename", "Modification Time", "Size");
+        //printf("------------------------------------------------------------\n");
+        
+        for (int i = 0; i < count; i++) 
+        {
+            //char time_str[20];
+            //struct tm *tm_info = localtime(&files[i].mtime);
+            //strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);    
+            //printf("%-40s %-20s %ld bytes\n", files[i].name, time_str, (long)files[i].size);
+
+            //print_file_info(entry->d_name, &file_stat);
+            lv_table_set_cell_value(table_addition_picture_1, g_file_num, 0, files[i].name);
+            printf("Created: %s", ctime(&files[i].mtime));
+            format_time(ctime(&files[i].mtime), created_time);
+            printf("created_time=%s\n\r",created_time);
+            lv_table_set_cell_value(table_addition_picture_1, g_file_num, 1, created_time);
+            g_file_num++;
+        }
+
+        // 清理
+        free(files);
+
+        closedir(dir);
+#if 0
+        remove_dat_suffix(lv_table_get_cell_value(table_addition_picture_1, g_row, 0),file_name);
+
+        printf("%s\n\r", lv_table_get_cell_value(table_addition_picture_1,g_row,0));
+        sprintf(image_name,"A:/media/img/%s.bmp", file_name);
+
+        printf("file_name=%s\n\r", file_name);
+
+        //显示图片
+        picture_img = lv_img_create(obj_addition_picture_preview_bg);
+        lv_img_set_src(picture_img, image_name);
+#endif
+
+        //lv_img_set_zoom(picture_img, 128); 
+
+        lv_obj_add_event_cb(table_addition_picture_1, file_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
+        lv_obj_add_event_cb(table_addition_picture_1, file_change_event_cb, LV_EVENT_PRESSED, NULL);
+
+
+        typeface_slider_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(typeface_slider_bg, 20, 195);
+        lv_obj_align(typeface_slider_bg, LV_ALIGN_TOP_LEFT, 460, 54);
+        lv_obj_set_style_border_width(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_radius(typeface_slider_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT);
+
+        //左滑块停止
+        LV_IMG_DECLARE(left_stop_typeface);
+        left_stop_img_typeface = lv_img_create(lv_scr_act());
+        lv_img_set_src(left_stop_img_typeface, &left_stop_typeface);
+        lv_obj_align(left_stop_img_typeface, LV_ALIGN_TOP_LEFT, 460, 54);
+
+        slider_show_file();
+
+        //右滑块停止
+        LV_IMG_DECLARE(right_stop_typeface);
+        right_stop_img_typeface = lv_img_create(lv_scr_act());
+        lv_img_set_src(right_stop_img_typeface, &right_stop_typeface);
+        lv_obj_align(right_stop_img_typeface, LV_ALIGN_TOP_LEFT, 460, 228);
+
+
+        
+        obj_addition_picture_bottom_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj_addition_picture_bottom_bg, 480, 24);
+        lv_obj_align(obj_addition_picture_bottom_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(obj_addition_picture_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(obj_addition_picture_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(obj_addition_picture_bottom_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(obj_addition_picture_bottom_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_return, "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_return, "Return");
+        }
+        lv_obj_align(label_addition_picture_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+
+        LV_IMG_DECLARE(get_back);
+        imgbtn_addition_picture_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_picture_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(imgbtn_addition_picture_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_picture_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(imgbtn_addition_picture_return, imgbtn_file_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_IMG_DECLARE(confirm);
+        imgbtn_addition_picture_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(imgbtn_addition_picture_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(imgbtn_addition_picture_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(imgbtn_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(imgbtn_addition_picture_confirm, imgbtn_file_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_addition_picture_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_addition_picture_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_addition_picture_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_addition_picture_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_addition_picture_confirm, "Confirm");
+        }
+        lv_obj_align(label_addition_picture_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
 
 
 static void button_save_keyboard_return_event_cb(lv_event_t* e)
@@ -11410,10 +10044,13 @@ static void button_save_keyboard_confirm_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     code = lv_event_get_code(e);
+    int win_content_child_num = 0;
+    int i;
+
     //int len = 0;
     char file_name[128] = { 0 };
-    char img_name[128] = { 0 };
-    static lv_img_dsc_t* snapshot_1 = NULL;
+    //char img_name[128] = { 0 };
+    //static lv_img_dsc_t* snapshot_1 = NULL;
     if (code == LV_EVENT_CLICKED)
     {
         lv_obj_del(label_keyboard_confirm);
@@ -11423,6 +10060,16 @@ static void button_save_keyboard_confirm_event_cb(lv_event_t* e)
 
         printf("button_save_keyboard_confirm_event_cb\n");
         buzzer_enable = 1;
+
+        win_content_child_num = lv_obj_get_child_cnt(win_content);
+
+        printf("win_content_child_num=%d\n\r",win_content_child_num);
+
+        for(i=win_content_child_num;i<NEW_TEXT_MAX_NUMBER;i++)
+        {
+            memset((char *)&data_structure[i],0,sizeof(DATA_STRUCTURE));
+        }
+        
         //获取文件名称
         sprintf(file_name, "/media/file/%s.dat", lv_textarea_get_text(textarea_text_keyboard));
         // 打开文件以写入二进制数据
@@ -11439,17 +10086,25 @@ static void button_save_keyboard_confirm_event_cb(lv_event_t* e)
             fclose(file);
             //return EXIT_FAILURE;
         }
+
+        // 刷新缓冲区确保数据写入磁盘
+        if (fsync(fileno(file)) != 0)
+        {
+            printf("Fsync failed\r\n");
+        }
+            
+
         // 关闭文件
         fclose(file);
 
         //写图片
-        sprintf(img_name, "/media/img/%s.bmp", lv_textarea_get_text(textarea_text_keyboard));
+        //sprintf(img_name, "/media/img/%s.bmp", lv_textarea_get_text(textarea_text_keyboard));
 
         lv_obj_del(textarea_bg_keyboard);
         lv_obj_del(pinyin_ime);
         lv_obj_del(textarea_text_keyboard);
         lv_obj_del(keyboard_bg);
-
+#if 0
         snapshot_1 = lv_snapshot_take(win_content, LV_IMG_CF_TRUE_COLOR_ALPHA);
 
         //使用示例
@@ -11458,6 +10113,7 @@ static void button_save_keyboard_confirm_event_cb(lv_event_t* e)
         save_as_bmp_half_size_noalloc(img_name, snapshot_1);
         //save_as_png_stb(img_name,snapshot_1);
         lv_mem_free(snapshot_1);
+#endif
     }
 }
 
@@ -11706,9 +10362,9 @@ static void drag_event_handler(lv_event_t* e)
                 x = 0;
             }
 
-            if (x >= 1024)
+            if (x >= 10000)
             {
-                x = 1024;
+                x = 10000;
             }
 
             lv_obj_set_pos(obj, x, 0);
@@ -11724,9 +10380,9 @@ static void drag_event_handler(lv_event_t* e)
                 x = 0;
             }
 
-            if (x >= 1024)
+            if (x >= 10000)
             {
-                x = 1024;
+                x = 10000;
             }
 
             lv_coord_t y = lv_obj_get_y(obj) + vect.y;
@@ -11766,6 +10422,7 @@ static void drag_event_handler(lv_event_t* e)
         else
         {
             temp_focused_obj = obj;
+            lv_obj_set_style_bg_color(obj, lv_color_hex(0xFF6A6A), LV_STATE_DEFAULT);
         }
 
     }
@@ -11780,6 +10437,10 @@ static void drag_event_handler(lv_event_t* e)
             //lv_coord_t x = lv_obj_get_x(obj);
             //lv_coord_t y = lv_obj_get_y(obj);
             //printf("x=%u y=%u\n", x, y);
+        }
+        else
+        {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         }
     }
 }
@@ -11904,7 +10565,7 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
             printf("x=%u y=%u\n\r", text_size.x, text_size.y);
 
             lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.word.spin*10, 0);
-
+#if 0
             if (data_structure[win_content_child_num].data.word.spin != 0)
             {
                 lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, text_size.x, text_size.y);
@@ -11913,6 +10574,9 @@ static void button_file_management_confirm_event_cb(lv_event_t* e)
             {
                  lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
             }
+#endif
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 6*win_content_child_num);
 
             //x_size = text_size.x + text_size.x / text_size.y * word_space * 2;
 
@@ -12023,7 +10687,7 @@ static void textarea_text_event_cb(lv_event_t* e)
 
     printf("code=%d\n",code);
 
-    buzzer_enable = 1;
+    
 
     if (code == LV_EVENT_FOCUSED)
     {
@@ -12033,6 +10697,7 @@ static void textarea_text_event_cb(lv_event_t* e)
     {
         printf("LV_EVENT_VALUE_CHANGED\n");
         //const char* txt = lv_textarea_get_text(target);
+        buzzer_enable = 1;
     }
     else if (code == LV_EVENT_CANCEL)
     {
@@ -12044,6 +10709,8 @@ static void textarea_text_event_cb(lv_event_t* e)
 static void btn_file_management_text_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
+    int len =0;
+
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
@@ -12072,7 +10739,7 @@ static void btn_file_management_text_event_cb(lv_event_t* e)
         lv_obj_set_size(textarea_text_keyboard, 480, 95);
         lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont7, 0);
         lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_textarea_set_max_length(textarea_text_keyboard, 100);
+        lv_textarea_set_max_length(textarea_text_keyboard, 160);
         lv_textarea_set_placeholder_text(textarea_text_keyboard, "Smart printer");
         //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
         lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
@@ -12080,7 +10747,14 @@ static void btn_file_management_text_event_cb(lv_event_t* e)
         lv_obj_set_style_border_opa(textarea_text_keyboard, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
         lv_obj_set_style_radius(textarea_text_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
      
+        len = strlen(lv_label_get_text(label_file_management_text_label));
 
+        printf("len=%u\n\r", len);
+
+        if (strlen(lv_label_get_text(label_file_management_text_label)) != 0)
+        {
+            lv_textarea_set_text(textarea_text_keyboard, lv_label_get_text(label_file_management_text_label));
+        }
 
         /*Create a keyboard and add it to ime_pinyin*/
         text_edit_keyboard = lv_keyboard_create(lv_scr_act());
@@ -12149,8 +10823,128 @@ static void btn_file_management_text_event_cb(lv_event_t* e)
             lv_label_set_text(label_keyboard_confirm, "Confirm");
         }
         lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
+    }
+}
 
-        lv_timer_pause(timer_100ms);
+
+
+static void btn_modification_text_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int len =0;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_modification_text_event_cb\n");
+        buzzer_enable = 1;
+
+        textarea_bg_keyboard = lv_obj_create(lv_scr_act());
+        /* 设置大小 */
+        lv_obj_set_size(textarea_bg_keyboard, 480, 272);
+        lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(textarea_bg_keyboard, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        //lv_obj_set_style_border_opa(file_management_win, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(textarea_bg_keyboard, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+
+        //输入框+键盘
+        LV_FONT_DECLARE(heiFont7);
+        pinyin_ime = lv_ime_pinyin_create(lv_scr_act());
+        lv_obj_set_style_text_font(pinyin_ime, &heiFont7, 0);
+        //lv_obj_set_style_text_font(pinyin_ime, &lv_font_simsun_16_cjk, 0);
+        //lv_ime_pinyin_set_dict(pinyin_ime, your_dict); // Use a custom dictionary. If it is not set, the built-in dictionary will be used.
+
+        textarea_text_keyboard = lv_textarea_create(lv_scr_act());
+        //lv_textarea_set_one_line(textarea_text_keyboard, true);
+        lv_obj_set_size(textarea_text_keyboard, 480, 95);
+        lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont7, 0);
+        lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_textarea_set_max_length(textarea_text_keyboard, 160);
+        lv_textarea_set_placeholder_text(textarea_text_keyboard, "Smart printer");
+        //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
+        lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(textarea_text_keyboard, lv_color_hex(0xAAAAAA), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_set_style_border_opa(textarea_text_keyboard, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
+        lv_obj_set_style_radius(textarea_text_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+     
+        len = strlen(lv_label_get_text(label_file_management_text_label));
+
+        printf("len=%u\n\r", len);
+
+        if (strlen(lv_label_get_text(label_file_management_text_label)) != 0)
+        {
+            lv_textarea_set_text(textarea_text_keyboard, lv_label_get_text(label_file_management_text_label));
+        }
+
+        /*Create a keyboard and add it to ime_pinyin*/
+        text_edit_keyboard = lv_keyboard_create(lv_scr_act());
+        lv_ime_pinyin_set_keyboard(pinyin_ime, text_edit_keyboard);
+        lv_keyboard_set_textarea(text_edit_keyboard, textarea_text_keyboard);
+        //lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0xff4040), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0x1fadd3), LV_PART_MAIN);
+        lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, text_edit_keyboard);
+        lv_obj_align(text_edit_keyboard, LV_ALIGN_TOP_LEFT, 0, 115);
+        lv_obj_set_size(text_edit_keyboard, 480, 133);
+
+        /*Get the cand_panel, and adjust its size and position*/
+        keyboard_cand_panel = lv_ime_pinyin_get_cand_panel(pinyin_ime);
+        lv_obj_set_size(keyboard_cand_panel, LV_PCT(100), LV_PCT(10));
+        lv_obj_align_to(keyboard_cand_panel, text_edit_keyboard, LV_ALIGN_OUT_TOP_MID, 0, 5);
+        lv_obj_set_style_bg_color(keyboard_cand_panel, lv_color_hex(0x8B1A1A), LV_PART_MAIN);
+    
+
+        keyboard_bg = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(keyboard_bg, 480, 24);
+        lv_obj_align(keyboard_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+        lv_obj_set_style_border_width(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_radius(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+        lv_obj_set_style_bg_color(keyboard_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+        lv_obj_remove_style(keyboard_bg, 0, LV_PART_SCROLLBAR);
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_keyboard_return = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_return,  "返回");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_return, "Return");
+        }
+        lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
+
+        LV_IMG_DECLARE(get_back);
+        btn_keyboard_return = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+        lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
+        lv_obj_add_event_cb(btn_keyboard_return, button_modification_text_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_IMG_DECLARE(confirm);
+        btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
+        lv_imgbtn_set_src(btn_keyboard_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+        lv_obj_set_size(btn_keyboard_confirm, get_back.header.w, get_back.header.h);
+        lv_obj_align(btn_keyboard_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
+        lv_obj_add_event_cb(btn_keyboard_confirm, button_modification_text_keyboard_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_keyboard_confirm = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+        {
+            lv_label_set_text(label_keyboard_confirm, "确定");
+        }
+        else if(system_data.system.language == LANGUAGE_ENGLISH)
+        {
+            lv_label_set_text(label_keyboard_confirm, "Confirm");
+        }
+        lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);
     }
 }
 
@@ -12443,7 +11237,7 @@ static void button_work_space_return_event_cb(lv_event_t* e)
         lv_obj_del(typeface_slider_bg);
         lv_obj_del(pwd_text_area);
         lv_obj_del(pwd_keyboard);
-
+        
         lv_obj_del(label_typeface_return);
         lv_obj_del(btn_typeface_return);
         lv_obj_del(btn_typeface_confirm);
@@ -13558,6 +12352,8 @@ static void btn_speed_print_mode_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_speed_print_mode_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -13571,7 +12367,31 @@ static void btn_speed_print_mode_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_label_speed_print_mode, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+        
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+static void btn_speed_print_mode_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    //int i=0;
+    //char temp_str[12] = { 0 };
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_speed_print_mode_return_event_cb\n");
+        buzzer_enable = 1;   
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -13719,7 +12539,7 @@ static void btn_label_speed_print_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_speed_print_mode_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -13795,6 +12615,31 @@ static void button_addition_count_times_repetition_confirm_event_cb(lv_event_t* 
         lv_obj_del(label_typeface_confirm);
     }
 }
+
+
+
+static void button_addition_count_times_repetition_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_addition_count_times_repetition_return_event_cb\n");
+        buzzer_enable = 1;
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
 
 
 
@@ -13924,7 +12769,7 @@ static void btn_addition_count_times_repetition_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_addition_count_times_repetition_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -14406,6 +13251,32 @@ static void btn_addition_count_space_confirm_event_cb(lv_event_t* e)
 
 
 
+
+static void btn_addition_count_space_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_addition_count_space_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+
+
 static void btn_addition_count_space_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -14531,7 +13402,7 @@ static void btn_addition_count_space_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_addition_count_space_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -14611,6 +13482,29 @@ static void button_count_current_value_confirm_event_cb(lv_event_t* e)
         lv_obj_del(label_typeface_confirm);
 
         btn_addition_count_updata();
+    }
+}
+
+static void button_count_current_value_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_count_current_value_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
     }
 }
 
@@ -14742,7 +13636,7 @@ static void btn_addition_count_current_value_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_count_current_value_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -14803,6 +13697,30 @@ static void button_addition_count_minimum_confirm_event_cb(lv_event_t* e)
         lv_obj_del(label_typeface_confirm);
     }
 }
+
+
+static void button_addition_count_minimum_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_addition_count_minimum_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
 
 
 static void btn_addition_count_minimum_event_cb(lv_event_t* e)
@@ -14930,7 +13848,7 @@ static void btn_addition_count_minimum_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_addition_count_minimum_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -14996,6 +13914,31 @@ static void btn_addition_count_maximum_confirm_event_cb(lv_event_t* e)
 
 
 
+static void btn_addition_count_maximum_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_addition_count_maximum_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+
 
 static void btn_addition_count_maximum_event_cb(lv_event_t* e)
 {
@@ -15006,6 +13949,8 @@ static void btn_addition_count_maximum_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_count_maximum_event_cb\n");
+        buzzer_enable = 1;
+
         typeface_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(typeface_head_bg, 480, 24);
         lv_obj_align(typeface_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -15121,7 +14066,7 @@ static void btn_addition_count_maximum_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_addition_count_maximum_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -15156,6 +14101,9 @@ static void  btn_addition_count_step_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_addition_count_step_confirm_event_cb\n");
+        buzzer_enable = 1;
+
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -15169,7 +14117,28 @@ static void  btn_addition_count_step_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_count_step, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+static void  btn_addition_count_step_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_addition_count_step_confirm_event_cb\n");
+        buzzer_enable = 1;
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -15345,7 +14314,7 @@ static void btn_addition_count_step_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_addition_count_step_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -15527,7 +14496,8 @@ static void btn_addition_count_confirm_event_cb(lv_event_t* e)
 
             lv_obj_set_size(temp_obj, text_size.x, text_size.y);
 
-            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            //lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 6*win_content_child_num);
 
             lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.count.style, word_space);
             lv_obj_t* label1 = lv_label_create(temp_obj);
@@ -15624,6 +14594,7 @@ static void btn_addition_count_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_count_return_event_cb\n");
+        buzzer_enable = 1;
 
         lv_obj_del(addition_count_head_bg);
         lv_obj_del(label_addition_count_head);
@@ -16297,7 +15268,8 @@ static void btn_addition_subsection_event_cb(lv_event_t* e)
             data_structure[win_content_child_num].type = TYPE_BREAK;
 
             lv_obj_set_style_bg_opa(temp_obj, LV_OPA_COVER, 0);
-            lv_obj_set_style_bg_color(temp_obj, lv_color_hex(0xFF6A6A), LV_STATE_DEFAULT);
+            //lv_obj_set_style_bg_color(temp_obj, lv_color_hex(0xFF6A6A), LV_STATE_DEFAULT);
+            lv_obj_set_style_bg_color(temp_obj, lv_color_hex(0x000000), LV_STATE_DEFAULT);
             lv_obj_set_style_border_width(temp_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
 
             lv_obj_add_event_cb(temp_obj, drag_event_handler, LV_EVENT_PRESSING, NULL);
@@ -16307,7 +15279,9 @@ static void btn_addition_subsection_event_cb(lv_event_t* e)
 
             lv_obj_set_size(temp_obj, 5, 150);
 
-            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            //lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 0);
         }
 
         //删除添加界面
@@ -16399,7 +15373,7 @@ static void btn_addition_symbol_confirm_event_cb(lv_event_t* e)
             printf("%s\n", temp_typeface);
 
             data_structure[win_content_child_num].data.word.info.name = temp_typeface;
-            data_structure[win_content_child_num].data.word.info.weight = 20;
+            data_structure[win_content_child_num].data.word.info.weight = 48;
             data_structure[win_content_child_num].data.word.info.style = FT_FONT_STYLE_NORMAL;
             lv_ft_font_init(&data_structure[win_content_child_num].data.word.info);
 
@@ -16419,7 +15393,8 @@ static void btn_addition_symbol_confirm_event_cb(lv_event_t* e)
 
             lv_obj_set_size(temp_obj, text_size.x, text_size.y);     
 
-            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0); 
+            //lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0); 
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 6*win_content_child_num);
 
             lv_obj_t* label1 = lv_label_create(temp_obj);
             lv_obj_add_style(label1, &data_structure[win_content_child_num].data.word.style, 0);
@@ -16429,7 +15404,7 @@ static void btn_addition_symbol_confirm_event_cb(lv_event_t* e)
             //strncpy(data_structure[win_content_child_num].data.word.text, g_addition_symbol[g_symbol_flag], strlen(g_addition_symbol[g_symbol_flag])+1);
             snprintf(data_structure[win_content_child_num].data.word.text, sizeof(data_structure[win_content_child_num].data.word.text),"%s", g_addition_symbol[g_symbol_flag]);
           
-            data_structure[win_content_child_num].data.word.size = 20;
+            data_structure[win_content_child_num].data.word.size = 48;
             printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
             data_structure[win_content_child_num].type = TYPE_SYMBOL;
     
@@ -16489,6 +15464,7 @@ static void btn_addition_symbol_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_symbol_return_event_cb\n");
+        buzzer_enable = 1;
 
         for (i = 0; i < SYMBOL_NUMBER; i++)
         {
@@ -16702,7 +15678,8 @@ static void button_icon_confirm_event_cb(lv_event_t* e)
             printf("w=%d\n\r", icon_buf[g_icon_type].header.w);
             printf("h=%d\n\r", icon_buf[g_icon_type].header.h);
             lv_obj_set_size(temp_obj, icon_buf[g_icon_type].header.w, icon_buf[g_icon_type].header.h);
-            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            //lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 6*win_content_child_num);
             lv_obj_center(img);
             data_structure[win_content_child_num].data.icon.type = g_icon_type;
             data_structure[win_content_child_num].data.icon.size = 256;
@@ -17317,6 +16294,8 @@ static void imgbtn_addition_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_addition_return_event_cb\n");
+        buzzer_enable = 1;
+
         lv_obj_del(img_addition_bg);
         lv_obj_del(btn_addition_text);
         lv_obj_del(label_btn_addition_text);
@@ -17633,39 +16612,202 @@ static void button_date_keyboard_confirm_event_cb(lv_event_t* e)
 
 
 
-static void button_date_keyboard_return_event_cb(lv_event_t* e)
+static void button_date_validity_return_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
-    int i;
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_date_keyboard_return_event_cb\n");
-        lv_obj_del(textarea_bg_keyboard);
-        lv_obj_del(pinyin_ime);
-        lv_obj_del(textarea_text_keyboard);
-        lv_obj_del(keyboard_bg);
-        lv_obj_del(label_keyboard_confirm);
-        lv_obj_del(btn_keyboard_confirm);
-        lv_obj_del(label_keyboard_return);
-        lv_obj_del(btn_keyboard_return);
+        printf("button_date_validity_return_event_cb\n");
+        buzzer_enable = 1;
+        lv_obj_del(label_system_date_confirm);
+        lv_obj_del(btn_system_date_confirm);
+        lv_obj_del(btn_system_date_return);
+        lv_obj_del(label_system_date_return);
+        lv_obj_del(system_date_bottom_bg);
+        lv_obj_del(system_date_roller_day);
+        lv_obj_del(system_date_roller_month);
+        lv_obj_del(system_date_roller_year);
+        lv_obj_del(label_system_date_day_middle);
+        lv_obj_del(label_system_date_month_middle);
+        lv_obj_del(label_system_date_year_middle);
+        lv_obj_del(system_date_middle_bg);
+        lv_obj_del(label_system_date_head);
+        lv_obj_del(system_date_head_bg);
+    }
+}
 
 
-        lv_obj_del(obj_addition_date_text_head_bg);
-        lv_obj_del(label_addition_date_text_head);
 
-        for (i = 0; i < DATA_TYPE_NUMBER; i++)
+// 判断是否为闰年
+bool isLeapYear(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+// 获取指定年月的天数
+int daysInMonth(int year, int month) {
+    static const int days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month == 2 && isLeapYear(year)) {
+        return 29;
+    }
+    return days[month - 1];
+}
+
+// 计算有效期后的日期
+void calculateExpiryDate(int startYear, int startMonth, int startDay,
+                         int validYears, int validMonths, int validDays,
+                         int *endYear, int *endMonth, int *endDay) {
+    // 初始化结果为起始日期
+    *endYear = startYear;
+    *endMonth = startMonth;
+    *endDay = startDay;
+
+    // 加上年
+    *endYear += validYears;
+
+    // 加上月
+    *endMonth += validMonths;
+    while (*endMonth > 12) {
+        *endMonth -= 12;
+        (*endYear)++;
+    }
+
+    // 加上天
+    *endDay += validDays;
+    while (*endDay > daysInMonth(*endYear, *endMonth)) {
+        *endDay -= daysInMonth(*endYear, *endMonth);
+        (*endMonth)++;
+        if (*endMonth > 12) {
+            *endMonth = 1;
+            (*endYear)++;
+        }
+    }
+}
+
+#if 0
+int main() {
+    int startYear = 2025, startMonth = 8, startDay = 26;
+    int validYears = 1, validMonths = 6, validDays = 31;
+    int endYear, endMonth, endDay;
+
+    calculateExpiryDate(startYear, startMonth, startDay,
+                        validYears, validMonths, validDays,
+                        &endYear, &endMonth, &endDay);
+
+    printf("起始日期: %d年%d月%d日\n", startYear, startMonth, startDay);
+    printf("有效期: %d年%d个月%d天\n", validYears, validMonths, validDays);
+    printf("到期日期: %d年%d月%d日\n", endYear, endMonth, endDay);
+
+    return 0;
+}
+#endif
+
+
+static void btn_date_validity_confirm_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    int now_year = g_system_time[0] + 2000;
+    int now_month = g_system_time[1];
+    int now_day = g_system_time[2];
+    int end_year = 0;
+    int end_month = 0;
+    int end_day = 0;  
+    char temp_str[20] = { 0 };
+    int i = 0;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_date_validity_confirm_event_cb\n");
+        buzzer_enable = 1;
+
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_year,temp_str,sizeof(temp_str));
+        validity_date.year = atoi(temp_str)%100;	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_month,temp_str,sizeof(temp_str));
+        validity_date.month = atoi(temp_str);	
+        memset(temp_str,0,sizeof(temp_str));
+        lv_roller_get_selected_str(system_date_roller_day,temp_str,sizeof(temp_str));
+        validity_date.day = atoi(temp_str);
+
+        if((validity_date.year != 0)||(validity_date.month != 0)||(validity_date.day != 0))
         {
-            lv_obj_del(date_type_obj[i].obj_date_label);
-            lv_obj_del(date_type_obj[i].obj_date_btn);
+            validity_date.flag = 1;
+
+            calculateExpiryDate(now_year,now_month,now_day,validity_date.year,validity_date.month,validity_date.day,&end_year,&end_month,&end_day);
+
+            now_year = end_year;
+            now_month = end_month;
+            now_day = end_day;
+
+            for (i = 0; i < DATA_TYPE_NUMBER - 1; i++)
+            {
+                switch (i)
+                {
+                    case 0:
+                        sprintf(temp_str, "%04d/%02d/%02d", now_year, now_month, now_day);
+                        break;
+                    case 1:
+                        sprintf(temp_str, "%02d/%02d/%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 2:
+                        sprintf(temp_str, "%04d-%02d-%02d", now_year, now_month, now_day);
+                        break;
+                    case 3:
+                        sprintf(temp_str, "%02d-%02d-%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 4:
+                        sprintf(temp_str, "%04d.%02d.%02d", now_year, now_month, now_day);
+                        break;
+                    case 5:
+                        sprintf(temp_str, "%02d.%02d.%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 6:
+                        sprintf(temp_str, "%02d/%02d/%04d", now_day, now_month, now_year);
+                        break;
+                    case 7:
+                        sprintf(temp_str, "%02d/%02d/%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 8:
+                        sprintf(temp_str, "%02d-%02d-%04d", now_day, now_month, now_year);
+                        break;
+                    case 9:
+                        sprintf(temp_str, "%02d-%02d-%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 10:
+                        sprintf(temp_str, "%02d.%02d.%04d", now_day, now_month, now_year);
+                        break;
+                    case 11:
+                        sprintf(temp_str, "%02d.%02d.%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 12:
+                        sprintf(temp_str, "%04d年%02d月%02d日", now_year, now_month, now_day);
+                        break;
+                    case 13:
+                        sprintf(temp_str, "%02d年%02d月%02d日", now_year%100, now_month, now_day);
+                        break;
+
+                }
+
+                lv_label_set_text(date_type_obj[i].obj_date_label, temp_str);
+            }
+
         }
 
-        lv_obj_del(obj_addition_date_text_middle_bg);
-
-        lv_obj_del(label_addition_date_text_return);
-        lv_obj_del(btn_addition_date_text_return);
-        lv_obj_del(btn_addition_date_confirm);
-        lv_obj_del(label_addition_date_confirm);
+        lv_obj_del(label_system_date_confirm);
+        lv_obj_del(btn_system_date_confirm);
+        lv_obj_del(btn_system_date_return);
+        lv_obj_del(label_system_date_return);
+        lv_obj_del(system_date_bottom_bg);
+        lv_obj_del(system_date_roller_day);
+        lv_obj_del(system_date_roller_month);
+        lv_obj_del(system_date_roller_year);
+        lv_obj_del(label_system_date_day_middle);
+        lv_obj_del(label_system_date_month_middle);
+        lv_obj_del(label_system_date_year_middle);
+        lv_obj_del(system_date_middle_bg);
+        lv_obj_del(label_system_date_head);
+        lv_obj_del(system_date_head_bg);       
     }
 }
 
@@ -17693,92 +16835,205 @@ static void button_date_type_event_cb(lv_event_t* e)
     {
         if (lv_obj_get_index(obj) == 14)
         {
-            //键盘界面
-            textarea_bg_keyboard = lv_obj_create(lv_scr_act());
-            /* 设置大小 */
+            static lv_style_t style_sel;
+            lv_style_init(&style_sel);
+            lv_style_set_text_font(&style_sel, &lv_font_montserrat_20);
 
-            lv_obj_set_size(textarea_bg_keyboard, 480, 272);
-            lv_obj_align(textarea_bg_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
-            lv_obj_set_style_border_width(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-            lv_obj_set_style_border_color(textarea_bg_keyboard, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
-            //lv_obj_set_style_border_opa(file_management_win, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
-            lv_obj_set_style_radius(textarea_bg_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-            lv_obj_set_style_bg_color(textarea_bg_keyboard, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
+            system_date_head_bg = lv_obj_create(lv_scr_act());
+            lv_obj_set_size(system_date_head_bg, 480, 24);
+            lv_obj_align(system_date_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
+            lv_obj_set_style_border_width(system_date_head_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+            lv_obj_set_style_border_color(system_date_head_bg, lv_color_hex(0x9bcd9b), LV_STATE_DEFAULT); /* 设置边框颜色 */
+            lv_obj_set_style_radius(system_date_head_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+            lv_obj_set_style_bg_color(system_date_head_bg, lv_color_hex(0x1fadd3), LV_STATE_DEFAULT);
 
-            //输入框+键盘
             LV_FONT_DECLARE(heiFont16_1);
-            pinyin_ime = lv_ime_pinyin_create(lv_scr_act());
-            lv_obj_set_style_text_font(pinyin_ime, &heiFont16_1, 0);
-            //lv_obj_set_style_text_font(pinyin_ime, &lv_font_simsun_16_cjk, 0);
-            //lv_ime_pinyin_set_dict(pinyin_ime, your_dict); // Use a custom dictionary. If it is not set, the built-in dictionary will be used.
+            label_system_date_head = lv_label_create(lv_scr_act());
+            lv_obj_set_style_text_font(label_system_date_head, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_system_date_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
+            lv_obj_align(label_system_date_head, LV_ALIGN_TOP_LEFT, 200, 4);
+            lv_label_set_text(label_system_date_head, "有效期");
 
-            textarea_text_keyboard = lv_textarea_create(lv_scr_act());
-            //lv_textarea_set_one_line(textarea_text_keyboard, true);
-            lv_obj_set_size(textarea_text_keyboard, 480, 95);
-            lv_obj_set_style_text_font(textarea_text_keyboard, &heiFont16_1, 0);
-            lv_obj_align(textarea_text_keyboard, LV_ALIGN_TOP_LEFT, 0, 0);
-            lv_textarea_set_max_length(textarea_text_keyboard, 100);
-            lv_textarea_set_placeholder_text(textarea_text_keyboard, "Smart printer");
-            //lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, NULL);
-            lv_obj_set_style_border_width(textarea_text_keyboard, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
-            lv_obj_set_style_border_color(textarea_text_keyboard, lv_color_hex(0xAAAAAA), LV_STATE_DEFAULT); /* 设置边框颜色 */
-            lv_obj_set_style_border_opa(textarea_text_keyboard, 100, LV_STATE_DEFAULT); /* 设置边框透明度 */
-            lv_obj_set_style_radius(textarea_text_keyboard, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-
-
-            /*Create a keyboard and add it to ime_pinyin*/
-            text_edit_keyboard = lv_keyboard_create(lv_scr_act());
-            lv_ime_pinyin_set_keyboard(pinyin_ime, text_edit_keyboard);
-            lv_keyboard_set_textarea(text_edit_keyboard, textarea_text_keyboard);
-            //lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0xff4040), LV_PART_MAIN);
-            lv_obj_set_style_bg_color(text_edit_keyboard, lv_color_hex(0x1fadd3), LV_PART_MAIN);
-            lv_obj_add_event_cb(textarea_text_keyboard, textarea_text_event_cb, LV_EVENT_ALL, text_edit_keyboard);
-            lv_obj_align(text_edit_keyboard, LV_ALIGN_TOP_LEFT, 0, 115);
-            lv_obj_set_size(text_edit_keyboard, 480, 133);
-
-            /*Get the cand_panel, and adjust its size and position*/
-            keyboard_cand_panel = lv_ime_pinyin_get_cand_panel(pinyin_ime);
-            lv_obj_set_size(keyboard_cand_panel, LV_PCT(100), LV_PCT(10));
-            lv_obj_align_to(keyboard_cand_panel, text_edit_keyboard, LV_ALIGN_OUT_TOP_MID, 0, 5);
-            lv_obj_set_style_bg_color(keyboard_cand_panel, lv_color_hex(0x8B1A1A), LV_PART_MAIN);
-            lv_obj_set_style_text_font(keyboard_cand_panel, &heiFont16_1, 0);
-
-            keyboard_bg = lv_obj_create(lv_scr_act());
-            lv_obj_set_size(keyboard_bg, 480, 24);
-            lv_obj_align(keyboard_bg, LV_ALIGN_TOP_LEFT, 0, 248);
-            lv_obj_set_style_border_width(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
-            lv_obj_set_style_radius(keyboard_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
-            lv_obj_set_style_bg_color(keyboard_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
-            lv_obj_remove_style(keyboard_bg, 0, LV_PART_SCROLLBAR);
+            system_date_middle_bg = lv_obj_create(lv_scr_act());
+            lv_obj_set_size(system_date_middle_bg, 480, 224);
+            lv_obj_align(system_date_middle_bg, LV_ALIGN_TOP_LEFT, 0, 24);
+            lv_obj_set_style_border_width(system_date_middle_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+            lv_obj_set_style_border_color(system_date_middle_bg, lv_color_hex(0xaaaaa), LV_STATE_DEFAULT); /* 设置边框颜色 */
+            lv_obj_set_style_radius(system_date_middle_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+            lv_obj_set_style_bg_color(system_date_middle_bg, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
 
 
             LV_FONT_DECLARE(heiFont16_1);
-            label_keyboard_return = lv_label_create(lv_scr_act());
-            lv_obj_set_style_text_font(label_keyboard_return, &heiFont16_1, LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(label_keyboard_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-            lv_label_set_text(label_keyboard_return, "返回");
-            lv_obj_align(label_keyboard_return, LV_ALIGN_TOP_LEFT, 140, 252);
+            label_system_date_year_middle = lv_label_create(system_date_middle_bg);
+            lv_obj_set_style_text_font(label_system_date_year_middle, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_system_date_year_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+            lv_obj_align(label_system_date_year_middle, LV_ALIGN_TOP_LEFT, 105, 5);
+            lv_label_set_text(label_system_date_year_middle, "年");
+
+
+            LV_FONT_DECLARE(heiFont16_1);
+            label_system_date_month_middle = lv_label_create(system_date_middle_bg);
+            lv_obj_set_style_text_font(label_system_date_month_middle, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_system_date_month_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+            lv_obj_align(label_system_date_month_middle, LV_ALIGN_TOP_LEFT, 205, 5);
+            lv_label_set_text(label_system_date_month_middle, "月");
+
+            LV_FONT_DECLARE(heiFont16_1);
+            label_system_date_day_middle = lv_label_create(system_date_middle_bg);
+            lv_obj_set_style_text_font(label_system_date_day_middle, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_system_date_day_middle, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+            lv_obj_align(label_system_date_day_middle, LV_ALIGN_TOP_LEFT, 305, 5);
+            lv_label_set_text(label_system_date_day_middle, "日");
+
+
+            system_date_roller_year = lv_roller_create(system_date_middle_bg);
+            lv_roller_set_options(system_date_roller_year,
+                "0\n"
+                "1\n"
+                "2\n"
+                "3\n"
+                "4\n"
+                "5\n"
+                "6\n"
+                "7\n"
+                "8\n"
+                "9\n"
+                "10",
+                LV_ROLLER_MODE_INFINITE);
+
+            lv_roller_set_visible_row_count(system_date_roller_year, 5);
+            lv_obj_align(system_date_roller_year, LV_ALIGN_TOP_LEFT, 85, 25);
+            lv_obj_set_style_width(system_date_roller_year, 60, LV_STATE_DEFAULT);
+            lv_obj_add_style(system_date_roller_year, &style_sel, LV_PART_SELECTED);
+
+            if(flag_modification_or_addition == 1)
+            {
+                lv_roller_set_selected(system_date_roller_year, data_structure[g_modification_id].data.date_time.year, LV_ANIM_ON);
+            }
+            else
+            {
+                lv_roller_set_selected(system_date_roller_year, 0, LV_ANIM_ON);
+            }
+
+            system_date_roller_month = lv_roller_create(system_date_middle_bg);
+            lv_roller_set_options(system_date_roller_month,
+                "0\n"
+                "1\n"
+                "2\n"
+                "3\n"
+                "4\n"
+                "5\n"
+                "6\n"
+                "7\n"
+                "8\n"
+                "9\n"
+                "10\n"
+                "11\n"
+                "12",
+                LV_ROLLER_MODE_INFINITE);
+            lv_obj_set_style_width(system_date_roller_month, 60, LV_STATE_DEFAULT);
+            lv_roller_set_visible_row_count(system_date_roller_month, 5);
+            lv_obj_align(system_date_roller_month, LV_ALIGN_TOP_LEFT, 185, 25);
+            lv_obj_add_style(system_date_roller_month, &style_sel, LV_PART_SELECTED);
+
+
+            if(flag_modification_or_addition == 1)
+            {
+                lv_roller_set_selected(system_date_roller_month, data_structure[g_modification_id].data.date_time.month, LV_ANIM_ON);
+            }
+            else
+            {
+                lv_roller_set_selected(system_date_roller_month, 0, LV_ANIM_ON);
+            }
+
+
+            system_date_roller_day = lv_roller_create(system_date_middle_bg);
+            lv_roller_set_options(system_date_roller_day,
+                "0\n"
+                "1\n"
+                "2\n"
+                "3\n"
+                "4\n"
+                "5\n"
+                "6\n"
+                "7\n"
+                "8\n"
+                "9\n"
+                "10\n"
+                "11\n"
+                "12\n"
+                "13\n"
+                "14\n"
+                "15\n"
+                "16\n"
+                "17\n"
+                "18\n"
+                "19\n"
+                "20\n"
+                "21\n"
+                "22\n"
+                "23\n"
+                "24\n"
+                "25\n"
+                "26\n"
+                "27\n"
+                "28\n"
+                "29\n"
+                "30\n"
+                "31",
+                LV_ROLLER_MODE_INFINITE);
+            lv_obj_set_style_width(system_date_roller_day, 60, LV_STATE_DEFAULT);
+            lv_roller_set_visible_row_count(system_date_roller_day, 5);
+            lv_obj_align(system_date_roller_day, LV_ALIGN_TOP_LEFT, 285, 25);
+            lv_obj_add_style(system_date_roller_day, &style_sel, LV_PART_SELECTED);
+
+
+            if(flag_modification_or_addition == 1)
+            {
+                lv_roller_set_selected(system_date_roller_day, data_structure[g_modification_id].data.date_time.day, LV_ANIM_ON);
+            }
+            else
+            {
+                lv_roller_set_selected(system_date_roller_day, 0, LV_ANIM_ON);
+            }
+
+            system_date_bottom_bg = lv_obj_create(lv_scr_act());
+            lv_obj_set_size(system_date_bottom_bg, 480, 24);
+            lv_obj_align(system_date_bottom_bg, LV_ALIGN_TOP_LEFT, 0, 248);
+            lv_obj_set_style_border_width(system_date_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
+            lv_obj_set_style_radius(system_date_bottom_bg, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+            lv_obj_set_style_bg_color(system_date_bottom_bg, lv_color_hex(0x28536a), LV_STATE_DEFAULT);
+            lv_obj_remove_style(system_date_bottom_bg, 0, LV_PART_SCROLLBAR);
+
+
+            LV_FONT_DECLARE(heiFont16_1);
+            label_system_date_return = lv_label_create(lv_scr_act());
+            lv_obj_set_style_text_font(label_system_date_return, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_system_date_return, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+            lv_label_set_text(label_system_date_return, "返回");
+            lv_obj_align(label_system_date_return, LV_ALIGN_TOP_LEFT, 140, 252);
 
             LV_IMG_DECLARE(get_back);
-            btn_keyboard_return = lv_imgbtn_create(lv_scr_act());
-            lv_imgbtn_set_src(btn_keyboard_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
-            lv_obj_set_size(btn_keyboard_return, get_back.header.w, get_back.header.h);
-            lv_obj_align(btn_keyboard_return, LV_ALIGN_TOP_LEFT, 180, 250);
-            lv_obj_add_event_cb(btn_keyboard_return, button_date_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
+            btn_system_date_return = lv_imgbtn_create(lv_scr_act());
+            lv_imgbtn_set_src(btn_system_date_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
+            lv_obj_set_size(btn_system_date_return, get_back.header.w, get_back.header.h);
+            lv_obj_align(btn_system_date_return, LV_ALIGN_TOP_LEFT, 180, 250);
+            lv_obj_add_event_cb(btn_system_date_return, button_date_validity_return_event_cb, LV_EVENT_CLICKED, NULL);
+
 
             LV_IMG_DECLARE(confirm);
-            btn_keyboard_confirm = lv_imgbtn_create(lv_scr_act());
-            lv_imgbtn_set_src(btn_keyboard_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
-            lv_obj_set_size(btn_keyboard_confirm, get_back.header.w, get_back.header.h);
-            lv_obj_align(btn_keyboard_confirm, LV_ALIGN_TOP_LEFT, 250, 250);
-            lv_obj_add_event_cb(btn_keyboard_confirm, button_date_keyboard_confirm_event_cb, LV_EVENT_CLICKED, NULL);
+            btn_system_date_confirm = lv_imgbtn_create(lv_scr_act());
+            lv_imgbtn_set_src(btn_system_date_confirm, LV_IMGBTN_STATE_RELEASED, NULL, &confirm, NULL);
+            lv_obj_set_size(btn_system_date_confirm, get_back.header.w, get_back.header.h);
+            lv_obj_align(btn_system_date_confirm, LV_ALIGN_TOP_LEFT, 270, 250);
+            lv_obj_add_event_cb(btn_system_date_confirm, btn_date_validity_confirm_event_cb, LV_EVENT_CLICKED, NULL);
 
             LV_FONT_DECLARE(heiFont16_1);
-            label_keyboard_confirm = lv_label_create(lv_scr_act());
-            lv_obj_set_style_text_font(label_keyboard_confirm, &heiFont16_1, LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(label_keyboard_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
-            lv_label_set_text(label_keyboard_confirm, "确定");
-            lv_obj_align(label_keyboard_confirm, LV_ALIGN_TOP_LEFT, 277, 252);  
+            label_system_date_confirm = lv_label_create(lv_scr_act());
+            lv_obj_set_style_text_font(label_system_date_confirm, &heiFont16_1, LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(label_system_date_confirm, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+            lv_label_set_text(label_system_date_confirm, "确定");
+            lv_obj_align(label_system_date_confirm, LV_ALIGN_TOP_LEFT, 300, 252);
         }
     }
 }
@@ -17797,7 +17052,15 @@ static void button_date_confirm_event_cb(lv_event_t* e)
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_addition_date_middle, lv_label_get_text(date_type_obj[g_date_type].obj_date_label));
         lv_label_set_text(label_btn_addition_date_text, lv_label_get_text(date_type_obj[g_date_type].obj_date_label));
-        date_or_time_flag = 0;
+
+        if(validity_date.flag == 1)
+        {
+            date_or_time_flag = 2;
+        }
+        else
+        {
+            date_or_time_flag = 0;
+        }
 
         lv_obj_del(obj_addition_date_text_head_bg);
         lv_obj_del(label_addition_date_text_head);
@@ -17859,12 +17122,17 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
     int size_wide = 108;
     int size_high = 40;
     char temp_str[20] = { 0 };
+    int end_year = 0;
+    int end_month = 0;
+    int end_day = 0;
 
     if (code == LV_EVENT_CLICKED)
     {
         printf("btn_addition_date_text_event_cb\n");
 
         buzzer_enable = 1;
+
+        memset(&validity_date,0,sizeof(validity_date));
 
         obj_addition_date_text_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(obj_addition_date_text_head_bg, 480, 24);
@@ -17914,64 +17182,138 @@ static void btn_addition_date_text_event_cb(lv_event_t* e)
             LV_FONT_DECLARE(heiFont16_1);
             date_type_obj[i].obj_date_label = lv_label_create(date_type_obj[i].obj_date_btn);
             lv_obj_set_style_text_font(date_type_obj[i].obj_date_label, &heiFont16_1, LV_STATE_DEFAULT);
-            switch (i)
-            {
-                case 0:
-                    sprintf(temp_str, "%04d/%02d/%02d", now_year, now_month, now_day);
-                    break;
-                case 1:
-                    sprintf(temp_str, "%02d/%02d/%02d", now_year%100, now_month, now_day);
-                    break;
-                case 2:
-                    sprintf(temp_str, "%04d-%02d-%02d", now_year, now_month, now_day);
-                    break;
-                case 3:
-                    sprintf(temp_str, "%02d-%02d-%02d", now_year%100, now_month, now_day);
-                    break;
-                case 4:
-                    sprintf(temp_str, "%04d.%02d.%02d", now_year, now_month, now_day);
-                    break;
-                case 5:
-                    sprintf(temp_str, "%02d.%02d.%02d", now_year%100, now_month, now_day);
-                    break;
-                case 6:
-                    sprintf(temp_str, "%02d/%02d/%04d", now_day, now_month, now_year);
-                    break;
-                case 7:
-                    sprintf(temp_str, "%02d/%02d/%02d", now_day, now_month, now_year%100);
-                    break;
-                case 8:
-                    sprintf(temp_str, "%02d-%02d-%04d", now_day, now_month, now_year);
-                    break;
-                case 9:
-                    sprintf(temp_str, "%02d-%02d-%02d", now_day, now_month, now_year%100);
-                    break;
-                case 10:
-                    sprintf(temp_str, "%02d.%02d.%04d", now_day, now_month, now_year);
-                    break;
-                case 11:
-                    sprintf(temp_str, "%02d.%02d.%02d", now_day, now_month, now_year%100);
-                    break;
-                case 12:
-                    sprintf(temp_str, "%04d年%02d月%02d日", now_year, now_month, now_day);
-                    break;
-                case 13:
-                    sprintf(temp_str, "%02d年%02d月%02d日", now_year%100, now_month, now_day);
-                    break;
-                case 14:
-                    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
-                    {
-                        sprintf(temp_str, "自定义");
-                    }
-                    else if(system_data.system.language == LANGUAGE_ENGLISH)
-                    {
-                        sprintf(temp_str, "Custom");
-                    }
-                    break;
-                case 15:
-                    sprintf(temp_str, "延期");
-                    break;
 
+            if(flag_modification_or_addition == 1)
+            {
+                if(data_structure[g_modification_id].data.date_time.date_or_time == 2)
+                {
+                    calculateExpiryDate(now_year,now_month,now_day,data_structure[g_modification_id].data.date_time.year,data_structure[g_modification_id].data.date_time.month,data_structure[g_modification_id].data.date_time.day,&end_year,&end_month,&end_day);
+                    now_year = end_year;
+                    now_month = end_month;
+                    now_day = end_day;
+                }
+
+                switch (i)
+                {
+                    case 0:
+                        sprintf(temp_str, "%04d/%02d/%02d", now_year, now_month, now_day);
+                        break;
+                    case 1:
+                        sprintf(temp_str, "%02d/%02d/%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 2:
+                        sprintf(temp_str, "%04d-%02d-%02d", now_year, now_month, now_day);
+                        break;
+                    case 3:
+                        sprintf(temp_str, "%02d-%02d-%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 4:
+                        sprintf(temp_str, "%04d.%02d.%02d", now_year, now_month, now_day);
+                        break;
+                    case 5:
+                        sprintf(temp_str, "%02d.%02d.%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 6:
+                        sprintf(temp_str, "%02d/%02d/%04d", now_day, now_month, now_year);
+                        break;
+                    case 7:
+                        sprintf(temp_str, "%02d/%02d/%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 8:
+                        sprintf(temp_str, "%02d-%02d-%04d", now_day, now_month, now_year);
+                        break;
+                    case 9:
+                        sprintf(temp_str, "%02d-%02d-%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 10:
+                        sprintf(temp_str, "%02d.%02d.%04d", now_day, now_month, now_year);
+                        break;
+                    case 11:
+                        sprintf(temp_str, "%02d.%02d.%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 12:
+                        sprintf(temp_str, "%04d年%02d月%02d日", now_year, now_month, now_day);
+                        break;
+                    case 13:
+                        sprintf(temp_str, "%02d年%02d月%02d日", now_year%100, now_month, now_day);
+                        break;
+                    case 14:
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            sprintf(temp_str, "有效期");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            sprintf(temp_str, "Validity");
+                        }
+                        break;
+                    case 15:
+                        sprintf(temp_str, "延期");
+                        break;
+
+                }
+            }
+            else
+            {
+                switch (i)
+                {
+                    case 0:
+                        sprintf(temp_str, "%04d/%02d/%02d", now_year, now_month, now_day);
+                        break;
+                    case 1:
+                        sprintf(temp_str, "%02d/%02d/%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 2:
+                        sprintf(temp_str, "%04d-%02d-%02d", now_year, now_month, now_day);
+                        break;
+                    case 3:
+                        sprintf(temp_str, "%02d-%02d-%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 4:
+                        sprintf(temp_str, "%04d.%02d.%02d", now_year, now_month, now_day);
+                        break;
+                    case 5:
+                        sprintf(temp_str, "%02d.%02d.%02d", now_year%100, now_month, now_day);
+                        break;
+                    case 6:
+                        sprintf(temp_str, "%02d/%02d/%04d", now_day, now_month, now_year);
+                        break;
+                    case 7:
+                        sprintf(temp_str, "%02d/%02d/%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 8:
+                        sprintf(temp_str, "%02d-%02d-%04d", now_day, now_month, now_year);
+                        break;
+                    case 9:
+                        sprintf(temp_str, "%02d-%02d-%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 10:
+                        sprintf(temp_str, "%02d.%02d.%04d", now_day, now_month, now_year);
+                        break;
+                    case 11:
+                        sprintf(temp_str, "%02d.%02d.%02d", now_day, now_month, now_year%100);
+                        break;
+                    case 12:
+                        sprintf(temp_str, "%04d年%02d月%02d日", now_year, now_month, now_day);
+                        break;
+                    case 13:
+                        sprintf(temp_str, "%02d年%02d月%02d日", now_year%100, now_month, now_day);
+                        break;
+                    case 14:
+                        if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                        {
+                            sprintf(temp_str, "有效期");
+                        }
+                        else if(system_data.system.language == LANGUAGE_ENGLISH)
+                        {
+                            sprintf(temp_str, "Validity");
+                        }
+                        break;
+                    case 15:
+                        sprintf(temp_str, "延期");
+                        break;
+
+                }
             }
 
             lv_label_set_text(date_type_obj[i].obj_date_label, temp_str);
@@ -18100,7 +17442,7 @@ static void button_time_type_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_FOCUSED)
     {
-        printf("button_date_type_event_cb LV_EVENT_FOCUSED\n");
+        printf("button_time_type_event_cb LV_EVENT_FOCUSED\n");
         buzzer_enable = 1;
         printf("g_date_type=%d\n", lv_obj_get_index(obj));
         g_time_type = lv_obj_get_index(obj);
@@ -18108,7 +17450,7 @@ static void button_time_type_event_cb(lv_event_t* e)
     }
     else if (code == LV_EVENT_DEFOCUSED)
     {
-        printf("button_date_type_event_cb LV_EVENT_DEFOCUSED\n");
+        printf("button_time_type_event_cb LV_EVENT_DEFOCUSED\n");
         lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_MAIN);
     }
     else if (code == LV_EVENT_CLICKED)
@@ -18277,48 +17619,48 @@ static void btn_addition_time_event_cb(lv_event_t* e)
             lv_obj_set_style_text_font(date_type_obj[i].obj_date_label, &heiFont16_1, LV_STATE_DEFAULT);
             switch (i)
             {
-            case 0:
-                sprintf(temp_str, "%02d:%02d:%02d", now_hour, now_minute, now_second);
-                break;
-            case 1:
-                sprintf(temp_str, "%02d:%02d", now_hour, now_minute);
-                break;
-            case 2:
-                if (now_hour > 12)
-                {
-                    sprintf(temp_str, "%02d:%02d:%02d PM", now_hour - 12, now_minute, now_second);
-                }
-                else
-                {
-                    sprintf(temp_str, "%02d:%02d:%02d AM", now_hour, now_minute, now_second);
-                }
-                break;
-            case 3:
-                if (now_hour > 12)
-                {
-                    sprintf(temp_str, "%02d:%02d PM", now_hour - 12, now_minute);
-                }
-                else
-                {
-                    sprintf(temp_str, "%02d:%02d AM", now_hour, now_minute);
-                }
-                break;
-            case 4:
-                sprintf(temp_str, "%02d时%02d分%02d秒", now_hour, now_minute, now_second);
-                break;
-            case 5:
-                if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
-                {
-                    sprintf(temp_str, "自定义");
-                }
-                else if(system_data.system.language == LANGUAGE_ENGLISH)
-                {
-                    sprintf(temp_str, "Custom");
-                }
-                break;
-            case 6:
-                sprintf(temp_str, "延期");
-                break;
+                case 0:
+                    sprintf(temp_str, "%02d:%02d:%02d", now_hour, now_minute, now_second);
+                    break;
+                case 1:
+                    sprintf(temp_str, "%02d:%02d", now_hour, now_minute);
+                    break;
+                case 2:
+                    if (now_hour > 12)
+                    {
+                        sprintf(temp_str, "%02d:%02d:%02d PM", now_hour - 12, now_minute, now_second);
+                    }
+                    else
+                    {
+                        sprintf(temp_str, "%02d:%02d:%02d AM", now_hour, now_minute, now_second);
+                    }
+                    break;
+                case 3:
+                    if (now_hour > 12)
+                    {
+                        sprintf(temp_str, "%02d:%02d PM", now_hour - 12, now_minute);
+                    }
+                    else
+                    {
+                        sprintf(temp_str, "%02d:%02d AM", now_hour, now_minute);
+                    }
+                    break;
+                case 4:
+                    sprintf(temp_str, "%02d时%02d分%02d秒", now_hour, now_minute, now_second);
+                    break;
+                case 5:
+                    if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
+                    {
+                        sprintf(temp_str, "自定义");
+                    }
+                    else if(system_data.system.language == LANGUAGE_ENGLISH)
+                    {
+                        sprintf(temp_str, "Custom");
+                    }
+                    break;
+                case 6:
+                    sprintf(temp_str, "延期");
+                    break;
             }
 
             lv_label_set_text(date_type_obj[i].obj_date_label, temp_str);
@@ -18385,6 +17727,30 @@ static void btn_addition_date_time_spin_confirm_event_cb(lv_event_t* e)
 
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_addition_date_spin, temp_str);
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+
+    }
+}
+
+
+static void btn_addition_date_time_spin_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_addition_date_time_spin_return_event_cb\n");
+        buzzer_enable = 1;
 
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
@@ -18534,7 +17900,7 @@ static void btn_addition_date_spin_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_addition_date_time_spin_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -18972,6 +18338,28 @@ static void button_date_time_word_space_confirm_event_cb(lv_event_t* e)
 }
 
 
+static void button_date_time_word_space_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_word_space_confirm_event_cb\n");
+        buzzer_enable = 1;
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
 static void btn_date_time_word_space_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -19098,7 +18486,7 @@ static void btn_date_time_word_space_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_date_time_word_space_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -19241,7 +18629,7 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
 
             lv_obj_set_size(temp_obj, text_size.x, text_size.y);
             lv_obj_set_style_transform_angle(temp_obj, data_structure[win_content_child_num].data.date_time.spin * 10, 0);
-
+#if 0
             if (data_structure[win_content_child_num].data.date_time.spin != 0)
             {
                 lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 200, 70);
@@ -19250,6 +18638,9 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
             {
                 lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
             }
+#endif
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 6*win_content_child_num);
 
             lv_style_set_text_letter_space(&data_structure[win_content_child_num].data.date_time.style, word_space);
             lv_obj_t* label1 = lv_label_create(temp_obj);
@@ -19266,7 +18657,14 @@ static void button_date_time_confirm_event_cb(lv_event_t* e)
 
             if(date_or_time_flag == 0)
             {
+                data_structure[win_content_child_num].data.date_time.date_or_time_type = g_date_type;
+            }
+            else if(date_or_time_flag == 2)
+            {
                  data_structure[win_content_child_num].data.date_time.date_or_time_type = g_date_type;
+                 data_structure[win_content_child_num].data.date_time.year = validity_date.year;
+                 data_structure[win_content_child_num].data.date_time.month = validity_date.month;
+                 data_structure[win_content_child_num].data.date_time.day = validity_date.day;
             }
             else
             {
@@ -19451,6 +18849,9 @@ static void button_addition_date_event_cb(lv_event_t* e)
     {
         printf("addition text\n");
         buzzer_enable = 1;
+
+        flag_modification_or_addition = 0;
+
         addition_date_head_bg = lv_obj_create(lv_scr_act());
         lv_obj_set_size(addition_date_head_bg, 480, 24);
         lv_obj_align(addition_date_head_bg, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -19952,9 +19353,12 @@ static int is_image_file(const char *filename)
             strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
             strcmp(ext, ".bmp") == 0 || strcmp(ext, ".tiff") == 0) 
 #endif
+#if 0
         if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
             strcmp(ext, ".png") == 0 || strcmp(ext, ".gif") == 0 ||
             strcmp(ext, ".bmp") == 0) 
+#endif
+        if (strcmp(ext, ".bmp") == 0) 
         {
             return 1;
         }
@@ -20010,7 +19414,7 @@ static void picture_draw_event_cb(lv_event_t* e)
     if (dsc->part == LV_PART_ITEMS)
     {
         //printf("dsc->id=%d\n\r", dsc->id);
-        if ((dsc->id / 4) == g_row)
+        if ((dsc->id / 3) == g_row)
         {
             dsc->rect_dsc->bg_color = lv_color_hex(0x00FF00);  // 绿色
             dsc->rect_dsc->bg_opa = LV_OPA_COVER;  // 完全不透明
@@ -20118,7 +19522,7 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
     unsigned char picture_count = 0;
     int picture_type = 0;
     char created_time[20] ={0};
-    char size_str[20]; // 存储转换后的字符串
+    //char size_str[20]; // 存储转换后的字符串
     char image_name[50]; // 存储提取的图片名称
     char file_name_short[100]={0};
 
@@ -20152,10 +19556,10 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
         lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
 
-        lv_table_set_col_width(table_addition_picture_1, 0, 120);
+        lv_table_set_col_width(table_addition_picture_1, 0, 160);
         lv_table_set_col_width(table_addition_picture_1, 1, 45);
-        lv_table_set_col_width(table_addition_picture_1, 2, 55);
-        lv_table_set_col_width(table_addition_picture_1, 3, 75);
+        //lv_table_set_col_width(table_addition_picture_1, 2, 55);
+        lv_table_set_col_width(table_addition_picture_1, 2, 89);
 
         //重新绘制表格
         if (len == 0)
@@ -20171,7 +19575,7 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
             while ((entry = readdir(dir)) != NULL) 
             {
                 snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
-                if (stat(path, &file_stat) == -1) 
+                if ((stat(path, &file_stat) == -1)||(file_stat.st_size > 500 *1024))
                 {
                     perror("stat");
                     continue;
@@ -20205,10 +19609,10 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
                                 lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "bmp");
                                 break;
                         }
-                        size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
-                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
+                        //size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
+                        //lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
                         format_time(ctime(&file_stat.st_ctime), created_time);
-                        lv_table_set_cell_value(table_addition_picture, picture_count, 3, created_time);
+                        lv_table_set_cell_value(table_addition_picture, picture_count, 2, created_time);
                         memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
                         picture_count++;
                     }
@@ -20242,7 +19646,7 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
             while ((entry = readdir(dir)) != NULL) 
             {
                 snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
-                if (stat(path, &file_stat) == -1) 
+                if ((stat(path, &file_stat) == -1)||(file_stat.st_size > 500 *1024))
                 {
                     perror("stat");
                     continue;
@@ -20276,10 +19680,10 @@ static void button_picture_search_keyboard_confirm_event_cb(lv_event_t* e)
                                 lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "bmp");
                                 break;
                         }
-                        size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
-                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
+                        //size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
+                        //lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
                         format_time(ctime(&file_stat.st_ctime), created_time);
-                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 3, created_time);
+                        lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, created_time);
                         memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
                         picture_count++;
                     }
@@ -20556,6 +19960,8 @@ static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
                 printf("图片加载成功：%dx%d，%d 通道\n", width, height, channels);
 
                 sprintf(picture_name_1, "/media/qr_bar_bmp/%s.png", lv_table_get_cell_value(table_addition_picture_1, g_row, 0));
+
+                printf("picture_name_1=%s\n\r",picture_name_1);
             
                 // 步骤 2：将数据保存为 PNG
                 int success = stbi_write_png(picture_name_1, width, height, channels, data, width * channels);
@@ -20592,7 +19998,9 @@ static void imgbtn_addition_picture_confirm_event_cb(lv_event_t* e)
             }
 
             lv_obj_set_size(temp_obj, header.w, header.h);
-            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            //lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 6*win_content_child_num);
 
             sprintf(data_structure[win_content_child_num].data.picture.text_1,"%s", tempString);
             sprintf(data_structure[win_content_child_num].data.picture.text_2,"%s", picture_name_1);
@@ -20796,21 +20204,21 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         {
             lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
             lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
-            lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
-            lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+            //lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
+            lv_table_set_cell_value(table_addition_picture, 0, 2, "时间");
         }
         else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
             lv_table_set_cell_value(table_addition_picture, 0, 0, "Name");
             lv_table_set_cell_value(table_addition_picture, 0, 1, "Type");
-            lv_table_set_cell_value(table_addition_picture, 0, 2, "Size");
-            lv_table_set_cell_value(table_addition_picture, 0, 3, "Time");
+            //lv_table_set_cell_value(table_addition_picture, 0, 2, "Size");
+            lv_table_set_cell_value(table_addition_picture, 0, 2, "Time");
         }
 
-        lv_table_set_col_width(table_addition_picture, 0, 115);
+        lv_table_set_col_width(table_addition_picture, 0, 166);
         lv_table_set_col_width(table_addition_picture, 1, 50);
-        lv_table_set_col_width(table_addition_picture, 2, 51);
-        lv_table_set_col_width(table_addition_picture, 3, 81);
+        //lv_table_set_col_width(table_addition_picture, 2, 51);
+        lv_table_set_col_width(table_addition_picture, 2, 81);
 
 
         obj_addition_table_bg = lv_obj_create(lv_scr_act());
@@ -20838,10 +20246,10 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
 
-        lv_table_set_col_width(table_addition_picture_1, 0, 115);
+        lv_table_set_col_width(table_addition_picture_1, 0, 160);
         lv_table_set_col_width(table_addition_picture_1, 1, 45);
-        lv_table_set_col_width(table_addition_picture_1, 2, 45);
-        lv_table_set_col_width(table_addition_picture_1, 3, 89);
+        //lv_table_set_col_width(table_addition_picture_1, 2, 45);
+        lv_table_set_col_width(table_addition_picture_1, 2, 89);
 
 
 #if 0
@@ -20872,7 +20280,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         unsigned char picture_count = 0;
         int picture_type = 0;
         char created_time[20] ={0};
-        char size_str[20]; // 存储转换后的字符串
+        //char size_str[20]; // 存储转换后的字符串
         char image_name[50]; // 存储提取的图片名称
 
 
@@ -20887,7 +20295,7 @@ static void button_addition_picture_event_cb(lv_event_t* e)
         while ((entry = readdir(dir)) != NULL) 
         {
             snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
-            if (stat(path, &file_stat) == -1) 
+            if ((stat(path, &file_stat) == -1)||(file_stat.st_size > 500 *1024))
             {
                 perror("stat");
                 continue;
@@ -20921,12 +20329,12 @@ static void button_addition_picture_event_cb(lv_event_t* e)
                             lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "bmp");
                             break;
                     }
-                    size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
-                    printf("size_str=%s\n\r",size_str);
-                    lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
+                    //size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
+                    //printf("size_str=%s\n\r",size_str);
+                    //lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
                     format_time(ctime(&file_stat.st_ctime), created_time);
                     printf("created_time=%s\n\r",created_time);
-                    lv_table_set_cell_value(table_addition_picture_1, picture_count, 3, created_time);
+                    lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, created_time);
                     //memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
                     picture_count++;
                 }
@@ -22755,7 +22163,7 @@ static void button_keyboard_confirm_QR_code_text_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
-        printf("button_keyboard_confirm_event_cb\n");
+        printf("button_keyboard_confirm_QR_code_text_event_cb\n");
         buzzer_enable = 1;
         //获取输入框数据给到文本显示框
         lv_label_set_text(label_btn_addition_QR_code_text, lv_textarea_get_text(textarea_text_keyboard));
@@ -22769,7 +22177,10 @@ static void button_keyboard_confirm_QR_code_text_event_cb(lv_event_t* e)
         lv_obj_del(label_keyboard_return);
         lv_obj_del(btn_keyboard_return);
         update_preview_QR_bar_code();
-        addition_QR_bar_updata();
+        if(flag_modification_or_addition == 1)
+        {
+            addition_QR_bar_updata();
+        }
     }
 }
 
@@ -23172,6 +22583,31 @@ static void button_QR_code_height_confirm_event_cb(lv_event_t* e)
 }
 
 
+
+
+static void button_QR_code_height_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_QR_code_height_return_event_cb\n");
+
+        buzzer_enable = 1;
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
 static void btn_addition_QR_code_height_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -23298,7 +22734,7 @@ static void btn_addition_QR_code_height_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_QR_code_height_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -23598,6 +23034,30 @@ static void button_QR_code_width_confirm_event_cb(lv_event_t* e)
 
 
 
+static void button_QR_code_width_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_QR_code_width_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+
 static void btn_addition_QR_code_width_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -23723,7 +23183,7 @@ static void btn_addition_QR_code_width_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_QR_code_width_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -25945,7 +25405,9 @@ static void btn_addition_QR_code_confirm_event_cb(lv_event_t* e)
                 }
             }
 
-            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+            //lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30, 0);
+
+            lv_obj_align(temp_obj, LV_ALIGN_TOP_LEFT, 30 + 20*win_content_child_num, 6*win_content_child_num);
         }
 
         lv_obj_del(btn_addition_QR_code_confirm);
@@ -26447,6 +25909,7 @@ static void button_addition_event_cb(lv_event_t* e)
     if ((code == LV_EVENT_CLICKED) && (print_status == 0))
     {
         printf("addition\n");
+        flag_modification_or_addition = 0;
         buzzer_enable = 1;
         LV_IMG_DECLARE(img_addition_bg_2);
         img_addition_bg = lv_img_create(lv_scr_act());
@@ -26725,6 +26188,12 @@ static void button_delete_event_cb(lv_event_t* e)
     lv_img_t* img_1 = NULL;
     lv_img_dsc_t* img_dsc = NULL;
     lv_font_t* temp_font = NULL;
+    int now_year = 0;
+    int now_month = 0;
+    int now_day = 0;
+    int end_year = 0;
+    int end_month = 0;
+    int end_day = 0;
 
     code = lv_event_get_code(e);
     if ((code == LV_EVENT_CLICKED)&&(print_status == 0))
@@ -26856,8 +26325,7 @@ static void button_delete_event_cb(lv_event_t* e)
                         lv_obj_center(label1);     
                         lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
                         break;
-                    }
-                    
+                    }             
                     case TYPE_ICON:
                     {
 
@@ -26976,6 +26444,63 @@ static void button_delete_event_cb(lv_event_t* e)
                                     break;
                                 case 13:
                                     sprintf(date_time_str, "%02d年%02d月%02d日", g_system_time[0], g_system_time[1], g_system_time[2]);
+                                    break;
+                                case 14:
+                                    sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                                    break;
+                                case 15:
+                                    sprintf(date_time_str, "延期");
+                                    break;
+                            }
+                        }
+                        else if(data_structure[i].data.date_time.date_or_time == 2)
+                        {
+
+                            calculateExpiryDate(now_year,now_month,now_day,data_structure[i].data.date_time.year,data_structure[i].data.date_time.month,data_structure[i].data.date_time.day,&end_year,&end_month,&end_day);
+
+                            switch(data_structure[i].data.date_time.date_or_time_type)
+                            {
+                                case 0:
+                                    sprintf(date_time_str, "%04d/%02d/%02d", end_year, end_month, end_day);
+                                    break;
+                                case 1:
+                                    sprintf(date_time_str, "%02d/%02d/%02d", end_year%100, end_month, end_day);
+                                    break;
+                                case 2:
+                                    sprintf(date_time_str, "%04d-%02d-%02d", end_year, end_month, end_day);
+                                    break;
+                                case 3:
+                                    sprintf(date_time_str, "%02d-%02d-%02d", end_year%100, end_month, end_day);
+                                    break;
+                                case 4:
+                                    sprintf(date_time_str, "%04d.%02d.%02d", end_year, end_month, end_day);
+                                    break;
+                                case 5:
+                                    sprintf(date_time_str, "%02d.%02d.%02d", end_year%100, end_month, end_day);
+                                    break;
+                                case 6:
+                                    sprintf(date_time_str, "%02d/%02d/%04d", end_day,  end_month, end_year);
+                                    break;
+                                case 7:
+                                    sprintf(date_time_str, "%02d/%02d/%02d", end_day,  end_month, end_year%100);
+                                    break;
+                                case 8:
+                                    sprintf(date_time_str, "%02d-%02d-%04d", end_day,  end_month, end_year);
+                                    break;
+                                case 9:
+                                    sprintf(date_time_str, "%02d-%02d-%02d", end_day,  end_month, end_year%100);
+                                    break;
+                                case 10:
+                                    sprintf(date_time_str, "%02d.%02d.%04d", end_day,  end_month, end_year);
+                                    break;
+                                case 11:
+                                    sprintf(date_time_str, "%02d.%02d.%02d", end_day,  end_month, end_year%100);
+                                    break;
+                                case 12:
+                                    sprintf(date_time_str, "%04d年%02d月%02d日", end_year, end_month, end_day);
+                                    break;
+                                case 13:
+                                    sprintf(date_time_str, "%02d年%02d月%02d日", end_year%100, end_month, end_day);
                                     break;
                                 case 14:
                                     sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
@@ -30139,6 +29664,8 @@ static void modification_text_confirm_event_cb(lv_event_t* e)
             data_structure[win_content_child_num].data.word.italic_bold = data_structure[win_content_child_num].data.word.info.style;
             data_structure[win_content_child_num].type = TYPE_WORD;
             printf("text=%s\n\r", data_structure[win_content_child_num].data.word.text);
+
+            lv_obj_update_layout(win_content);
         }
 
         lv_obj_del(file_management_win);
@@ -30349,7 +29876,7 @@ static void modification_text(void)
     lv_obj_set_style_radius(label_file_management_text_label, 0, LV_STATE_DEFAULT); /* 设置圆角 */
     lv_obj_set_style_bg_opa(label_file_management_text_label, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(label_file_management_text_label, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_add_event_cb(btn_file_management_text, btn_file_management_text_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(btn_file_management_text, btn_modification_text_event_cb, LV_EVENT_CLICKED, NULL);
 
 
     LV_IMG_DECLARE(typeface);
@@ -33248,15 +32775,15 @@ static void modification_QR_code(void)
 
     if(data_structure[g_modification_id].type == TYPE_QR)
     {
-        lv_label_set_text(label_btn_addition_QR_code_QR,  QR_code_name[data_structure[g_modification_id].data.qr_bar.type]);  
+        lv_label_set_text(label_btn_addition_QR_code_QR,  QR_code_name[data_structure[g_modification_id].data.qr_bar.symbology]);  
         QR_or_bar_code_flag = 0;
-        QR_code_type = data_structure[g_modification_id].data.qr_bar.type;
+        QR_code_type = data_structure[g_modification_id].data.qr_bar.symbology;
     }
     else
     {
        lv_label_set_text(label_btn_addition_QR_code_QR, "");  
        QR_or_bar_code_flag = 1;
-       bar_code_type = QR_code_type = data_structure[g_modification_id].data.qr_bar.type;
+       bar_code_type = data_structure[g_modification_id].data.qr_bar.symbology;
     }
    
     lv_obj_align(label_btn_addition_QR_code_QR, LV_ALIGN_CENTER, 0, 0);
@@ -33372,12 +32899,12 @@ static void modification_QR_code(void)
     lv_obj_set_style_text_color(label_btn_addition_QR_code_bar_code, lv_color_hex(0x000000), LV_STATE_DEFAULT);
     if(data_structure[g_modification_id].type == TYPE_BAR)
     {
+        lv_label_set_text(label_btn_addition_QR_code_bar_code,  bar_code_name[data_structure[g_modification_id].data.qr_bar.symbology]); 
         
-        lv_label_set_text(label_btn_addition_QR_code_bar_code, "");  
     }
     else
     {
-       lv_label_set_text(label_btn_addition_QR_code_bar_code,  bar_code_name[data_structure[g_modification_id].data.qr_bar.type]);  
+        lv_label_set_text(label_btn_addition_QR_code_bar_code, "");  
     }
 
     lv_obj_align(label_btn_addition_QR_code_bar_code, LV_ALIGN_CENTER, 0, 0);
@@ -33666,6 +33193,13 @@ static void button_modification_date_time_confirm_event_cb(lv_event_t* e)
             {
                  data_structure[win_content_child_num].data.date_time.date_or_time_type = g_date_type;
             }
+            else if(date_or_time_flag == 2)
+            {
+                 data_structure[win_content_child_num].data.date_time.date_or_time_type = g_date_type;
+                 data_structure[win_content_child_num].data.date_time.year = validity_date.year;
+                 data_structure[win_content_child_num].data.date_time.month = validity_date.month;
+                 data_structure[win_content_child_num].data.date_time.day = validity_date.day;
+            }
             else
             {
                 data_structure[win_content_child_num].data.date_time.date_or_time_type = g_time_type;
@@ -33787,8 +33321,16 @@ static void modification_date(void)
 {
     //lv_event_code_t code;
     char date_time_str[128]={0};
+    int now_year = 0;
+    int now_month = 0;
+    int now_day = 0;
+    int end_year = 0;
+    int end_month = 0;
+    int end_day = 0;
 
     printf("modification_date\n\r");
+
+    flag_modification_or_addition = 1;
 
     addition_date_head_bg = lv_obj_create(lv_scr_act());
     lv_obj_set_size(addition_date_head_bg, 480, 24);
@@ -33916,6 +33458,69 @@ static void modification_date(void)
                 break;
             case 13:
                 sprintf(date_time_str, "%02d年%02d月%02d日", g_system_time[0], g_system_time[1], g_system_time[2]);
+                break;
+            case 14:
+                sprintf(date_time_str, "%s",data_structure[g_modification_id].data.date_time.text);
+                break;
+            case 15:
+                sprintf(date_time_str, "延期");
+                break;
+        }
+
+        lv_label_set_text(label_addition_date_middle, date_time_str);
+        lv_label_set_text(label_btn_addition_date_text, date_time_str);
+    }
+    else if(data_structure[g_modification_id].data.date_time.date_or_time == 2)
+    {
+        now_year = 2000 + g_system_time[0];
+        now_month = g_system_time[1];
+        now_day =  g_system_time[2];
+
+        calculateExpiryDate(now_year,now_month,now_day,data_structure[g_modification_id].data.date_time.year,data_structure[g_modification_id].data.date_time.month,data_structure[g_modification_id].data.date_time.day,&end_year,&end_month,&end_day);
+
+        switch(data_structure[g_modification_id].data.date_time.date_or_time_type)
+        {
+            case 0:
+                sprintf(date_time_str, "%04d/%02d/%02d", end_year, end_month, now_day);
+                break;
+            case 1:
+                sprintf(date_time_str, "%02d/%02d/%02d", end_year%100, end_month, now_day);
+                break;
+            case 2:
+                sprintf(date_time_str, "%04d-%02d-%02d", end_year, end_month, now_day);
+                break;
+            case 3:
+                sprintf(date_time_str, "%02d-%02d-%02d", end_year%100, end_month, now_day);
+                break;
+            case 4:
+                sprintf(date_time_str, "%04d.%02d.%02d", end_year, end_month, now_day);
+                break;
+            case 5:
+                sprintf(date_time_str, "%02d.%02d.%02d", end_year%100, end_month, now_day);
+                break;
+            case 6:
+                sprintf(date_time_str, "%02d/%02d/%04d", now_day,  end_month, end_year);
+                break;
+            case 7:
+                sprintf(date_time_str, "%02d/%02d/%02d", now_day,  end_month, end_year%100);
+                break;
+            case 8:
+                sprintf(date_time_str, "%02d-%02d-%04d", now_day,  end_month, end_year);
+                break;
+            case 9:
+                sprintf(date_time_str, "%02d-%02d-%02d", now_day,  end_month, end_year%100);
+                break;
+            case 10:
+                sprintf(date_time_str, "%02d.%02d.%04d", now_day,  end_month, end_year);
+                break;
+            case 11:
+                sprintf(date_time_str, "%02d.%02d.%02d", now_day,  end_month, end_year%100);
+                break;
+            case 12:
+                sprintf(date_time_str, "%04d年%02d月%02d日", end_year, end_month, now_day);
+                break;
+            case 13:
+                sprintf(date_time_str, "%02d年%02d月%02d日", end_year%100, end_month, now_day);
                 break;
             case 14:
                 sprintf(date_time_str, "%s",data_structure[g_modification_id].data.date_time.text);
@@ -34447,6 +34052,9 @@ static void imgbtn_modification_picture_return_event_cb(lv_event_t* e)
     if (code == LV_EVENT_CLICKED)
     {
         printf("imgbtn_modification_picture_return_event_cb\n");
+
+        buzzer_enable = 1;
+
         lv_obj_del(obj_addition_picture_head_bg);
         lv_obj_del(label_addition_picture_head);
         lv_obj_del(obj_addition_picture_preview_bg);
@@ -34471,31 +34079,6 @@ static void imgbtn_modification_picture_return_event_cb(lv_event_t* e)
         lv_obj_del(label_addition_picture_confirm);
 
         lv_obj_del(slider_typeface);
-
-
-        //删除添加界面
-        lv_obj_del(img_addition_bg);
-        lv_obj_del(btn_addition_text);
-        lv_obj_del(label_btn_addition_text);
-        lv_obj_del(btn_addition_date);
-        lv_obj_del(label_btn_addition_date);
-        lv_obj_del(btn_addition_picture);
-        lv_obj_del(label_btn_addition_picture);
-        lv_obj_del(btn_addition_QR_code);
-        lv_obj_del(label_btn_addition_QR_code);
-        lv_obj_del(btn_addition_bar_code);
-        lv_obj_del(label_btn_addition_bar_code);
-        lv_obj_del(btn_addition_count);
-        lv_obj_del(label_btn_addition_count);
-        lv_obj_del(btn_addition_subsection);
-        lv_obj_del(label_btn_addition_subsection);
-        lv_obj_del(btn_addition_symbol);
-        lv_obj_del(label_btn_addition_symbol);
-        lv_obj_del(btn_addition_icon);
-        lv_obj_del(label_btn_addition_icon);
-        lv_obj_del(btn_addition_more_functions);
-        lv_obj_del(label_btn_addition_more_functions);
-        lv_obj_del(btn_addition_return);
     }
 }
 
@@ -34505,7 +34088,7 @@ static void imgbtn_modification_picture_return_event_cb(lv_event_t* e)
 
 static void modification_picture(void)
 {
-    //char file_name[100]={0};
+    char file_name[100]={0};
 
     printf("modification_picture\n");
     buzzer_enable = 1;
@@ -34563,20 +34146,20 @@ static void modification_picture(void)
     {
         lv_table_set_cell_value(table_addition_picture, 0, 0, "名称");
         lv_table_set_cell_value(table_addition_picture, 0, 1, "类型");
-        lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
-        lv_table_set_cell_value(table_addition_picture, 0, 3, "时间");
+        //lv_table_set_cell_value(table_addition_picture, 0, 2, "大小");
+        lv_table_set_cell_value(table_addition_picture, 0, 2, "时间");
     }
     else if(system_data.system.language == LANGUAGE_ENGLISH)
     {
         lv_table_set_cell_value(table_addition_picture, 0, 0, "Name");
         lv_table_set_cell_value(table_addition_picture, 0, 1, "Type");
-        lv_table_set_cell_value(table_addition_picture, 0, 2, "Size");
-        lv_table_set_cell_value(table_addition_picture, 0, 3, "Time");
+        //lv_table_set_cell_value(table_addition_picture, 0, 2, "Size");
+        lv_table_set_cell_value(table_addition_picture, 0, 2, "Time");
     }
-    lv_table_set_col_width(table_addition_picture, 0, 115);
+    lv_table_set_col_width(table_addition_picture, 0, 166);
     lv_table_set_col_width(table_addition_picture, 1, 50);
-    lv_table_set_col_width(table_addition_picture, 2, 56);
-    lv_table_set_col_width(table_addition_picture, 3, 76);
+    //lv_table_set_col_width(table_addition_picture, 2, 56);
+    lv_table_set_col_width(table_addition_picture, 2, 81);
 
     obj_addition_table_bg = lv_obj_create(lv_scr_act());
     lv_obj_set_size(obj_addition_table_bg, 300, 198);
@@ -34602,10 +34185,10 @@ static void modification_picture(void)
     lv_obj_align(table_addition_picture_1, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_text_font(table_addition_picture_1, &heiFont16_1, LV_STATE_DEFAULT);
 
-    lv_table_set_col_width(table_addition_picture_1, 0, 120);
+    lv_table_set_col_width(table_addition_picture_1, 0, 160);
     lv_table_set_col_width(table_addition_picture_1, 1, 45);
-    lv_table_set_col_width(table_addition_picture_1, 2, 55);
-    lv_table_set_col_width(table_addition_picture_1, 3, 75);
+    //lv_table_set_col_width(table_addition_picture_1, 2, 55);
+    lv_table_set_col_width(table_addition_picture_1, 2, 89);
 
 
 #if 0
@@ -34636,7 +34219,7 @@ static void modification_picture(void)
     unsigned char picture_count = 0;
     int picture_type = 0;
     char created_time[20] ={0};
-    char size_str[20]; // 存储转换后的字符串
+    //char size_str[20]; // 存储转换后的字符串
     char image_name[50]; // 存储提取的图片名称
 
     dir = opendir("/mnt");
@@ -34649,7 +34232,7 @@ static void modification_picture(void)
     while ((entry = readdir(dir)) != NULL) 
     {
         snprintf(path, sizeof(path), "/mnt/%s", entry->d_name);
-        if (stat(path, &file_stat) == -1) 
+        if ((stat(path, &file_stat) == -1)||(file_stat.st_size > 500 *1024))
         {
             perror("stat");
             continue;
@@ -34683,12 +34266,12 @@ static void modification_picture(void)
                         lv_table_set_cell_value(table_addition_picture_1, picture_count, 1, "bmp");
                         break;
                 }
-                size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
-                printf("size_str=%s\n\r",size_str);
-                lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
+                //size_to_human_readable(file_stat.st_size, size_str, sizeof(size_str));
+                //printf("size_str=%s\n\r",size_str);
+                //lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, size_str);
                 format_time(ctime(&file_stat.st_ctime), created_time);
                 printf("created_time=%s\n\r",created_time);
-                lv_table_set_cell_value(table_addition_picture_1, picture_count, 3, created_time);
+                lv_table_set_cell_value(table_addition_picture_1, picture_count, 2, created_time);
                 //memcpy(usb_picture,entry->d_name,strlen(entry->d_name) + 1);
 
                 if(isSubstring(data_structure[g_modification_id].data.picture.text_1,entry->d_name))
@@ -34707,7 +34290,11 @@ static void modification_picture(void)
 
     //显示图片
     picture_img = lv_img_create(obj_addition_picture_preview_bg);
-    lv_img_set_src(picture_img, data_structure[g_modification_id].data.picture.text_1);
+    printf("text_1=%s\n\r",data_structure[g_modification_id].data.picture.text_1);
+    sprintf(file_name,"A:%s", data_structure[g_modification_id].data.picture.text_1);
+    printf("file_name=%s\n\r",file_name);
+
+    lv_img_set_src(picture_img, file_name);
 
     lv_obj_add_event_cb(table_addition_picture_1, picture_draw_event_cb, LV_EVENT_DRAW_PART_BEGIN, NULL);
     lv_obj_add_event_cb(table_addition_picture_1, picture_change_event_cb, LV_EVENT_PRESSED, NULL);
@@ -36820,6 +36407,8 @@ static void  btn_interval_continuous_print_mode_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_interval_continuous_print_mode_confirm_event_cb\n");
+        buzzer_enable = 1;
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -36833,7 +36422,31 @@ static void  btn_interval_continuous_print_mode_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_interval_continuous_print_mode, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+      
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+static void  btn_interval_continuous_print_mode_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_interval_continuous_print_mode_return_event_cb\n");
+        buzzer_enable = 1;
+
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -36982,7 +36595,7 @@ static void btn_interval_continuous_print_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_interval_continuous_print_mode_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -37018,6 +36631,10 @@ static void btn_trigger_delay_mode_confirm_event_cb(lv_event_t* e)
     code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED)
     {
+        printf("btn_trigger_delay_mode_confirm_event_cb\n");
+
+        buzzer_enable = 1;
+
         const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
         if ((pwd_txt != NULL))
         {
@@ -37031,7 +36648,32 @@ static void btn_trigger_delay_mode_confirm_event_cb(lv_event_t* e)
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_trigger_delay_mode, temp_str);
 
-        printf("button_word_space_confirm_event_cb\n");
+       
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+static void btn_trigger_delay_mode_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_trigger_delay_mode_return_event_cb\n");
+
+        buzzer_enable = 1;
+
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -37180,7 +36822,7 @@ static void btn_trigger_delay_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_trigger_delay_mode_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -37228,6 +36870,29 @@ static void btn_set_print_mode_confirm_event_cb(lv_event_t* e)
 
         sprintf(temp_str, "%d", i);
         lv_label_set_text(label_btn_label_set_print_mode, temp_str);
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(pwd_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
+
+
+static void btn_set_print_mode_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("btn_set_print_mode_return_event_cb\n");
+        buzzer_enable = 1;
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
@@ -37375,7 +37040,7 @@ static void btn_label_set_print_mode_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, btn_set_print_mode_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -38707,7 +38372,8 @@ static void btn_calibration_event_cb(lv_event_t* e)
         screen_off_obj = lv_obj_create(lv_scr_act());
         lv_obj_align(screen_off_obj, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_size(screen_off_obj, 480, 272);
-        lv_obj_set_style_bg_color(screen_off_obj, lv_color_hex(0xff0000), LV_STATE_DEFAULT);
+        //lv_obj_set_style_bg_color(screen_off_obj, lv_color_hex(0xff0000), LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_color(screen_off_obj, lv_color_hex(0x000000), LV_STATE_DEFAULT);
         lv_obj_set_style_border_width(screen_off_obj, 0, LV_STATE_DEFAULT); /* 设置边框宽度 */
         lv_obj_set_style_border_color(screen_off_obj, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
         lv_obj_clear_flag(screen_off_obj, LV_OBJ_FLAG_SCROLLABLE);
@@ -39050,11 +38716,11 @@ static void btn_check_updates_event_cb(lv_event_t* e)
         lv_obj_set_style_text_color(label_set_developer_head, lv_color_hex(0xFFFFFF), LV_STATE_DEFAULT);
         if(system_data.system.language == LANGUAGE_SIMPLIFIED_CHINESE)
         {
-            lv_label_set_text(label_set_developer_head, "取消加密");
+            lv_label_set_text(label_set_developer_head, "权限升级");
         }
         else if(system_data.system.language == LANGUAGE_ENGLISH)
         {
-            lv_label_set_text(label_set_developer_head, "Cancel encryption");
+            lv_label_set_text(label_set_developer_head, "Permission upgrade");
         }
         lv_obj_align(label_set_developer_head, LV_ALIGN_TOP_LEFT, 200, 4);
 
@@ -39215,19 +38881,129 @@ static void btn_check_updates_event_cb(lv_event_t* e)
 
 
 
+
+
+static void button_reset_confirm_event_handler(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_reset_confirm_event_handler\n");
+
+        buzzer_enable = 1;
+        system_data.init = 0;
+        set_system_data();
+        get_system_data();
+
+        if (remove("/media/system_file/data_structure.dat") == 0) 
+        {
+            printf("文件 /media/system_file/data_structure.dat 删除成功\n\r");
+        } 
+        else
+        {
+            perror("删除文件 /media/system_file/data_structure.dat 失败");
+        }
+
+        lv_obj_del(Ink_cartridge_error_content);
+        lv_obj_del(Ink_cartridge_error_win);
+        print_status = 0;
+    }
+}
+
+
+static void button_reset_return_event_handler(lv_event_t* e)
+{
+    lv_event_code_t code;
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_reset_return_event_handler\n");
+
+        buzzer_enable = 1;
+        lv_obj_del(Ink_cartridge_error_content);
+        lv_obj_del(Ink_cartridge_error_win);
+        print_status = 0;
+    }
+}
+
+
+
 static void btn_factory_reset_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
     //int i;
     //lv_obj_t* obj = lv_event_get_target(e);
     code = lv_event_get_code(e);
-    if (code == LV_EVENT_LONG_PRESSED)
+    if (code == LV_EVENT_CLICKED)
     {
         printf("btn_factory_reset_event_cb\n");
+#if 0
         buzzer_enable = 1;
         system_data.init = 0;
         set_system_data();
         get_system_data();
+#endif
+
+        print_status = 1;
+        buzzer_enable = 1;
+
+        Ink_cartridge_error_win = lv_obj_create(lv_scr_act());
+        lv_obj_align(Ink_cartridge_error_win, LV_ALIGN_TOP_LEFT, 90, 80);
+        lv_obj_set_size(Ink_cartridge_error_win, 300, 40);
+        lv_obj_set_style_bg_color(Ink_cartridge_error_win, lv_color_hex(0x1e90ff), LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(Ink_cartridge_error_win, LV_OPA_COVER, LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(Ink_cartridge_error_win, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(Ink_cartridge_error_win, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(Ink_cartridge_error_win, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(Ink_cartridge_error_win, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_warning = lv_label_create(Ink_cartridge_error_win);
+        lv_obj_set_style_text_font(label_warning, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_warning, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_label_set_text(label_warning, "是否恢复出厂设置");
+        lv_obj_align(label_warning, LV_ALIGN_TOP_LEFT, 75, 0);
+
+
+        Ink_cartridge_error_content = lv_obj_create(lv_scr_act());
+        lv_obj_align(Ink_cartridge_error_content, LV_ALIGN_TOP_LEFT, 90, 120);
+        lv_obj_set_size(Ink_cartridge_error_content, 300, 80);
+        lv_obj_set_style_bg_color(Ink_cartridge_error_content, lv_color_hex(0xffffff), LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(Ink_cartridge_error_content, LV_OPA_COVER, LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(Ink_cartridge_error_content, 1, LV_STATE_DEFAULT); /* 设置边框宽度 */
+        lv_obj_set_style_border_color(Ink_cartridge_error_content, lv_color_hex(0xcccccc), LV_STATE_DEFAULT); /* 设置边框颜色 */
+        lv_obj_clear_flag(Ink_cartridge_error_content, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(Ink_cartridge_error_content, 0, LV_STATE_DEFAULT); /* 设置圆角 */
+
+
+        LV_FONT_DECLARE(heiFont16_1);
+        label_warning_content = lv_label_create(Ink_cartridge_error_content);
+        lv_obj_set_style_text_font(label_warning_content, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label_warning_content, lv_color_hex(0x000000), LV_STATE_DEFAULT);
+        lv_label_set_text(label_warning_content, "恢复出厂设置将删除所有数据跟设置!");
+        lv_obj_align(label_warning_content, LV_ALIGN_TOP_LEFT, 5, -5);
+
+
+
+        button_return = lv_btn_create(Ink_cartridge_error_content);
+        lv_obj_add_event_cb(button_return, button_reset_return_event_handler, LV_EVENT_ALL, NULL);
+        lv_obj_align(button_return, LV_ALIGN_TOP_LEFT, 45, 20);
+        button_return_label = lv_label_create(button_return);
+        lv_obj_set_style_text_font(button_return_label, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_label_set_text(button_return_label, "取消");
+        lv_obj_center(button_return_label);
+
+
+        button_ack = lv_btn_create(Ink_cartridge_error_content);
+        lv_obj_add_event_cb(button_ack, button_ack_event_handler, LV_EVENT_ALL, NULL);
+        lv_obj_align(button_ack, LV_ALIGN_TOP_LEFT, 165, 20);
+
+        button_ack_label = lv_label_create(button_ack);
+        lv_obj_set_style_text_font(button_ack_label, &heiFont16_1, LV_STATE_DEFAULT);
+        lv_label_set_text(button_ack_label, "确定");
+        lv_obj_center(button_ack_label);
+
     }
 }
 
@@ -39257,7 +39033,7 @@ static void button_yield_reset_keyboard_confirm_event_cb(lv_event_t* e)
     {
         printf("button_yield_reset_keyboard_confirm_event_cb\n");
         buzzer_enable = 1;
-        const char* pwd_txt = lv_textarea_get_text(pwd_text_area);
+        const char* pwd_txt = lv_textarea_get_text(yield_text_area);
         if ((pwd_txt != NULL))
         {
             i = atoi(pwd_txt);
@@ -39268,14 +39044,19 @@ static void button_yield_reset_keyboard_confirm_event_cb(lv_event_t* e)
         }
 
         sprintf(temp_str, "%d", i);
+        printf("temp_str=%s  i=%u\n\r",temp_str,i);
         lv_label_set_text(label_btn_yield_reset, temp_str);
 
         system_data.total_output = i;
 
+        total_output_changeFlag = 1;
+
+        set_system_data();
+
         lv_obj_del(typeface_head_bg);
         lv_obj_del(label_typeface_head);
         lv_obj_del(typeface_slider_bg);
-        lv_obj_del(pwd_text_area);
+        lv_obj_del(yield_text_area);
         lv_obj_del(pwd_keyboard);
 
         lv_obj_del(label_typeface_return);
@@ -39284,6 +39065,32 @@ static void button_yield_reset_keyboard_confirm_event_cb(lv_event_t* e)
         lv_obj_del(label_typeface_confirm);
     }
 }
+
+
+
+static void button_yield_reset_keyboard_return_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+
+    code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED)
+    {
+        printf("button_yield_reset_keyboard_return_event_cb\n");
+        buzzer_enable = 1;
+
+        lv_obj_del(typeface_head_bg);
+        lv_obj_del(label_typeface_head);
+        lv_obj_del(typeface_slider_bg);
+        lv_obj_del(yield_text_area);
+        lv_obj_del(pwd_keyboard);
+
+        lv_obj_del(label_typeface_return);
+        lv_obj_del(btn_typeface_return);
+        lv_obj_del(btn_typeface_confirm);
+        lv_obj_del(label_typeface_confirm);
+    }
+}
+
 
 
 
@@ -39331,10 +39138,10 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
         lv_obj_set_style_bg_color(typeface_slider_bg, lv_color_hex(0xaaaaaa), LV_STATE_DEFAULT);
 
         //数字键盘
-        pwd_text_area = lv_textarea_create(lv_scr_act());
-        if (pwd_text_area == NULL)
+        yield_text_area = lv_textarea_create(lv_scr_act());
+        if (yield_text_area == NULL)
         {
-            printf("[%s:%d] create pwd_text_area obj failed\n", __FUNCTION__, __LINE__);
+            printf("[%s:%d] create yield_text_area obj failed\n", __FUNCTION__, __LINE__);
             return;
         }
 
@@ -39346,11 +39153,11 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
         lv_style_set_pad_all(&pwd_text_style, 0); // 设置样式的内部填充
         lv_style_set_text_font(&pwd_text_style, &lv_font_montserrat_18); //设置字体
         //lv_textarea_set_password_mode(pwd_text_area, true); // 文本区域开启密码模式
-        lv_textarea_set_max_length(pwd_text_area, 3); // 设置可输入的文本的最大长度
-        lv_obj_add_style(pwd_text_area, &pwd_text_style, 0); // 给btn_label添加样式
-        lv_obj_set_size(pwd_text_area, 480, 50); // 设置对象大小
-        lv_textarea_set_text(pwd_text_area, ""); // 文本框置空
-        lv_obj_align(pwd_text_area, LV_ALIGN_TOP_LEFT, 0, 24);
+        lv_textarea_set_max_length(yield_text_area, 3); // 设置可输入的文本的最大长度
+        lv_obj_add_style(yield_text_area, &pwd_text_style, 0); // 给btn_label添加样式
+        lv_obj_set_size(yield_text_area, 480, 50); // 设置对象大小
+        lv_textarea_set_text(yield_text_area, ""); // 文本框置空
+        lv_obj_align(yield_text_area, LV_ALIGN_TOP_LEFT, 0, 24);
 
         // 基于键盘背景对象创建密码校验提示标签
         hint_label = lv_label_create(lv_scr_act());
@@ -39391,7 +39198,7 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
         lv_obj_set_size(pwd_keyboard, 480, 174); //设置键盘大小
         lv_keyboard_set_mode(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2); //设置键盘模式为数字键盘
         lv_keyboard_set_map(pwd_keyboard, LV_KEYBOARD_MODE_NUMBER_2, keyboard_map, keyboard_ctrl); // 设置键盘映射
-        lv_keyboard_set_textarea(pwd_keyboard, pwd_text_area); // 键盘对象和文本框绑定
+        lv_keyboard_set_textarea(pwd_keyboard, yield_text_area); // 键盘对象和文本框绑定
         lv_obj_add_style(pwd_keyboard, &pwd_kb_style, 0); // 添加样式
         lv_obj_align(pwd_keyboard, LV_ALIGN_TOP_LEFT, 0, 74);
 
@@ -39415,7 +39222,7 @@ static void btn_yield_reset_event_cb(lv_event_t* e)
         lv_imgbtn_set_src(btn_typeface_return, LV_IMGBTN_STATE_RELEASED, NULL, &get_back, NULL);
         lv_obj_set_size(btn_typeface_return, get_back.header.w, get_back.header.h);
         lv_obj_align(btn_typeface_return, LV_ALIGN_TOP_LEFT, 180, 250);
-        lv_obj_add_event_cb(btn_typeface_return, button_work_space_return_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(btn_typeface_return, button_yield_reset_keyboard_return_event_cb, LV_EVENT_CLICKED, NULL);
 
 
         LV_IMG_DECLARE(confirm);
@@ -39956,7 +39763,7 @@ static void btn_developer_model_event_cb(lv_event_t* e)
     lv_event_code_t code;
     //lv_obj_t* obj = lv_event_get_target(e);
     code = lv_event_get_code(e);
-    if (code == LV_EVENT_CLICKED)
+    if (code == LV_EVENT_LONG_PRESSED)
     {
         printf("btn_developer_model_event_cb\n");
         buzzer_enable = 1;
@@ -40683,6 +40490,34 @@ static void set_tv_about_create(lv_obj_t* parent)
 
 }
 
+void tabview_event_cb(lv_event_t * e)
+{
+    lv_obj_t * tabview = lv_event_get_target(e); // 获取触发事件的对象（即tabview）
+
+    buzzer_enable = 1;
+
+    // 获取当前激活的标签页索引
+    uint16_t active_tab_id = lv_tabview_get_tab_act(tabview);
+
+    // 根据索引执行你需要的操作
+    switch(active_tab_id) {
+        case 0:
+            printf("切换到标签页 1\n");
+            // 例如：更新页面1的内容
+            break;
+        case 1:
+            printf("切换到标签页 2\n");
+            // 例如：从网络加载页面2的数据
+            break;
+        case 2:
+            printf("切换到标签页 3\n");
+            // 例如：刷新页面3的图表
+            break;
+        default:
+            break;
+    }
+}
+
 static void button_set_event_cb(lv_event_t* e)
 {
     lv_event_code_t code;
@@ -40705,6 +40540,8 @@ static void button_set_event_cb(lv_event_t* e)
             set_tv_system = lv_tabview_add_tab(set_tv, "System setup");
             set_tv_about = lv_tabview_add_tab(set_tv, "About this machine");
         }
+
+        lv_obj_add_event_cb(set_tv, tabview_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
         set_tv_print_create(set_tv_print);
         set_tv_system_create(set_tv_system);
@@ -40804,7 +40641,7 @@ void get_system_data(void)
         system_data.print.nozzle = 0;
         system_data.print.width = 1;
         system_data.print.print_voltage = 0;
-        system_data.print.flash_set = 1;
+        system_data.print.flash_set = 5;
         system_data.system.brightness = 70;
         system_data.system.buzzer = 1;
         lv_res = lv_fs_open(&lv_file, "A:/root/system_data.dat", LV_FS_MODE_WR);
@@ -40980,7 +40817,7 @@ void check_hp45(void)
 {
     int retvalue;
     unsigned char databuf[20]={0};
-    int i;
+    //int i;
     unsigned char *p = NULL;
     //int num;
     unsigned char crc;
@@ -40999,12 +40836,12 @@ void check_hp45(void)
     }
     else
     {
-        printf("读卡密文\n\r");
-        for(i=0;i<16;i++)
-        {
-            printf("0x%x ",databuf[i]);
-        }
-        printf("\n\r");
+        //printf("读卡密文\n\r");
+        //for(i=0;i<16;i++)
+        //{
+        //    printf("0x%x ",databuf[i]);
+        //}
+        //printf("\n\r");
 
         memset(msg, 0, MSG_SIZE);
         memset(&context, 0, sizeof(context));
@@ -41015,17 +40852,17 @@ void check_hp45(void)
         AES_cbc_decrypt(&context, databuf, (unsigned char *)&card_info_newest, MSG_SIZE);
 
         p = (unsigned char *)&card_info_newest;
-        printf("读卡明文\n\r");
-        for(i=0;i<16;i++)
-        {
-            printf("0x%x ",*(p+i));
-        }
-        printf("\n\r");
+        //printf("读卡明文\n\r");
+        //for(i=0;i<16;i++)
+        //{
+        //    printf("0x%x ",*(p+i));
+        //}
+        //printf("\n\r");
 
         crc =  CRC8(p,16);
         if(crc == card_info_newest.crc)
         {
-            printf("databuf ok\n");
+            //printf("databuf ok\n");
             read_card_info_result = 1;
         }
         else
@@ -41201,7 +41038,7 @@ void recovery_data(void)
     lv_obj_t* label1; 
     char bmp_name[64]={0};
     char bmp_name_1[100]={0};  
-    //char date_time_str[64]={ 0 };
+    char date_time_str[64]={ 0 };
     lv_obj_t* img_obj = NULL;
     lv_img_t* img_1 = NULL;
     lv_img_dsc_t* img_dsc = NULL;
@@ -41209,6 +41046,12 @@ void recovery_data(void)
     int success;
     lv_img_header_t header;
     lv_res_t res;
+    int now_year;
+    int now_month;
+    int now_day;
+    int end_year;
+    int end_month;
+    int end_day;
 
 
     memset(&data_structure, 0, sizeof(data_structure));
@@ -41335,7 +41178,7 @@ void recovery_data(void)
                             label1 = lv_label_create(temp_obj);
                             lv_obj_add_style(label1, &data_structure[i].data.date_time.style, 0);
 
-#if 0
+
                             if(data_structure[i].data.date_time.date_or_time == 0)
                             {
                                 switch(data_structure[i].data.date_time.date_or_time_type)
@@ -41390,6 +41233,65 @@ void recovery_data(void)
                                         break;
                                 }
                             }
+                            else if(data_structure[i].data.date_time.date_or_time == 2)
+                            {
+                                now_year =  2000 + g_system_time[0];
+                                now_month =  g_system_time[1];
+                                now_day =  g_system_time[2];
+                                calculateExpiryDate(now_year,now_month,now_day,data_structure[i].data.date_time.year,data_structure[i].data.date_time.month,data_structure[i].data.date_time.day,&end_year,&end_month,&end_day);
+    
+                                switch(data_structure[i].data.date_time.date_or_time_type)
+                                {
+                                    case 0:
+                                        sprintf(date_time_str, "%04d/%02d/%02d", end_year, end_month, end_day);
+                                        break;
+                                    case 1:
+                                        sprintf(date_time_str, "%02d/%02d/%02d", end_year%100, end_month, end_day);
+                                        break;
+                                    case 2:
+                                        sprintf(date_time_str, "%04d-%02d-%02d", end_year, end_month, end_day);
+                                        break;
+                                    case 3:
+                                        sprintf(date_time_str, "%02d-%02d-%02d", end_year%100, end_month, end_day);
+                                        break;
+                                    case 4:
+                                        sprintf(date_time_str, "%04d.%02d.%02d", end_year, end_month, end_day);
+                                        break;
+                                    case 5:
+                                        sprintf(date_time_str, "%02d.%02d.%02d", end_year%100, end_month, end_day);
+                                        break;
+                                    case 6:
+                                        sprintf(date_time_str, "%02d/%02d/%04d", end_day,  end_month, end_year);
+                                        break;
+                                    case 7:
+                                        sprintf(date_time_str, "%02d/%02d/%02d", end_day,  end_month, end_year%100);
+                                        break;
+                                    case 8:
+                                        sprintf(date_time_str, "%02d-%02d-%04d", end_day,  end_month, end_year);
+                                        break;
+                                    case 9:
+                                        sprintf(date_time_str, "%02d-%02d-%02d", end_day,  end_month, end_year%100);
+                                        break;
+                                    case 10:
+                                        sprintf(date_time_str, "%02d.%02d.%04d", end_day,  end_month, end_year);
+                                        break;
+                                    case 11:
+                                        sprintf(date_time_str, "%02d.%02d.%02d", end_day,  end_month, end_year%100);
+                                        break;
+                                    case 12:
+                                        sprintf(date_time_str, "%04d年%02d月%02d日", end_year, end_month, end_day);
+                                        break;
+                                    case 13:
+                                        sprintf(date_time_str, "%02d年%02d月%02d日", end_year%100, end_month, end_day);
+                                        break;
+                                    case 14:
+                                        sprintf(date_time_str, "%s",data_structure[i].data.date_time.text);
+                                        break;
+                                    case 15:
+                                        sprintf(date_time_str, "延期");
+                                        break;
+                                }
+                            }
                             else
                             {
                                 switch(data_structure[i].data.date_time.date_or_time_type)
@@ -41431,9 +41333,8 @@ void recovery_data(void)
                                         break;
                                 }              
                             }
-#endif
 
-                            lv_label_set_text(label1, data_structure[i].data.date_time.text);
+                            lv_label_set_text(label1, date_time_str);
                             lv_obj_center(label1);     
                             lv_obj_align(temp_obj, LV_ALIGN_OUT_TOP_LEFT, data_structure[i].x, data_structure[i].y);
                             break;
@@ -43873,6 +43774,56 @@ int get_sd_id(void)
 }
 
 
+static void button_left_stop_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    lv_coord_t x_vaule;
+
+    code = lv_event_get_code(e);
+    if ((code == LV_EVENT_CLICKED) && (print_status == 0))
+    {
+        printf("button_left_stop__event_cb\n\r");
+
+        x_vaule = lv_obj_get_x(win_content);
+        printf("x_vaule=%d\n\r", x_vaule);
+        //-15~-15615
+        x_vaule = x_vaule + 50;
+        if (x_vaule >= -15)
+        {
+            x_vaule = -15;
+        }
+
+        lv_obj_set_pos(win_content, x_vaule, -15);//Limit drag boundaries
+
+        lv_slider_set_value(slider_main, ( - 15 - x_vaule) / 156, LV_ANIM_ON);
+    }
+}
+
+static void button_right_stop_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code;
+    lv_coord_t x_vaule;
+
+    code = lv_event_get_code(e);
+    if ((code == LV_EVENT_CLICKED) && (print_status == 0))
+    {
+        printf("button_right_stop_event_cb\n\r");
+        x_vaule = lv_obj_get_x(win_content);
+        printf("x_vaule=%d\n\r", x_vaule);
+        //-15~-15615
+        x_vaule = x_vaule - 50;
+        if (x_vaule <= -15615)
+        {
+            x_vaule = -15615;
+        }
+
+        lv_obj_set_pos(win_content, x_vaule, -15);//Limit drag boundaries
+
+        lv_slider_set_value(slider_main, (-15 - x_vaule) / 156, LV_ANIM_ON);
+    }
+}
+
+
 
 void lv_demo_widgets(void)
 {
@@ -44380,7 +44331,7 @@ void lv_demo_widgets(void)
     lv_obj_set_style_radius(win_content, 0, LV_STATE_DEFAULT); /* 设置圆角 */
     lv_obj_set_style_pad_all(win_content, 0, LV_STATE_DEFAULT);
 
-    recovery_data();
+    //recovery_data();
 
     LV_IMG_DECLARE(Slider_base_color);
     lv_obj_t* Slider_base_color_img = lv_img_create(lv_scr_act());
@@ -44389,17 +44340,21 @@ void lv_demo_widgets(void)
 
     //左滑块停止
     LV_IMG_DECLARE(left_stop);
-    lv_obj_t* left_stop_img = lv_img_create(lv_scr_act());
-    lv_img_set_src(left_stop_img, &left_stop);
+    lv_obj_t* left_stop_img = lv_imgbtn_create(lv_scr_act());
+    lv_imgbtn_set_src(left_stop_img, LV_IMGBTN_STATE_RELEASED, NULL,&left_stop,NULL);
+    lv_obj_set_size(left_stop_img, left_stop.header.w, left_stop.header.h);
     lv_obj_align(left_stop_img, LV_ALIGN_TOP_LEFT, 0, 183);
+    lv_obj_add_event_cb(left_stop_img, button_left_stop_event_cb, LV_EVENT_CLICKED, NULL);
 
     slider_show_2();
 
     //右滑块停止
     LV_IMG_DECLARE(right_stop);
-    lv_obj_t* right_stop_img = lv_img_create(lv_scr_act());
-    lv_img_set_src(right_stop_img, &right_stop);
+    lv_obj_t* right_stop_img = lv_imgbtn_create(lv_scr_act());
+    lv_imgbtn_set_src(right_stop_img, LV_IMGBTN_STATE_RELEASED, NULL,&right_stop,NULL);
+    lv_obj_set_size(right_stop_img, right_stop.header.w, right_stop.header.h);
     lv_obj_align(right_stop_img, LV_ALIGN_TOP_LEFT, 459, 183);
+    lv_obj_add_event_cb(right_stop_img, button_right_stop_event_cb, LV_EVENT_CLICKED, NULL);
 
 
     //底部背景

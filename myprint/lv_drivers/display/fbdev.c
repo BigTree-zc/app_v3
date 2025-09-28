@@ -195,6 +195,8 @@ void fbdev_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * color
     long int byte_location = 0;
     unsigned char bit_location = 0;
 
+    //printf("bits_per_pixel=%u\n\r",vinfo.bits_per_pixel);
+
     /*32 or 24 bit per pixel*/
     if(vinfo.bits_per_pixel == 32 || vinfo.bits_per_pixel == 24) {
         uint32_t * fbp32 = (uint32_t *)fbp;
@@ -250,6 +252,7 @@ void fbdev_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * color
     //ret = ioctl(state->fd, FBIO_UPDATE, (unsigned long)((uintptr_t)rect));
 
     lv_disp_flush_ready(drv);
+
 }
 
 void fbdev_get_sizes(uint32_t *width, uint32_t *height, uint32_t *dpi) {
