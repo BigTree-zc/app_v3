@@ -123,12 +123,21 @@ static const lv_btnmatrix_ctrl_t default_kb_ctrl_uc_map[] = {
     LV_KEYBOARD_CTRL_BTN_FLAGS, LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1),LV_KB_BTN(4),LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
 };
 
+#if 0
 static const char * const default_kb_map_spec[] = {"±", "‰", "≤", "≥", "$", "&", "÷", "#", "≈", "￥", "\n",
                                                    "？", "。", "；","：","-", "=", "（", "）", "%", "*", "\n",
                                                    "！",  "，", "、", "“", "”", "[", "]", "@", "\"", "\n",
                                                    "大小写", "‘", "’", "^", "＜", "＞", "+", "删除", "\n",
                                                     "图标","123","/","空格",".","中文","符号",""
                                                   };
+#endif
+
+static const char* const default_kb_map_spec[] = { "±", "‰", "≦", "≧", "$", "&", "÷", "#", "≈", "￥", "\n",
+                                                   "？", "。", "；",":","-", "﹦", "（", "）", "%", "*", "\n",
+                                                   "！",  "，", "、", "“", "”", "[", "]", "@", "\\", "\n",
+                                                   "大小写", "‘", "’", "×", "＜", "＞", "﹢", "删除", "\n",
+                                                    "图标","123","/","空格",".","中文","符号",""
+};
 
 static const lv_btnmatrix_ctrl_t default_kb_ctrl_spec_map[] = {
     LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
@@ -138,12 +147,22 @@ static const lv_btnmatrix_ctrl_t default_kb_ctrl_spec_map[] = {
     LV_KEYBOARD_CTRL_BTN_FLAGS, LV_BTNMATRIX_CTRL_CHECKED | LV_KB_BTN(1), LV_KB_BTN(1),LV_KB_BTN(4),LV_KB_BTN(1), LV_KEYBOARD_CTRL_BTN_FLAGS, LV_KEYBOARD_CTRL_BTN_FLAGS,
 };
 
-static const char* const default_kb_map_spec_1[] = { "±", "‰", "≤", "≥", "$", "&", "÷", "#", "≈", "￥", "\n",
+
+#if 0
+static const char* const default_kb_map_spec_1[] = { "±", "‰", "≤", "≥", "$", "&", "÷", "#", "≈", "¥", "\n",
                                                    "?", ".", ";",":", "-", "=", "(", ")", "%", "*", "\n",
                                                    "!",  ",", "\\", "\"", "\"", "[", "]","@", "\"", "\n",
                                                    "大小写", "'", "'", "^", "<", ">", "+", "删除", "\n",
                                                     "图标","123","/","空格",".","中文","符号",""
                                                     };
+#endif
+
+static const char* const default_kb_map_spec_1[] = { "±", "‰", "≤", "≥", "$", "&", "÷", "#", "≈", "¥", "\n",
+                                                   "?", ".", ";",":", "-", "=", "(", ")", "%", "*", "\n",
+                                                   "!",  ",", "_", "\\", "\"", "[", "]","@", "：", "\n",
+                                                   "大小写", "×", "'", "^", "<", ">", "+", "删除", "\n",
+                                                    "图标","123","/","空格",".","中文","符号",""
+};
 
 static const lv_btnmatrix_ctrl_t default_kb_ctrl_spec_map_1[] = {
     LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2), LV_KB_BTN(2),
@@ -367,6 +386,9 @@ bool lv_btnmatrix_get_popovers(const lv_obj_t * obj)
     return keyboard->popovers;
 }
 
+
+extern unsigned int buzzer_enable;
+
 /*=====================
  * Other functions
  *====================*/
@@ -398,6 +420,7 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
 
     if(strcmp(txt, "大小写") == 0)
     {
+        buzzer_enable = 1;
         //英文
         lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
         lv_obj_set_size(obj, 480, 133);
@@ -424,6 +447,7 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     }
     else if (strcmp(txt, "英文") == 0)
     {
+        buzzer_enable = 1;
         //英文
         LV_LOG_ERROR("yingwen\n\r");
         lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
@@ -437,6 +461,8 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     }
     else if(strcmp(txt, "中文") == 0)
     {
+        buzzer_enable = 1;
+
         LV_LOG_ERROR("zhongwen\n\r");
         lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
         lv_obj_set_size(obj, 480, 133);
@@ -449,6 +475,8 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     }
     else if (strcmp(txt, "图标") == 0)
     {
+        buzzer_enable = 1;
+
         keyboard_type = 0;
         symbol_type = 3;
         lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 40);
@@ -460,6 +488,8 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     }
     else if(strcmp(txt, "123") == 0)
     {
+        buzzer_enable = 1;
+
         lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
         lv_obj_set_size(obj, 480, 133);
         keyboard_type = 0;
@@ -470,6 +500,8 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     }
     else if (strcmp(txt, "符号") == 0)
     {
+        buzzer_enable = 1;
+
         lv_obj_align(obj, LV_ALIGN_TOP_LEFT, 0, 115);
         lv_obj_set_size(obj, 480, 133);
         //printf("symbol_type=%d\n", symbol_type);
@@ -559,6 +591,7 @@ void lv_keyboard_def_event_cb(lv_event_t * e)
     }
     else if((strcmp(txt, LV_SYMBOL_BACKSPACE) == 0)||( strcmp(txt, "删除") == 0))
     {
+        buzzer_enable = 1;
         lv_textarea_del_char(keyboard->ta);
     }
     else if ((strcmp(txt, "x") == 0)&&(keyboard->mode == LV_KEYBOARD_MODE_NUMBER_2))

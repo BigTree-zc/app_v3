@@ -811,7 +811,16 @@ static void draw_main(lv_event_t * e)
 
         /*Calculate the size of the text*/
         LV_FONT_DECLARE(heiFont7);
-        draw_label_dsc_act.font = &heiFont7;
+        LV_FONT_DECLARE(heiFont8);
+        //LV_FONT_DECLARE(heiFont16_1);
+        if (strlen(btnm->map_p[txt_i]) > 5)
+        {
+            draw_label_dsc_act.font = &heiFont7;
+        }
+        else
+        {
+            draw_label_dsc_act.font = &heiFont8;
+        }
         const lv_font_t * font = draw_label_dsc_act.font;
         lv_coord_t letter_space = draw_label_dsc_act.letter_space;
         lv_coord_t line_space = draw_label_dsc_act.line_space;

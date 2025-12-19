@@ -731,7 +731,7 @@ uint32_t custom_tick_get(void);
     #define LV_IME_PINYIN_USE_DEFAULT_DICT 1
     /*Set the maximum number of candidate panels that can be displayed*/
     /*This needs to be adjusted according to the size of the screen*/
-    #define LV_IME_PINYIN_CAND_TEXT_NUM 6
+    #define LV_IME_PINYIN_CAND_TEXT_NUM 16
 
     /*Use 9 key input(k9)*/
     #define LV_IME_PINYIN_USE_K9_MODE      0
