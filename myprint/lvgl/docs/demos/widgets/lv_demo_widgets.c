@@ -28,8 +28,8 @@
 #include <regex.h> // 用于正则表达式匹配
 
 
-#define  SOFTWARE_VERSION  "V1.0_20251209"
-#define  VALID_TIME         (30)
+#define  SOFTWARE_VERSION  "V1.0_20260124"
+#define  VALID_TIME         (3000)
 
 
 #if LV_USE_DEMO_WIDGETS
